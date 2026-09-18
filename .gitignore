@@ -1,0 +1,50 @@
+# 凭据与本地配置 —— 永不提交
+.env
+.env.*
+!.env.example
+**/application-local.yml
+**/application-secrets.yml
+*.pem
+*.key
+id_rsa*
+
+# 构建产物
+target/
+dist/
+build/
+*.jar
+*.war
+
+# 依赖与缓存
+node_modules/
+.vite/
+**/_cache/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# 运行期数据（上传的图片、日志、备份、导出）
+backend/uploads/
+backend/logs/
+backup/
+*.log
+*.sql.gz
+
+# 实验中间产物（原始数据不入库，汇总 CSV 要入库）
+论文材料/experiments/data/raw/
+
+# 本地工具链与数据库落盘（体积大 / 含本机路径，绝不入库）
+_tools/
+/tools/redis*/data/
+*.rdb
+appendonlydir/
+__pycache__/
+*.pyc
+.venv/
+
+# 文档历史副本：有 git 之后一律用提交/标签留痕，不再手动备份
+*.bak
+*.bak_*

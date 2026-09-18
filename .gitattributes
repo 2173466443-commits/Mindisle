@@ -1,0 +1,24 @@
+# .gitattributes —— 锁定行尾口径，防止换机器后 autocrlf 改掉手册规定的行尾
+* text=auto
+
+# 交付类文档：Windows 下直接打开，保持 CRLF
+*.md    text eol=crlf
+*.sql   text eol=crlf
+
+# 构建与配置：必须 LF，且严禁 BOM（Boot 4 的 SnakeYAML 遇 BOM 直接抛错）
+*.java text eol=lf
+*.xml  text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.ts   text eol=lf
+*.js   text eol=lf
+*.vue  text eol=lf
+*.css  text eol=lf
+.env.example text eol=lf
+.gitignore   text eol=lf
+
+*.bat  text eol=crlf
+*.png  binary
+*.jpg  binary
+*.zip  binary
+*.xlsx binary
