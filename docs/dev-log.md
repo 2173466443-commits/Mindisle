@@ -43,3 +43,52 @@
 
 - 用户执行 `docs\init-db.ps1` 完成 0.5；提供 DeepSeek Key 完成 0.10（`docs/deepseek-models.json` 落盘）。
 - 随即进 **阶段 1B**（开题报告 + 文献综述 + 23 页线框图，2026-10 上旬截止）与 **阶段 2**（工程骨架 + 30 表）。
+
+---
+
+## 2026-09-18 阶段 2 —— 数据库 DDL 与种子数据（`sql/01`–`sql/10`）
+
+### 交付物（实测计数，不是计划）
+
+| 文件 | CREATE TABLE | 域 |
+|---|---|---|
+| `sql/00_create_db_and_user.sql` | — | 建库 + 应用账号（须用户跑 `docs/init-db.ps1`） |
+| `sql/01_account.sql` | 6 | `user` `user_profile` `user_consent` `anonymous_alias` `user_follow` `user_block` |
+| `sql/02_ai.sql` | 3 | `conversation` `chat_message` `ai_call_log` |
+| `sql/03_emotion.sql` | 2 | `emotion_record` `weekly_report` |
+| `sql/04_community.sql` | 7 | `post` `post_image` `post_status_log` `topic` `post_topic` `comment` `post_like` |
+| `sql/05_recommend.sql` | 3 | `user_action` `item_similarity` `recommend_result` |
+| `sql/06_pm.sql` | 1 | `private_message` |
+| `sql/07_audit.sql` | 6 | `sensitive_word_group` `sensitive_word` `audit_task` `audit_record` `alert_ticket` `post_appeal` |
+| `sql/08_config.sql` | 3 | `sys_config` `notify_message` `admin_op_log` |
+| `sql/09_seed.sql` | 0（只 INSERT） | 参数 21 + 词组 7 + 词条 139 + 话题 20 + 演示账号 6 |
+| `sql/10_index.sql` | 0（只 ALTER） | 全文索引 2 + 二级索引 4 |
+
+**合计 31 张表**（6+3+2+7+3+1+6+3），全部 LF / UTF-8 无 BOM，脚本实测无 `\r`。
+
+### 与手册口径的 4 项偏差（先改文档口径、再落代码，遵守 R12）
+
+1. **30 → 31 张**：手册 §5.1 推导「26 物理表 + `post_status_log` + `appeal` + `post_like` = 29，v1.1 补 `weekly_report` = 30」，
+   漏算了隐私合规必需的 `user_consent`（需求 §7.2 #3 是独立编号行，不是 `user_profile` 的列）。
+   实测落库 **31 张**，文档中所有「30 表 / 30 张」口径统一回填为 31。
+2. **文件名**：手册写 `sql/00_schema.sql`，实际拆成 `sql/00_create_db_and_user.sql`——
+   建库 + 建账号必须 root 执行，与业务 DDL（应用账号执行）权限级别不同，混在一个文件里会让人误用 `root` 跑全量。
+3. **`private_message` 会话内排序索引**：需求 §7.2 写 `(from_user_id,to_user_id,created_at)`，
+   实测改为 `(from_user_id,to_user_id,id)`：`id` 自增即会话内时间序，且同毫秒消息不会在游标分页时被跳过；语义等价、更稳，已在 DDL COMMENT 里写明理由。
+4. **`appeal` → `post_appeal`**：`appeal` 在 MySQL 8 保留字表边缘且语义太泛（未来可能有账号申诉），改名并在 `sql/07` 注释留痕。
+
+### 本日新增坑
+
+1. **种子文件里的幂等不能只靠 `INSERT IGNORE`**：`user_consent` 是「只追加、无唯一键」的审计表，
+   重跑必然翻倍。解法：种子数据显式指定主键 `id`，用 PK 冲突达成幂等；同时在文件头写清这条依赖。
+2. **MySQL 字符串会吞反斜杠**：敏感词正则若写 `\d` 需在 SQL 里双重转义，极易出错。
+   词表统一改用 POSIX 字符类（`[0-9]`、`[a-zA-Z]`），全库正则零反斜杠。
+3. **`word_cnt` 必须等于实插条数**：分组词条数与 `sensitive_word_group.word_cnt` 由同一段脚本从同一数组算出，
+   并在文件尾附「HAVING g.word_cnt <> COUNT(w.id) 应返回空集」的自检 SQL，答辩时能当场证明。
+4. **`ADD INDEX` 没有 `IF NOT EXISTS`**（MySQL 8）：`sql/10` 不可无脑重跑，故文件内附 information_schema 核对查询与逐条回滚语句。
+
+### 仍未做（诚实记录）
+
+- **DDL 尚未在真库执行过**：`mysql` root 口令不由我持有，`docs/init-db.ps1` 只能用户手输。
+  也就是说 31 张表目前是「严格手写 + 脚本自检」，**未经 MySQL 解析器验证**。用户跑通后若报语法错，按报错逐条修，不许改口径凑数。
+- `sensitive_word` 的 `variant_hash` 是 MD5(原文) 占位，真实变体归一化算法在 T5.x 实现后需要重刷该列。
