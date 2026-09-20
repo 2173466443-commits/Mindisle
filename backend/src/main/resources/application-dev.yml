@@ -1,0 +1,16 @@
+# dev：只覆盖「本地开发才需要」的项，业务参数一律留在主文件（避免配置漂移）
+logging:
+  level:
+    root: INFO
+    com.mindisle: DEBUG
+
+mybatis-plus:
+  configuration:
+    # SQL 走 slf4j，配合上一行的 DEBUG 才能在控制台看到真实语句（排查 N+1 用）
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 5      # 单机开发不需要 20
+      pool-name: mindisle-dev-pool

@@ -1,0 +1,3 @@
+# §5.7：.env 加载器必须在 ConfigData 之后、任何占位符解析之前生效（EnvLoader 自身声明 Ordered）
+org.springframework.boot.env.EnvironmentPostProcessor=\
+  com.mindisle.config.EnvLoader

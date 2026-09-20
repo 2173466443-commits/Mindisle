@@ -1,15 +1,19 @@
 # 009_心屿（MindIsle）· AI 心理陪伴与情感支持社区平台（毕业设计）
 
-> 项目编号 009 ｜ 立项 2026-09-17 ｜ 当前阶段：**Gate 1 前置调研已通过（SOP 关卡，用户 2026-09-18 确认）；阶段 0 环境已完工 8/10（0.5 建库、0.10 DeepSeek 探活待用户本机执行）；正在做阶段 1B 开题材料**
+> 项目编号 009 ｜ 立项 2026-09-17 ｜ 当前阶段：**阶段 2 代码侧完工**（31 表 DDL + 后端骨架 + 用户端/管理端骨架，双端构建通过、21 项单测绿）；**唯一阻塞：待用户本机跑 `docs\init-db.ps1` 建库**，在那之前所有涉库接口按设计返回 HTTP 503 + 业务码 90002。开题材料（阶段 1B）按用户 2026-09-18 指令顺延，不再排在代码之前。
 > 论文题目（推荐）：**《基于大语言模型与情绪感知协同过滤算法的校园心理陪伴社区平台的设计与实现》**
+> 英文题目：*Design and Implementation of a Campus Psychological Companionship Community Platform Based on Large Language Model and Emotion-Aware Collaborative Filtering*
+>
+> **一句话定性**：这是一个**基于「大语言模型（LLM）+ 混合式中文情绪识别 + 情绪感知加权协同过滤推荐」技术**的**校园心理陪伴社区平台（Web 全栈系统）**设计与实现项目 —— 三层能力缝成一条闭环：LLM 负责共情对话与语义复核，级联情绪识别负责把文本变成可计算的情绪向量，协同过滤负责把「此刻需要什么样的内容」算出来；再叠加 L0–L3 危机分级与 12356 转介闭环做安全兜底。
+
 
 ## 一、文档三件套（按此顺序读）
 
 | 文件 | 作用 |
 |---|---|
-| `需求分析文档.md`（**v1.2**） | 做什么、做到什么标准：FR1–FR10 / NFR / BR / 算法与实验设计 / 里程碑 / DoD / 论文章节映射；§15 风险表已并入调研新增的 **R12–R21**，§7.2 表清单口径统一为「24 个编号行 = 30 张物理表」 |
-| **`制作步骤文档.md`（v1.1）** | **怎么一步步做**：技术栈定版、阶段 0–9 施工步骤与可复制命令、Gate 验收（含 §18 Gate 判定汇总 10 行）、30 条常见故障速查、117 项任务打勾总表（**144.3 人日 ≈ 577 小时**，日历 ≈32 周）、§17 三向追溯矩阵 101 行（FR 74 + NFR 12 + BR 12 + AR 3）、§19 交付自检。**当前 v1.1.2**：§2.1 补「阶段 0 实测结论」+ §2.1↔§15 编号对照表，§5.1 按调研补列 12+2 字段 |
-| `同类项目调研与实现方案.md`（**已定版**） | ✅ Gate 1 产出：18 个同类项目档案 + 横向对比 + 许可证核查 + §6 实现方案 + §7 风险 R12–R21。**SOP 关卡已过，本文件转只读**，后续结论以「增补 §10」追加 |
+| `需求分析文档.md`（**v1.2.1**） | 做什么、做到什么标准：FR1–FR10 / NFR / BR / 算法与实验设计 / 里程碑 / DoD / 论文章节映射；§15 风险表已并入调研新增的 **R12–R21**，§7.2 表清单口径统一为「24 个编号行 = **31** 张物理表」（v1.2.1 把「单独同意」拆成独立 `user_consent` 表） |
+| **`制作步骤文档.md`（v1.1.3）** | **怎么一步步做**：技术栈定版、阶段 0–9 施工步骤与可复制命令、Gate 验收（含 §18 Gate 判定汇总 10 行）、30 条常见故障速查、117 项任务打勾总表（**144.3 人日 ≈ 577 小时**，日历 ≈32 周）、§17 三向追溯矩阵 101 行（FR 74 + NFR 12 + BR 12 + AR 3）、§19 交付自检。**当前 v1.1.3 = 阶段 2 实测回写**：表数 30→31、`user_consent` 独立建表、申诉表定名 `post_appeal`、`00_create_db_and_user.sql` 实名、词云 R19 依赖层关闭（运行时渲染仍待验证）、§5.8 与 §5.10 逐条对账 |
+| `同类项目调研与实现方案.md`（**已定版 + §10 增补**） | ✅ Gate 1 产出：18 个同类项目档案 + 横向对比 + 许可证核查 + §6 实现方案 + §7 风险 R12–R21。**SOP 关卡已过，§0–§9 转只读**，开工后的事实以 **§10「阶段 2 施工实测回写」** 追加（表数 31、R19 只关一半、毕设材料顺延） |
 
 ## 二、项目目标（四件事缝成一条闭环）
 
@@ -31,7 +35,7 @@
 | 持久层 | MyBatis-Plus **3.5.17**（`mybatis-plus-spring-boot4-starter`）+ MySQL 9.7.1 + Redis 7（不可用则降级 Caffeine，统一 `CacheService` 抽象） |
 | AI | Spring AI **2.0.1** + `spring-ai-starter-model-deepseek`；自写 `LlmClient` 双实现（Spring AI / JDK HttpClient）+ MockLlmClient |
 | 实时与流式 | Spring WebSocket + STOMP + SockJS；SSE（`SseEmitter`） |
-| 前端 | Vue **3.5.43** + Vite **8.3.0** + Element Plus **2.14.5** + Pinia + Vue Router + Axios + ECharts 6（含 wordcloud） |
+| 前端 | Vue **3.5.43** + Vite **8.3.0** + Element Plus **2.14.5** + Pinia 4.0.3 + Vue Router 5.3.1 + Axios + ECharts 6.1.0（词云用 `@echarts-x/custom-word-cloud` 1.0.1，peer 兼容 ECharts 6） |
 | 算法 | 纯 Java（稀疏 Map + 余弦）；实验与出图 Python 3.12 |
 | 接口文档 | springdoc-openapi **3.1.1**（Boot4 无 knife4j 版） |
 | 构建 | Maven **3.9.16**，本地仓库 `E:\codex workspace\_cache\m2\repository`；npm/pip 缓存同指 E 盘 |
@@ -41,24 +45,51 @@
 ```
 009_心屿AI心理陪伴社区/
 ├─ README.md  需求分析文档.md  制作步骤文档.md
-├─ docs/            check-env.ps1 · dev-log.md · gate/ · 开题报告 · 文献综述 · wireframe/
-├─ sql/             00–10 建表与种子（按制作步骤 §5.1 顺序）
-├─ backend/         Spring Boot 工程（阶段 2 起）
-├─ frontend/        用户端 Vue 3（阶段 2 起）
-├─ admin/           管理端 Vue 3（同域 /admin）
+├─ docs/            check-env.ps1 · init-db.ps1 · start-redis.ps1 · dev-log.md · diagrams/{01 架构,02 时序,03 双通道,04 ER}
+├─ sql/             00_create_db_and_user · 01–08 建表（**31 表**）· 09_seed · 10_index · patch/
+├─ backend/         Spring Boot 4.1.1 工程（`src/main/java` 45 个类：web 5 Controller / security / common / cache / config / entity / mapper / auth / user / captcha / ratelimit）
+├─ frontend/        用户端 Vue 3（端口 5173，8 个视图：feed / ai / emotion / user / help / auth 登录注册 / 404）
+├─ admin/           管理端 Vue 3（端口 5174，`src` 17 个文件：Dashboard / Login / Audit / Configs / 404 + 布局 + api 三件套 + store + 主题）
 └─ 论文材料/        prompts/ experiments/{data,scripts,output,figs}/ 截图/ 图表/ 论文草稿/ 答辩/
 ```
+
+## 四·补 怎么跑起来（阶段 2 现状）
+
+```powershell
+# 0) 只跑一次：建库建用户（root 口令交互输入，脚本不落盘口令）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\docs\init-db.ps1
+#    → 建完后把同一个口令写进 backend\.env 的 DB_PASSWORD，并把 sql\01…10 依序执行（期望 31 张表）
+
+# 1) 可选：起 Redis（不起也能跑，CacheService 自动降级 Caffeine）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\docs\start-redis.ps1
+
+# 2) 后端（8080）
+cd backend; mvn -o spring-boot:run
+#    接口文档：http://127.0.0.1:8080/swagger-ui/index.html（不是 /doc.html，本工程只有 springdoc）
+#    验证码：http://127.0.0.1:8080/api/auth/captcha → {captchaId, imageBase64}
+#    未建库时涉库接口返回 HTTP 503 + {"code":90002}，这是设计好的降级，不是崩了
+
+# 3) 用户端（5173）/ 管理端（5174），各自目录内
+npm install; npm run dev
+#    注册/登录/验证码链路已通；阶段 3+ 的接口会显式返回 90001/90006 并在页面显示 StageNotice，
+#    不用假数据糊弄演示。
+```
+
 
 ## 五、进度
 
 - [x] 需求分析文档 v1.0 → **v1.1**（题目句式化、技术栈定版、17 节 12 项确认）
 - [x] **制作步骤文档 v1.0 → v1.1 → v1.1.1**（19 章施工手册：阶段 0–9 步骤 + 可复制命令、Gate 体系、30 条故障速查、117 项任务总表 144.3 人日、§17 追溯矩阵 101 行、§18 Gate 汇总、§19 交付自检）
 - [x] **制作步骤文档 v1.1.1**（2026-09-18 文字级复核：`check-env.ps1` 命名统一、§19 环境清单口径对齐、目录 §18 行与正文一致；1624 行，任务/人日/矩阵/Gate 数量不变）
+- [x] **制作步骤文档 v1.1.2 → v1.1.3**（2026-09-18）：v1.1.2 做阶段 0 完工回写 + 调研结论并入；v1.1.3 做**阶段 2 实测回写**（表数 30→31、`user_consent` 独立建表、`post_appeal` 定名、`00_create_db_and_user.sql` 实名、双端构建收口、词云 R19 依赖层关闭、§5.8/§5.10/§15 逐条对账）。任务总数、人日、追溯矩阵、Gate 行数**始终未变**：117 条 / 144.30 人日 / 101 行 / 10 行
 - [x] **阶段 0：环境与仓库 8/10 完工**（Maven 3.9.16 → `_tools`、Redis 7.2.16 便携版 → 方案 B、npm/pip 缓存指 E 盘、`git init -b main` + `.gitignore` 先行、`check-env.ps1` 十项全绿）；剩 **0.5 建库建用户**（需用户本机跑 `docs/init-db.ps1` 输入 root 口令）与 **0.10 DeepSeek 探活**（需 `DEEPSEEK_API_KEY`）
 - [x] **阶段 1 调研文档已写完**：《同类项目调研与实现方案.md》（618 行 / §0 先给答案 · §1 检索过程 · §2 逐项目档案 · §3 横向对比 · §4 许可证核查 · §5 差异定位 · §6 实现方案 · §7 风险 R12–R21 · §8 引用清单与 Gate 1 自检 · §9 用户答复已回填）
 - [x] **SOP 强制关卡已过**：用户 2026-09-18 答复「A. 按《同类项目调研与实现方案.md》和《制作步骤文档.md》开工 / B. 选 2（MySQL 就地启用）」→ 允许编码
-- [ ] **阶段 1B（当前所处位置，优先于任何 Java/SQL 业务代码）**：开题报告 + 文献综述（≥15 篇含 ≥5 英文，GB/T 7714）+ 23 页低保真线框（U1–U14 / A1–A9）+ 架构图 3 张 + ER 图 1 张，**2026-10 上旬截止**
-- [ ] 阶段 2 起：骨架 → 社区 → AI+情绪 → 私信 → 管理端 → 推荐与实验 → 测试 → 论文
+- [x] **阶段 2（数据库 + 三端骨架）代码侧完工 —— 2026-09-18**：31 表 DDL + 索引 + 种子脚本落盘（**尚未在真实 MySQL 执行**）；后端 45 类编译通过、8080 启动、`mvn test` **21 通过 + 1 跳过**、`/api/auth/captcha` 与降级/401/405 全实测；`frontend`（8 视图）与 `admin`（17 文件）双端 `npm install` + `npm run build` 通过
+- [ ] **当前唯一待办（用户侧）**：本机跑 `docs\init-db.ps1` 建 `mindisle` 库与应用账号 → 把口令写进 `backend/.env` 的 `DB_PASSWORD` → 重启后端 → 涉库接口从 HTTP 503/90002 转正常，Gate 2 才能从 ◐ 转 ☑
+- [ ] 阶段 3：社区核心（发帖—列表—详情—互动—匿名树洞—举报—频率限制）→ 阶段 4 AI+情绪+危机 → 阶段 5 私信 → 阶段 6 管理端 → 阶段 7 推荐与实验 → 阶段 8 测试 → 阶段 9 论文
+- [ ] **阶段 1B（开题报告 / 文献综述 ≥15 篇含 ≥5 英文 / 23 页线框 / ER 图 / 架构图 3 张）—— 按用户 2026-09-18 指令「毕设材料先不用写」顺延**；风险 R21（2026-10 上旬截止）改由用户盯办
+- [x] **论文材料目录骨架**：`论文材料/`（prompts · experiments/{data,scripts,output,figs} · 截图 · 图表 · 论文草稿 · 答辩）
 
 ## 六、硬性红线（开发中不得失守）
 

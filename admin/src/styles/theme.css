@@ -1,0 +1,53 @@
+/* 心屿深色治愈主题（制作步骤文档 §5.8 第 6 条）
+   只覆盖 Element Plus 的 CSS 变量，不 fork 组件库样式。 */
+:root {
+  --mi-bg: #0E1626;
+  --mi-card: #16203A;
+  --mi-primary: #F0876B;
+  --mi-mist: #7FA7C4;
+  --mi-text: #E8EEF7;
+  --mi-text-dim: #93A1B8;
+  --mi-border: #24304d;
+
+  /* 七色情绪色板（与后端 emotion_label 一致） */
+  --mi-joy: #F2C14E;
+  --mi-trust: #7FB3A6;
+  --mi-anger: #D9534F;
+  --mi-sadness: #5B7C99;
+  --mi-fear: #8E6BAF;
+  --mi-disgust: #7A8B3C;
+  --mi-neutral: #8A94A6;
+
+  /* Element Plus 变量覆盖 */
+  --el-color-primary: #F0876B;
+  --el-color-primary-light-3: #f5a692;
+  --el-color-primary-light-5: #f8bfaf;
+  --el-color-primary-light-7: #fad8cd;
+  --el-color-primary-light-8: #fce5de;
+  --el-color-primary-light-9: #fef1ed;
+  --el-color-primary-dark-2: #c06c56;
+  --el-bg-color: #16203A;
+  --el-bg-color-overlay: #1b2745;
+  --el-text-color-primary: #E8EEF7;
+  --el-text-color-regular: #cbd6e6;
+  --el-text-color-secondary: #93A1B8;
+  --el-border-color: #24304d;
+  --el-border-color-light: #24304d;
+  --el-fill-color-blank: #16203A;
+  --el-mask-color: rgba(14, 22, 38, 0.75);
+}
+
+html, body, #app { height: 100%; }
+body {
+  margin: 0;
+  background: var(--mi-bg);
+  color: var(--mi-text);
+  font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+}
+a { color: var(--mi-mist); }
+.mi-card {
+  background: var(--mi-card);
+  border: 1px solid var(--mi-border);
+  border-radius: 14px;
+  padding: 18px;
+}

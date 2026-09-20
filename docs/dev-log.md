@@ -92,3 +92,44 @@
 - **DDL 尚未在真库执行过**：`mysql` root 口令不由我持有，`docs/init-db.ps1` 只能用户手输。
   也就是说 31 张表目前是「严格手写 + 脚本自检」，**未经 MySQL 解析器验证**。用户跑通后若报语法错，按报错逐条修，不许改口径凑数。
 - `sensitive_word` 的 `variant_hash` 是 MD5(原文) 占位，真实变体归一化算法在 T5.x 实现后需要重刷该列。
+
+
+---
+
+## 2026-09-18 阶段 2（下半）—— 后端可运行 + 用户端 / 管理端骨架
+
+### 交付物（全部为实测计数）
+
+| 模块 | 实测 | 证据 |
+|---|---|---|
+| 后端 | Spring Boot 4.1.1 单模块，`src/main/java` **45 个类**编译通过并在 8080 启动 | `Get-ChildItem -Recurse -Filter *.java` 实数；`mvn -o spring-boot:run` |
+| 单测 | `src/test` 4 个类：`CaptchaServiceTest` 6 + `ResultTest` 7 + `JwtServiceTest` 8 = **21 通过**；`MindisleApplicationTests.contextLoads` **1 跳过** → 合计 run 22 / pass 21 / skip 1 | `target/surefire-reports/*.txt` 四份报告逐行读 |
+| 接口实测 | `GET /api/auth/captcha` 返回 captchaId + imageBase64（PNG）；未建库时 `GET /api/topics` → **HTTP 503 + code 90002**，响应体含 traceId 且带 `X-Trace-Id` 头；401 / 404 / 405 分别走 10002 / 90006 / 90007 | `curl.exe -s -i` |
+| 错误码 | `ErrorCode` 枚举 **34** 项（90005 本地缓存不支持、90006 资源不存在、90007 方法不支持 为本阶段新增） | 逐个数枚举项 |
+| 降级 | 无 Redis → `CaffeineCacheService`；无 DEEPSEEK key → `MockLlmClient`；无库 → 90002。三条都在零外部依赖环境下真跑过 | 启动日志 + 接口返回 |
+| 用户端 | `frontend` 28 个文件，`src/views` **8 个 .vue**（feed / ai / emotion / user / help / auth 登录注册 / 404）；145 包安装无 ERESOLVE；`npm run build` 通过 | 退出码 0 |
+| 管理端 | `admin` 21 个文件（`src` 下 **17**）：views 5 个 + AdminLayout + api 五件（admin/auth/system/http/errorCode）+ store + router + theme + StageNotice；128 包；`npm run build` 通过 | 退出码 0 |
+| 代理 | `vite.config.js` 对 chat/stream 删 content-encoding、置 no-transform 与 x-accel-buffering no；两端 strictPort 钉 5173 / 5174 | 源码 L18-36 |
+| 文档 | 手册 **v1.1.3**（1672 行）/ 需求 **v1.2.1**（960 行）/ 调研新增 **§10**（638 行）/ README（102 行）四处口径对齐 **31 表** | 回读断言 |
+
+### 本日对账纠偏（上一版记录写错了，以实测为准）
+
+1. 表数 **30 → 31**：多出的一张是 `user_consent`。上一轮按「手册说 30」抄了 30，这次把 `CREATE TABLE` 后面的**表名抓出来去重**才拿到 31。
+2. 单测数字：此前记成「22 通过 + 1 跳过」，surefire 实读是 **21 通过 + 1 跳过（共 22 个用例）**。跳过的是 `contextLoads`（未建库，主动 skip 比造假绿诚实）。
+3. 词云 R19 **只关了一半**：词云包只进了 `frontend/package.json` 的 deps，**全仓 .vue 零引用**；手册要求的 `docs/gate/` 目录**根本不存在**，spike 截图从未存档。所以措辞只能是「依赖层风险关闭、运行时渲染未验证」。
+4. 手册 §5.10 写的 `/doc.html` 是 knife4j 路径，本工程只引 springdoc-openapi 3.1.1 → 正确地址是 `/swagger-ui/index.html` 与 `/v3/api-docs`。已在手册内注明。
+5. 文档声称 `docs/rebuild.ps1` 存在 —— 实测不存在。`docs` 下只有 check-env.ps1 / init-db.ps1 / start-redis.ps1 / dev-log.md / diagrams/。**「文件存在」必须 readdirSync 核，不能信上一版文档。**
+
+### 本日新增坑（工具层，与业务无关但反复咬人）
+
+㉑ **js REPL 的 globalThis 不保证活到下一轮**：攒了几轮的内存数组在重置后全丢，而磁盘还是旧版。解法：每轮开头先探一下全局数组还在不在，并且**改完就落盘**，别等「所有批次做完再一次性写」。
+㉒ **同一条消息里发两个相同写盘调用 = 写两遍**：本轮再次发生重复调用。规则：**涉及写盘的批次，一条消息只发一个工具调用**。
+㉓ **Markdown 表格行不能裸 `includes` 定位**：`| T2.1 |` 这个串在 T2.2 / T2.3 行的「依赖列」里也出现（3 处命中）；`| T2.16 |` 在 §5.11 表里也有一行。必须用 `startsWith(前缀)` 且断言命中数唯一。
+㉔ **往数组元素里塞裸换行会造出孤立 LF**：全文 CRLF 的文件里混进不带 CR 的换行，用两种方式数行数就会差 1。落盘前必须把含换行的元素拆开，并用「孤立 LF 计数 == 0」做断言。
+㉕ **`exec_command` 传 PowerShell 时 `$` 变量会被吞**（`$p` 变空，报一堆 ParserError）；而且 `Invoke-WebRequest` 是 PS7 语义，拿到的 `HttpResponseMessage` 没有 `GetResponseStream`。结论：**看文件、做统计一律用 node**；**取非 2xx 的响应体一律用 `curl.exe -s -i`**。
+
+### 仍未做（诚实记录）
+
+- **31 表 DDL 从未被 MySQL 解析器执行过** —— root 口令不由我持有。建库、列数比对、`contextLoads` 转绿，全部挂在这一个用户动作上。
+- 词云运行时渲染未验证；`backend/run.bat`（无 BOM + chcp 65001）与 `docs/rebuild.ps1` 未建；`mvn -o dependency:tree` 输出未存档；`gen_seed.py` 未写；OpenAPI 分组未逐条核对。
+- 阶段 1B（开题报告 / 文献综述 / 线框图）按用户指令顺延，未开始。

@@ -1,0 +1,21 @@
+# prod：论文演示部署用（同域部署，前端 dist 由 Nginx/Boot 静态目录托管）
+server:
+  forward-headers-strategy: framework
+
+mindisle:
+  cors:
+    # §5.6：生产同域部署时关闭跨域放宽（留空即只允许同源，浏览器自发不携带跨域头）
+    allowed-origins: ""
+  upload:
+    dir: /var/lib/mindisle/uploads
+
+logging:
+  level:
+    com.mindisle: INFO
+  file:
+    name: ./logs/mindisle-server.log
+
+management:
+  endpoint:
+    health:
+      show-details: never      # 生产不暴露依赖细节（NFR7）

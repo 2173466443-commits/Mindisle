@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  心屿 MindIsle · backend/pom.xml
+  依据：制作步骤文档 §5.3.2（坐标全部为 2026-09-17 实测）· 需求 §11.1 第 1 条（编码固化进构建）
+  校验：mvn -B -Dfile.encoding=UTF-8 -Dmaven.repo.local=E:/codex workspace/_cache/m2/repository dependency:resolve
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.1.1</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.mindisle</groupId>
+  <artifactId>mindisle-server</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+  <name>mindisle-server</name>
+  <description>心屿 AI 心理陪伴社区 —— 校园心理陪伴社区平台后端（本科毕设 009）</description>
+
+  <properties>
+    <java.version>17</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <spring-ai.version>2.0.1</spring-ai.version>
+    <mybatis-plus.version>3.5.17</mybatis-plus.version>
+    <jjwt.version>0.13.0</jjwt.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.ai</groupId>
+        <artifactId>spring-ai-bom</artifactId>
+        <version>${spring-ai.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <!-- Web / 校验 / 安全 / 长连接 / 缓存 / 可观测 -->
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-validation</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-security</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-websocket</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-redis</artifactId></dependency>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-actuator</artifactId></dependency>
+    <!-- AI：Spring AI 2.0.1 DeepSeek starter（需求 §6.1 通道②；mindisle.llm.provider=mock 时走本地兜底） -->
+    <dependency><groupId>org.springframework.ai</groupId><artifactId>spring-ai-starter-model-deepseek</artifactId></dependency>
+    <!-- 持久层：MyBatis-Plus（Boot4 专用 starter；解析失败时的退路见 §5.3.3 与 dev-log） -->
+    <dependency><groupId>com.baomidou</groupId><artifactId>mybatis-plus-spring-boot4-starter</artifactId><version>${mybatis-plus.version}</version></dependency>
+    <dependency><groupId>com.baomidou</groupId><artifactId>mybatis-plus-jsqlparser</artifactId><version>${mybatis-plus.version}</version></dependency>
+    <dependency><groupId>com.mysql</groupId><artifactId>mysql-connector-j</artifactId><scope>runtime</scope></dependency>
+    <!-- 鉴权令牌（§5.6）：impl/jackson 只在运行期需要，编译期只暴露 api -->
+    <dependency><groupId>io.jsonwebtoken</groupId><artifactId>jjwt-api</artifactId><version>${jjwt.version}</version></dependency>
+    <dependency><groupId>io.jsonwebtoken</groupId><artifactId>jjwt-impl</artifactId><version>${jjwt.version}</version><scope>runtime</scope></dependency>
+    <dependency><groupId>io.jsonwebtoken</groupId><artifactId>jjwt-jackson</artifactId><version>${jjwt.version}</version><scope>runtime</scope></dependency>
+    <!-- 接口文档（T2.10，Gate2 要求 /doc.html 可见且接口 >= 20） -->
+    <dependency><groupId>org.springdoc</groupId><artifactId>springdoc-openapi-starter-webmvc-ui</artifactId><version>3.1.1</version></dependency>
+    <!-- 本地缓存降级实现（§5.5 CacheService 的 Caffeine 侧） -->
+    <dependency><groupId>com.github.ben-manes.caffeine</groupId><artifactId>caffeine</artifactId></dependency>
+    <!-- 内容安全与图片处理（阶段 3 的 T3.1/T3.3 预置，避免中途改 pom） -->
+    <dependency><groupId>org.jsoup</groupId><artifactId>jsoup</artifactId><version>1.23.2</version></dependency>
+    <dependency><groupId>net.coobird</groupId><artifactId>thumbnailator</artifactId><version>0.4.21</version></dependency>
+    <dependency><groupId>org.projectlombok</groupId><artifactId>lombok</artifactId><optional>true</optional></dependency>
+    <!-- 测试 -->
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+    <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <excludes>
+            <!-- lombok 只做编译期注解处理器，不打进可执行 jar -->
+            <exclude><groupId>org.projectlombok</groupId><artifactId>lombok</artifactId></exclude>
+          </excludes>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -1,0 +1,127 @@
+# ============================================================================ #
+# 心屿 MindIsle · application.yml · 依据 制作步骤文档 §5.4（键位对齐，勿随意增删）   #
+# 铁律：禁止 spring.mandatory-file-encoding（需求 §11.1 第 1 条，中文 Windows 秒退） #
+# 编码统一由 .mvn/jvm.config + pom.xml 的 UTF-8 属性保证                           #
+# ============================================================================ #
+server:
+  port: 8080
+  shutdown: graceful
+  tomcat:
+    threads:
+      max: 200
+    max-swallow-size: 10MB
+
+spring:
+  application:
+    name: mindisle-server
+  threads:
+    virtual:
+      enabled: true            # Boot4 亮点：SSE/WS 并发（论文「并发模型」一节引用）
+  profiles:
+    active: dev
+  lifecycle:
+    timeout-per-shutdown-phase: 20s        # 配合上面的 graceful
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 20MB
+  datasource:
+    # 三个占位符全部来自 .env（由 EnvLoader 注入为系统属性，见 §5.7）；仓库内永不出现明文口令
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 10000
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+  ai:
+    deepseek:
+      api-key: ${DEEPSEEK_API_KEY}
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      chat:
+        options:
+          model: ${DEEPSEEK_MODEL:deepseek-flash}
+          temperature: 0.7
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss.SSS
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+  web:
+    resources:
+      add-mappings: true
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.mindisle.**.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    default-enum-type-handler: com.baomidou.mybatisplus.core.handlers.MybatisEnumTypeHandler
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  # Redis 探活关掉：阶段 2 骨架期便携版 Redis 随时可能没起，
+  # 让 /actuator/health 反映「进程活着」而不是「外部依赖齐全」；
+  # 缓存实现改由 /api/system/info 的 cacheMode 字段暴露（偏差已记 dev-log）
+  health:
+    redis:
+      enabled: false
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  swagger-ui:
+    path: /doc.html
+  api-docs:
+    path: /v3/api-docs
+
+# --------------------- 本项目自定义配置（全部外置，NFR10） --------------------- #
+mindisle:
+  cache:
+    # 用占位符而非裸 local：.env 里的 MINDISLE_CACHE_MODE 经 EnvLoader 变成系统属性后才生效（偏差已记 dev-log）
+    mode: ${MINDISLE_CACHE_MODE:local}     # local | redis
+  llm:
+    provider: spring-ai          # spring-ai | raw-http | mock（T4.1 三实现开关）
+  env-file: ../.env              # 相对 backend/ 工作目录，见 §5.7
+  upload:
+    dir: ./uploads               # dev 落在 backend/uploads（已被 .gitignore 排除）
+  cors:
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174
+  jwt:
+    secret: ${JWT_SECRET}
+    access-minutes: 120
+    refresh-days: 7
+  rate-limit:
+    user-per-minute: 60          # NFR7：普通接口 60 次/分
+    ai-per-minute: 6             # NFR7：AI 接口 6 次/分（成本与雪崩保护）
+    login-fail-max: 5            # §5.11 T2.16：连错 5 次锁 10 分钟
+    login-lock-minutes: 10
+  ai-budget:
+    user-daily-tokens: 200000
+    global-daily-cost-cent: 10000
+    alert-ratio: 0.8
+  crisis:
+    hotline: ${CRISIS_HOTLINE:12356}
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{traceId:-}] %logger{20} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{traceId:-}] %logger{36} - %msg%n"
