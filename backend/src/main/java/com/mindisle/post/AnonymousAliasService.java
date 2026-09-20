@@ -59,24 +59,37 @@ public class AnonymousAliasService {
      * @param scene HOLE 树洞 / HELP 求助 / FEEDBACK 建议 / ALL 全域，未知值按 ALL 处理
      */
     public String resolveAlias(long userId, String scene) {
+        return resolve(userId, scene).getAliasName();
+    }
+
+    /**
+     * 同上，但要整行（含 id）。
+     *
+     * <p>发帖要把 {@code post.alias_id} 写成外键而不是抄一份昵称副本：
+     * 抄副本的话，将来给马甲改名（运营需求）就得回刷全部历史帖，
+     * 而匿名体系里最不该被回刷的正是「同一人同一张脸」这条去重证据（BR1）。</p>
+     *
+     * @return 一定非空，且 id 已落库（新建路径由 {@code insertIfAbsent} 保证）
+     */
+    public AnonymousAlias resolve(long userId, String scene) {
         if (userId <= 0L) {
             throw new IllegalArgumentException("userId 必须为正：" + userId);
         }
         String effective = normalizeScene(scene);
         AnonymousAlias sameScene = repository.findByUserAndScene(userId, effective);
         if (sameScene != null) {
-            return sameScene.getAliasName();
+            return sameScene;
         }
         if (!"ALL".equals(effective)) {
             AnonymousAlias universal = repository.findByUserAndScene(userId, "ALL");
             if (universal != null) {
-                return universal.getAliasName();
+                return universal;
             }
         }
         List<AnonymousAlias> owned = repository.listByUser(userId);
         if (!owned.isEmpty()) {
             // BR1：已经有脸了，就不发第二张。
-            return owned.get(0).getAliasName();
+            return owned.get(0);
         }
         return repository.insertIfAbsent(userId, effective, suggestAlias(userId, owned.size()));
     }

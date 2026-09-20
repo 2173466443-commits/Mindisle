@@ -32,6 +32,10 @@ public class MindisleProperties {
     private Audit audit = new Audit();
     /** 发帖与评论频率（任务 T3.12 · 需求 BR4/BR5/BR6）。 */
     private Quota quota = new Quota();
+    /** 发帖字段上限与树洞存活期（任务 3.3 · 需求 FR4.1、FR4.2）。 */
+    private Post post = new Post();
+    /** 图形验证码（任务 T2.16 · §5.11 第 1~2 条）。 */
+    private Captcha captcha = new Captcha();
 
     @Data
     public static class Cache {
@@ -55,6 +59,14 @@ public class MindisleProperties {
         private float jpegQuality = 0.82f;
         /** 单帖图片张数上限（需求 FR4.1：0–9 张），真正的校验发生在发帖（任务 T3.3）。 */
         private int maxImagesPerPost = 9;
+        /**
+         * 单帖配图总字节上限（需求 FR4.1「共 ≤20MB」）。
+         *
+         * <p>这道闸只能在发帖时判（任务 3.3）：上传接口是分次调的，一次 5MB 合法，
+         * 第十次也合法，只有把「本帖要挂哪几张」收齐了才知道总量超没超。
+         * 字节数取服务端读盘的真实大小，不信客户端声称的 size。</p>
+         */
+        private long maxTotalBytes = 20L * 1024 * 1024;
     }
 
     @Data
@@ -90,6 +102,47 @@ public class MindisleProperties {
     @Data
     public static class Crisis {
         private String hotline = "12356";
+        /** L2 触发分与展示分：需求 §5.2「AI 判定 risk ≥0.6」即 L2。 */
+        private double l2Score = 0.6d;
+        /** L3 触发分：需求 §5.2「双通道同时高分（risk ≥0.8）」，词面规则通道取 0.9 偏保守。 */
+        private double l3Score = 0.9d;
+        /** L2 认领时限（小时），需求 §5.2。 */
+        private int l2SlaHours = 4;
+        /** L3 认领时限（分钟），需求 §5.2。 */
+        private int l3SlaMinutes = 30;
+        /** 工单证据片段最大字数（FR10.5「脱敏后 200 字上下文」）。 */
+        private int evidenceChars = 200;
+    }
+
+    /**
+     * 发帖入参约束（任务 3.3）。
+     *
+     * <p>这些数字全部来自需求 FR4.1/FR4.2，但按 NFR10 不许在业务代码里写死，
+     * 统一走这里：改一处配置，DTO 校验、服务端复检、提示文案三处同步变。</p>
+     */
+    @Data
+    public static class Post {
+        /** 标题最长字符数（FR4.1：≤50）。 */
+        private int maxTitleChars = 50;
+        /** 正文最长字符数（FR4.1：≤5000）。 */
+        private int maxContentChars = 5000;
+        /** 单帖话题数上限：需求只写「+ 话题」没给数字，取 3（超过 3 个属于引流，FR1.7 防刷屏）。 */
+        private int maxTopics = 3;
+        /**
+         * 未显式传 visibility 时的默认值（需求 FR4.1 只有 public / private 两档）。
+         *
+         * <p>三种帖型共用这一个默认：树洞的「匿名」是<b>不露真实身份</b>，不是「不给人看」——
+         * 匿名倾诉拿到回应正是本产品的闭环（需求 §1.2「说出来 → 被理解 → 被回应」），
+         * 把 hole 默认成 private 会让树洞 tab 永远空着。</p>
+         */
+        private String defaultVisibility = "public";
+        /**
+         * 树洞可选存活时长（小时）。手册 §6.1 行 836 的「选项 24h/72h/7d」，
+         * 且必须在发帖时算成绝对时间落 auto_destroy_at，不能在查询时现算。
+         */
+        private List<Integer> holeDestroyOptions = new ArrayList<>(List.of(24, 72, 168));
+        /** 勾选树洞但没指定时长时的默认值（FR4.2「默认 7 天后」= 168 小时）。 */
+        private int holeDefaultDestroyHours = 168;
     }
 
     @Data
@@ -124,5 +177,19 @@ public class MindisleProperties {
         private int dailyPosts = 20;
         /** BR4：单用户对单帖的每日评论上限。 */
         private int dailyCommentsPerPost = 20;
+    }
+
+    @Data
+    public static class Captcha {
+        /**
+         * 验证码总开关。
+         *
+         * <p><b>默认 true 是刻意的 fail-closed</b>：漏配这个键时系统仍然要求验证码，
+         * 而不是悄悄敞开注册/登录接口。唯一允许改成 false 的场合是本地开发与
+         * 自动化冒烟——因为验证码答案只进缓存、不返回明文也不打日志，
+         * 脚本永远拿不到它，于是「注册 → 登录 → 带 token 调业务接口」这条
+         * 最需要真实验证的链路会被永远挡在门外（阶段 2/3 的 200 响应体欠账即由此而来）。</p>
+         */
+        private boolean enabled = true;
     }
 }

@@ -5,8 +5,6 @@ import java.util.List;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -24,6 +22,10 @@ import io.swagger.v3.oas.annotations.tags.Tag;
  * <p>/api/topics 落在 permitAll 白名单里（游客也能逛话题墙），其余需要登录。
  * 内容域在阶段 2 只开放话题墙这一个真接口：发帖牵涉内容安全链（先审后发 → 危机分流）
  * 与图片上传，未落地前一律返回 90001，而不是造假数据骗过前端联调。
+ *
+ * <p>2026-09-20 任务 3.3 落地后，<b>POST /api/posts 已迁至 {@link PostController}</b>：
+ * 这里的桩必须删掉，否则两条 handler 映射到同一个 POST 路径，
+ * Spring MVC 在启动期就报 ambiguous mapping，整个服务起不来（不是运行期才 500）。
  */
 @RestController
 @Tag(name = "4 内容", description = "话题墙、推荐流与帖子发布（阶段 3 起逐步开放）")
@@ -54,12 +56,6 @@ public class FeedController {
   @Operation(summary = "帖子列表（阶段 3 实现）")
   public Result<Void> posts() {
     throw BizException.notImplemented("阶段3 帖子列表与分页");
-  }
-
-  @PostMapping("/api/posts")
-  @Operation(summary = "发帖（阶段 3 实现，需先过内容安全链）")
-  public Result<Void> publish(@RequestBody(required = false) Object body) {
-    throw BizException.notImplemented("阶段3 发帖与内容审核链");
   }
 
   @GetMapping("/api/posts/{id}")

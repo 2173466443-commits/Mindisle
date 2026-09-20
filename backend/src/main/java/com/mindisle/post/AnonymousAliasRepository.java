@@ -23,9 +23,13 @@ public interface AnonymousAliasRepository {
      * 落库一条马甲。
      *
      * <p>并发下两个请求可能同时判定「该用户还没有马甲」，靠 uk_user_alias_scene 兜住：
-     * 实现方捕获唯一键冲突后返回<b>实际生效</b>的别名，而不是抛出异常。</p>
+     * 实现方捕获唯一键冲突后返回<b>实际生效</b>的那一行，而不是抛出异常。</p>
      *
-     * @return 实际生效的别名（冲突时是对手先插进去的那条）
+     * <p>返回值是整行而不只是别名：发帖（任务 3.3）要往 {@code post.alias_id} 写外键，
+     * 只有名字的话得再查一次库，而「再查一次」在并发下可能查到别人的行。
+     * v1.1.5 接线 T3.3 时才暴露出这个形状不够用，改动只涉及端口返回值。</p>
+     *
+     * @return 实际生效的马甲行（含 id；冲突时是对手先插进去的那条）
      */
-    String insertIfAbsent(long userId, String scene, String aliasName);
+    AnonymousAlias insertIfAbsent(long userId, String scene, String aliasName);
 }

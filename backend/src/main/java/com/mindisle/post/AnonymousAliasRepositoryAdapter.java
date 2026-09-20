@@ -39,18 +39,24 @@ public class AnonymousAliasRepositoryAdapter implements AnonymousAliasRepository
     }
 
     @Override
-    public String insertIfAbsent(long userId, String scene, String aliasName) {
+    public AnonymousAlias insertIfAbsent(long userId, String scene, String aliasName) {
         AnonymousAlias row = new AnonymousAlias();
         row.setUserId(userId);
         row.setScene(scene);
         row.setAliasName(aliasName);
         try {
             mapper.insert(row);
-            return aliasName;
+            return row;
         } catch (DuplicateKeyException e) {
             AnonymousAlias winner = mapper.findByUserAndScene(userId, scene);
             log.info("马甲并发插入撞唯一键，改用已存在的别名：user={} scene={}", userId, scene);
-            return winner == null ? aliasName : winner.getAliasName();
+            if (winner == null) {
+                // 冲突却又查不到对手行，只可能是「对方刚插入又被回滚」这一瞬间态。
+                // 这里必须失败关闭：给发帖一个 alias_id=null 的匿名帖，等于把这条匿名内容
+                // 变成永远无法回溯的孤儿（FR1.4 要求真实身份可审计回溯）。
+                throw new IllegalStateException("马甲唯一键冲突后查不到对手行：user=" + userId + " scene=" + scene);
+            }
+            return winner;
         }
     }
 }

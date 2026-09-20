@@ -107,6 +107,7 @@ mindisle:
     max-edge: 1600               # 重编码长边上限，只缩不放
     jpeg-quality: 0.82           # 仅对 jpg 生效
     max-images-per-post: 9       # FR4.1 单帖 0–9 张，校验点在发帖（T3.3）
+    max-total-bytes: 20971520    # FR4.1 单帖配图总量 ≤20MB，同样在发帖时按真实读盘字节判（T3.3）
   cors:
     allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174
   jwt:
@@ -122,8 +123,13 @@ mindisle:
     user-daily-tokens: 200000
     global-daily-cost-cent: 10000
     alert-ratio: 0.8
-  crisis:
+  crisis:                        # 任务 3.3 危机分级与工单（需求 §5.2、FR10.5 · 创新点 3）
     hotline: ${CRISIS_HOTLINE:12356}
+    l2-score: 0.6                # §5.2「risk ≥0.6 即 L2」；词面规则通道用固定分值，真实分数由任务 4.11 双通道 RiskScorer 产出
+    l3-score: 0.9                # §5.2 高分线 0.8，词面通道命中「计划/方式/时间/告别」直接按 0.9 报（宁可误报不可漏报）
+    l2-sla-hours: 4              # §5.2 L2 四小时内认领
+    l3-sla-minutes: 30           # §5.2 L3 三十分钟内认领
+    evidence-chars: 200          # FR10.5 工单证据「脱敏后 200 字上下文」
   audit:                       # 任务 T3.2 敏感词引擎（需求 FR7.1）
     dict-resource: classpath:dict/sensitive_words_v0.1.txt  # jar 内置快照；前缀必须显式写，见 MindisleProperties.Audit 注释
     dict-path: ${MINDISLE_DICT_PATH:}             # 指向日志盘可写快照时才启用真热更新，见 §6.1 行 3.2
@@ -134,6 +140,18 @@ mindisle:
     newbie-daily-posts: 5
     daily-posts: 20
     daily-comments-per-post: 20
+  post:                          # 任务 3.3 发帖字段约束（需求 FR4.1、FR4.2 · NFR10 不写死）
+    max-title-chars: 50          # FR4.1 标题 ≤50
+    max-content-chars: 5000      # FR4.1 正文 ≤5000
+    max-topics: 3                # 单帖话题数，超出属引流（FR1.7 防刷屏）
+    default-visibility: public   # public | private，FR4.1 两档；friends 属 FR4.6 未开放
+    hole-destroy-options: 24,72,168   # 树洞可选存活小时数（手册 §6.1 行 836）
+    hole-default-destroy-hours: 168   # FR4.2「默认 7 天后」；发帖时算成绝对时间落 auto_destroy_at
+  captcha:                       # 任务 T2.16 图形验证码总开关
+    # 默认 true 是 fail-closed：不配这个键就必须验码。答案只进缓存、不返回也不打日志，
+    # 所以自动化冒烟拿不到它 —— 只有本地开发/CI 才显式设 MINDISLE_CAPTCHA_ENABLED=false，
+    # 关掉后启动会打一条 WARN（生产误关能被看见）。
+    enabled: ${MINDISLE_CAPTCHA_ENABLED:true}
 
 logging:
   pattern:

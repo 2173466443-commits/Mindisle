@@ -46,6 +46,8 @@ public record RegisterRequest(
     @Size(max = 16)
     String consentVersion,
 
+    /** 必须是 user_profile.grade 的 ENUM 值（FRESH/SOPH/JUNIOR/SENIOR/OTHER），不填=OTHER。 */
+    @Pattern(regexp = "^$|^(FRESH|SOPH|JUNIOR|SENIOR|OTHER)$", message = "年级取值不合法，请重新选择")
     @Size(max = 16)
     String grade,
 

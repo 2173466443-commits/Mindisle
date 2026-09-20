@@ -19,8 +19,10 @@ import javax.imageio.ImageIO;
 import com.mindisle.cache.CacheService;
 import com.mindisle.common.BizException;
 import com.mindisle.common.ErrorCode;
+import com.mindisle.config.MindisleProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.stereotype.Service;
 
 /**
@@ -36,7 +38,7 @@ import org.springframework.stereotype.Service;
  *    否则服务器上 AWT 初始化会直接抛异常。</p>
  */
 @Service
-public class CaptchaService {
+public class CaptchaService implements InitializingBean {
 
     private static final Logger log = LoggerFactory.getLogger(CaptchaService.class);
 
@@ -53,10 +55,24 @@ public class CaptchaService {
     private static final Color BACKGROUND = new Color(0x16, 0x20, 0x3A);
 
     private final CacheService cacheService;
+    private final MindisleProperties properties;
     private final SecureRandom random = new SecureRandom();
 
-    public CaptchaService(CacheService cacheService) {
+    public CaptchaService(CacheService cacheService, MindisleProperties properties) {
         this.cacheService = cacheService;
+        this.properties = properties;
+    }
+
+    /**
+     * 开关被关掉时启动即喊一次话，避免「本地为了冒烟关掉的开关」被顺手带进生产。
+     * 与 SensitiveWordEngine 一致实现 InitializingBean，不引 jakarta.annotation。
+     */
+    @Override
+    public void afterPropertiesSet() {
+        if (!properties.getCaptcha().isEnabled()) {
+            log.warn("验证码校验已被显式关闭（mindisle.captcha.enabled=false）："
+                    + "注册与登录现在不校验人机，仅限本地开发与自动化冒烟，生产环境必须保持默认 true");
+        }
     }
 
     /** 生成图形码，并把答案写入缓存。 */
@@ -76,9 +92,16 @@ public class CaptchaService {
      * <p>先 getAndDelete 再比对：这样「答错」也会消耗掉这张图，
      * 攻击脚本每猜一次都必须重新申请一张，把在线爆破的成本抬到「取码开销 × 猜中概率」。</p>
      *
+     * <p><b>唯一的放行口子</b>是 {@code mindisle.captcha.enabled=false}，
+     * 该键默认 true（见 {@link MindisleProperties.Captcha}），关掉后每次启动都会打 WARN。</p>
+     *
      * @throws BizException CAPTCHA_EXPIRED 未申请或已消耗；CAPTCHA_INVALID 答案不对
      */
     public void verifyOrThrow(String captchaId, String captchaCode) {
+        if (!properties.getCaptcha().isEnabled()) {
+            // 关闭态直接放行：既不查缓存也不消耗，脚本连 captchaId 都可以不填。
+            return;
+        }
         if (captchaId == null || captchaId.isBlank() || captchaCode == null || captchaCode.isBlank()) {
             throw new BizException(ErrorCode.CAPTCHA_INVALID, "请填写验证码");
         }

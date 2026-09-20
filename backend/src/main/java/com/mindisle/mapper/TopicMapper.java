@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.mindisle.entity.Topic;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Update;
 
 /** 话题 Mapper（手册 §5.2 T2.5）。 */
 @Mapper
@@ -23,4 +24,13 @@ public interface TopicMapper extends BaseMapper<Topic> {
         .orderByAsc(Topic::getId)
         .last("limit " + Math.max(1, Math.min(limit, 50))));
   }
+
+  /**
+   * 话题下帖子数 +1（任务 3.3 发布成功后调）。
+   *
+   * <p>必须走 SQL 原子自增，不能「读出来加一再写回去」：两个用户同时往同一话题发帖时，
+   * 后者会把前者的计数覆盖掉。写在这里而不是 PostService 里，是为了让计数与表同源。
+   */
+  @Update("UPDATE topic SET post_cnt = post_cnt + 1 WHERE id = #{topicId} AND deleted = 0")
+  int increasePostCnt(long topicId);
 }

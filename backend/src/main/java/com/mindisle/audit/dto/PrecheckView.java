@@ -18,7 +18,7 @@ import com.mindisle.audit.SensitiveWordEngine.CheckResult;
  * @param hitCount    命中条数
  * @param positions   原文下标区间 [start,end)，与前端 textarea 的 selectionStart 同一坐标系
  * @param dictVersion 本次生效的词库版本，前端可据此判断提醒是否比发帖时更新
- * @param hotline     非空即「需要求助入口」：仅 risk 组命中时给出，界面必须把它显示成可拨打的卡片
+ * @param hotline     非空即「需要求助入口」：只要出现过 risk 组命中就给出（不要求它是主因），界面必须显示成可拨打的卡片
  * @param tip         给用户看的一句话，不含词面
  */
 public record PrecheckView(
@@ -41,7 +41,10 @@ public record PrecheckView(
      *                  检测模型输出时不该因为模型复述了风险词就给用户弹求助卡
      */
     public static PrecheckView of(CheckResult result, String hotline, boolean riskAsCare) {
-        boolean needCare = riskAsCare && "risk".equals(result.level());
+        // 判的是「有没有危机命中」，不是「危机是不是主因」：
+        // 主因按处置强度排序，隐私泄露（REVIEW）会盖住自伤自杀（TAG），
+        // 拿 result.level() 判会让留了手机号的求助者恰好拿不到 12356 卡片。
+        boolean needCare = riskAsCare && result.riskTouched();
         return new PrecheckView(result.hit(), result.category(), result.level(), result.action(),
                 result.hitCount(), result.positions(), result.dictVersion(),
                 needCare ? hotline : null, tipOf(result, needCare));

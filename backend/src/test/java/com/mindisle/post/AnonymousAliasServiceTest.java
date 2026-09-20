@@ -126,6 +126,33 @@ class AnonymousAliasServiceTest {
         assertThrows(IllegalArgumentException.class, () -> service.resolveAlias(-1L, "ALL"));
     }
 
+    @Test
+    @DisplayName("T3.3 需要的形状：resolve 返回整行含主键，发帖才能把 alias_id 写成外键而不是抄昵称副本")
+    void resolveReturnsWholeRowWithId() {
+        AnonymousAlias created = service.resolve(11L, "HOLE");
+
+        assertThat(created.getId()).isNotNull().isEqualTo(1L);
+        assertThat(created.getUserId()).isEqualTo(11L);
+        assertThat(created.getScene()).isEqualTo("HOLE");
+        assertThat(created.getAliasName()).startsWith(AnonymousAliasService.ALIAS_PREFIX);
+        // 同一个人第二次取到的必须是同一行同一 id：改名只改一处，历史帖跟着变（BR1 的去重证据）
+        assertThat(service.resolve(11L, "HELP").getId()).isEqualTo(created.getId());
+        assertThat(repository.rows).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("复用既有马甲时返回的就是库里那一行，id 与场景标签都不重发")
+    void resolveReusesTheExistingRowIdentity() {
+        repository.seed(4L, "HELP", AnonymousAliasService.ALIAS_PREFIX + "望舒");
+
+        AnonymousAlias reused = service.resolve(4L, "HOLE");
+
+        assertThat(reused.getId()).isEqualTo(1L);
+        assertThat(reused.getScene()).isEqualTo("HELP");
+        assertThat(reused.getAliasName()).endsWith("望舒");
+        assertThat(repository.rows).hasSize(1);
+    }
+
     /** 存储端口的内存实现，行为对齐 Mapper + Adapter：查不到返回 null、列表按 id 升序。 */
     private static final class InMemoryRepository implements AnonymousAliasRepository {
 
@@ -163,15 +190,15 @@ class AnonymousAliasServiceTest {
         }
 
         @Override
-        public String insertIfAbsent(long userId, String scene, String aliasName) {
+        public AnonymousAlias insertIfAbsent(long userId, String scene, String aliasName) {
             if (conflictWinner != null) {
                 String winner = conflictWinner;
                 conflictWinner = null;
                 rows.add(row(userId, scene, winner));
-                return winner;
+                return rows.get(rows.size() - 1);
             }
             rows.add(row(userId, scene, aliasName));
-            return aliasName;
+            return rows.get(rows.size() - 1);
         }
     }
 }

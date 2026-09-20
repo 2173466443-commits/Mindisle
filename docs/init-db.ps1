@@ -82,7 +82,12 @@ function Invoke-MySqlFile {
   # ONE pre-quoted argument string: Start-Process passes -ArgumentList string values verbatim to
   # CreateProcess, so the quoted defaults-file path survives the space inside "codex workspace".
   # An argument ARRAY does not give that guarantee (measured: it splits on spaces).
-  $argLine = '"' + $Cnf + '" --no-beep --default-character-set=utf8mb4 --table'
+  # mysql.exe reads an option file ONLY from an explicit --defaults-extra-file=, and that option
+  # must be the FIRST one on the command line. Passing the path as a bare positional argument makes
+  # mysql treat it as the database name and log in as the OS user with no password -> ERROR 1045
+  # "Access denied for user 'ODBC'@'localhost' (using password: NO)". Found by actually running the
+  # script on 2026-09-20; until then this file had never been executed end to end.
+  $argLine = '--defaults-extra-file="' + $Cnf + '" --no-beep --default-character-set=utf8mb4 --table'
   if ($Db) { $argLine = $argLine + ' --database=' + $Db }
   $p = Start-Process -FilePath $MysqlExe -ArgumentList $argLine -NoNewWindow -Wait -PassThru -RedirectStandardInput $SqlPath -RedirectStandardOutput $outF -RedirectStandardError $errF
   $code = $p.ExitCode
@@ -138,9 +143,15 @@ try {
   $vText = "SELECT COUNT(*) AS base_tables FROM information_schema.tables WHERE table_schema='mindisle' AND table_type='BASE TABLE'; SELECT VERSION() AS mysql_version, @@character_set_database AS charset, @@collation_database AS collation;"
   $vSql = Write-TempSql -Text $vText
   $madeFiles += $vSql
-  $vOut = Invoke-MySqlFile -Cnf $ddlCnf -Db '' -SqlPath $vSql -Label 'verification'
-  if ($vOut -notmatch '31') {
-    throw 'expected 31 base tables in mindisle, the count above is different - check the errors first'
+  $vRaw = Invoke-MySqlFile -Cnf $ddlCnf -Db '' -SqlPath $vSql -Label 'verification'
+  # Invoke-MySqlFile echoes its display lines into the pipeline and THEN returns the raw stdout,
+  # so the real text is the LAST element. Measured 2026-09-20.
+  $vText = @(,$vRaw)[-1]
+  # `$arr -notmatch 'x'` returns the NON-matching elements (a non-empty array is truthy); it does NOT mean
+  # "nothing matched". With the display lines in the array that check threw even though the database really
+  # had 31 tables - it made a SUCCESSFUL run look like a failure. Match the count cell itself instead.
+  if ($vText -notmatch '\|\s*31\s*\|') {
+    throw ('expected 31 base tables in mindisle, got: ' + ($vText -replace '\s+', ' '))
   }
 
   ''

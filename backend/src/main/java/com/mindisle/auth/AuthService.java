@@ -19,6 +19,7 @@ import com.mindisle.security.JwtService.TokenPair;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,6 +51,17 @@ public class AuthService {
 
   /** 登录失败计数键前缀。 */
   private static final String FAIL_KEY_PREFIX = "login:fail:";
+
+  /**
+   * user_profile.grade 的 ENUM 白名单，逐字对齐 sql/01_account.sql 第 40 行。
+   *
+   * <p><b>为什么服务层还要再判一次</b>：这个字段的落点是 MySQL 的 ENUM 列，
+   * 收到一个不在枚举里的值（例如前端把中文标签「大二」直接发过来）不会得到友好提示，
+   * 而是驱动抛 1265 Data truncated → 被 GlobalExceptionHandler 兜成 90002/503
+   * 「数据暂时读取不到」，排查方向完全错。2026-09-20 建库后第一次真实注册就是这么炸的
+   * （docs/smoke.mjs 第 3 步），已记 dev-log。</p>
+   */
+  static final Set<String> GRADES = Set.of("FRESH", "SOPH", "JUNIOR", "SENIOR", "OTHER");
 
   private final UserMapper userMapper;
   private final UserProfileMapper userProfileMapper;
@@ -121,7 +133,7 @@ public class AuthService {
 
     UserProfile profile = new UserProfile();
     profile.setUserId(user.getId());
-    profile.setGrade(cut(defaultIfBlank(req.grade(), "OTHER"), 16).toUpperCase(Locale.ROOT));
+    profile.setGrade(normalizeGrade(req.grade()));
     profile.setSchool(cut(req.school(), 64));
     userProfileMapper.insert(profile);
 
@@ -278,6 +290,18 @@ public class AuthService {
     AuthResponse.UserBrief brief = new AuthResponse.UserBrief(user.getId(), user.getUsername(),
         user.getNickname(), user.getAvatar(), user.getRole(), user.getAiStyle(), user.getStatus());
     return new AuthResponse(pair.accessToken(), pair.refreshToken(), pair.expiresIn(), brief);
+  }
+
+  /**
+   * 年级归一：空值按 OTHER，大小写容错，白名单外直接 10001，绝不让脏值走到数据库那一步。
+   * 包级可见是为了能被单测直接调用（本类比 Controller 更容易被别的 bean 注入绕过）。
+   */
+  static String normalizeGrade(String raw) {
+    String value = defaultIfBlank(raw, "OTHER").trim().toUpperCase(Locale.ROOT);
+    if (!GRADES.contains(value)) {
+      throw new BizException(ErrorCode.PARAM_INVALID, "年级只能是 FRESH/SOPH/JUNIOR/SENIOR/OTHER 之一");
+    }
+    return value;
   }
 
   private static String defaultIfBlank(String value, String fallback) {

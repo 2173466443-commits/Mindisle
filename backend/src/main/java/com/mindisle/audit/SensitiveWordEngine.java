@@ -95,6 +95,24 @@ public class SensitiveWordEngine implements InitializingBean {
      */
     public record CheckResult(boolean hit, String category, String level, String action, int hitCount,
             List<Hit> hits, List<int[]> positions, String dictVersion) {
+
+        /**
+         * 本次检测里是否出现过任何一条 risk 级（危机）命中。
+         *
+         * <p><b>不能只看 {@link #level()}</b>：主因是按处置强度排序选出来的，
+         * 「隐私泄露（grey/REVIEW）」会压在「自伤自杀（risk/TAG）」前面。2026-09-20 用真实
+         * HTTP 打 /api/audit/precheck 时才看到：一条既写自伤又留手机号的文本，
+         * 返回的主因是隐私泄露，于是求助卡片整个消失——而这恰好是最需要求助卡片的那类人。
+         * 危机识别看「有没有」，不看「排第几」，所以单独立这个方法。</p>
+         */
+        public boolean riskTouched() {
+            for (Hit h : hits) {
+                if ("risk".equals(h.level())) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     /** 去重键：同一匹配型 + 同一作用侧 + 同一词面只保留第一次出现。 */

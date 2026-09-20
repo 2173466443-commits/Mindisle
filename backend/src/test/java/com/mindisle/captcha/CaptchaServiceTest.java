@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import com.mindisle.cache.CaffeineCacheService;
 import com.mindisle.common.BizException;
 import com.mindisle.common.ErrorCode;
+import com.mindisle.config.MindisleProperties;
 
 /**
  * 图形码冒烟测试（手册 §5.10 Gate2 要求 3/3 · 任务 T2.16）。
@@ -31,12 +32,44 @@ class CaptchaServiceTest {
     private static final String KEY_PREFIX = "cap:";
 
     private CaffeineCacheService cache;
+    private MindisleProperties properties;
     private CaptchaService service;
 
     @BeforeEach
     void setUp() {
         cache = new CaffeineCacheService();
-        service = new CaptchaService(cache);
+        // 用真实配置对象而不是 mock：这样「默认值必须是 true」这条安全属性本身也被测试覆盖，
+        // 哪天有人把字段默认值改成 false，下面 disabledGate 之外的那几例会直接红。
+        properties = new MindisleProperties();
+        service = new CaptchaService(cache, properties);
+    }
+
+    @Test
+    @DisplayName("配置闸默认是开启的（fail-closed）：漏配键也不会把注册/登录敞开")
+    void captchaIsEnabledByDefault() {
+        assertThat(new MindisleProperties().getCaptcha().isEnabled()).isTrue();
+        properties.getCaptcha().setEnabled(false);
+        assertDoesNotThrow(() -> service.verifyOrThrow(null, null));
+        properties.getCaptcha().setEnabled(true);
+        assertThat(assertThrows(BizException.class,
+                () -> service.verifyOrThrow(null, null)).getErrorCode())
+                .isEqualTo(ErrorCode.CAPTCHA_INVALID);
+    }
+
+    @Test
+    @DisplayName("显式关闭后完全放行：不查缓存、不消耗，本地冒烟才能拿到 200")
+    void disabledGateSkipsVerificationEntirely() {
+        properties.getCaptcha().setEnabled(false);
+        assertDoesNotThrow(() -> service.verifyOrThrow("whatever", "wrong-code"));
+        // 关闭态下连「已存在的正确答案」也不需要填：这里证明它确实没走缓存分支
+        CaptchaService.Captcha captcha = service.generate();
+        assertDoesNotThrow(() -> service.verifyOrThrow(captcha.captchaId(), "0000"));
+        assertDoesNotThrow(() -> service.verifyOrThrow(captcha.captchaId(), "0000"));
+        // 答案仍在缓存里，说明只是没校验，没有把数据弄丢；重新开启后照常生效
+        properties.getCaptcha().setEnabled(true);
+        String answer = cache.get(KEY_PREFIX + captcha.captchaId(), String.class);
+        assertThat(answer).isNotNull();
+        assertDoesNotThrow(() -> service.verifyOrThrow(captcha.captchaId(), answer));
     }
 
     @Test

@@ -144,6 +144,81 @@ public class ImageUploadService {
                 onDisk.getWidth(), onDisk.getHeight(), encoded.length);
     }
 
+    /**
+     * 把任务 3.1 返回的 URL 换回磁盘上的真实文件（发帖时的 9 张 / 20MB 一致性校验用它）。
+     *
+     * <p><b>为什么必须有这个方法</b>：上传与发帖是两个请求，「单帖 ≤9 张、共 ≤20MB」
+     * 是发帖期才成立的整体约束（FR4.1），上传接口逐张判永远拦不住分 10 次上传。
+     * 而发帖请求里客户端唯一可信的东西就是 URL —— 于是这里<b>只认 URL，
+     * 尺寸、类型、字节数一律由服务端读盘重新得到</b>，客户端连「我这张图多大」都没机会谎报。</p>
+     *
+     * <p><b>路径穿越是这里的第一风险</b>：URL 来自客户端，必须逐段校验，
+     * 任何 ".." 、绝对路径、盘符、URL 编码残留都在这里挡掉，
+     * 并且最后用 {@code normalize().startsWith(root())} 再兜一道——
+     * 校验「拼出来的路径仍在 upload 根目录内」，而不是校验「字符串里没有两个点」。
+     * 前者是有效判定，后者能被我 percent-decode 出来的目录绕过。</p>
+     *
+     * <p>文件不存在或被人为删过，统一按「参数不合法」回绝（10001），
+     * 而不是 70004 落盘失败：此刻系统没写坏任何东西，是客户端给了一个服务端不认的引用。</p>
+     */
+    public StoredImage inspect(String url) {
+        Path base = root();
+        Path target = resolveUnderBase(base, url);
+        if (target == null || !Files.isRegularFile(target)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "配图不存在或已失效，请重新上传");
+        }
+        byte[] raw;
+        try {
+            raw = Files.readAllBytes(target);
+        } catch (IOException e) {
+            log.warn("配图回读失败：{}", target, e);
+            throw new BizException(ErrorCode.PARAM_INVALID, "配图读取失败，请重新上传");
+        }
+        Kind kind = sniff(raw);
+        BufferedImage image = kind == null ? null : decodeQuiet(raw);
+        if (image == null) {
+            // 服务端自己写进去的文件读不出位图，说明目录被动过（运维事故而非用户错误），日志要能看出来。
+            log.error("落盘文件不是可解码图片：{}", target);
+            throw new BizException(ErrorCode.PARAM_INVALID, "配图已失效，请重新上传");
+        }
+        return new StoredImage(url, kind.name().toLowerCase(), image.getWidth(), image.getHeight(), raw.length);
+    }
+
+    /**
+     * URL → 根目录内的真实路径；不在根目录内或形状不对返回 null。
+     *
+     * <p>包级可见是为了让单测能直接打穿越样本（"../../etc/passwd"、"C:/Windows/x.png"、
+     * "/uploads/..%2f..%2f.env"）而不必绕整个服务。</p>
+     */
+    static Path resolveUnderBase(Path base, String url) {
+        if (url == null || !url.startsWith(URL_PREFIX + "/") || url.indexOf('?') >= 0 || url.indexOf('#') >= 0) {
+            return null;
+        }
+        String rel = url.substring(URL_PREFIX.length() + 1);
+        // 百分号一并拒绝：服务端生成的文件名只有 hex、斜杠、点与扩展名，出现 % 就说明这个 URL 不是本服务给的。
+        // 现在不把 "..%2f..%2f.env" 交给文件系统其实也逃不出去（没解码的两个点不是目录），
+        // 但这条链路上将来可能换对象存储 SDK 或 URI 解析——任何一层做 percent-decode，它就会变成真穿越。
+        if (rel.isEmpty() || rel.indexOf(BACKSLASH) >= 0 || rel.indexOf(0) >= 0 || rel.indexOf('%') >= 0) {
+            return null;
+        }
+        Path candidate;
+        try {
+            candidate = base.resolve(rel).normalize();
+        } catch (IllegalArgumentException e) {
+            // 含非法字符（NUL、Windows 保留名等）时 JDK 直接抛，不往外传
+            return null;
+        }
+        return candidate.startsWith(base) && !candidate.equals(base) ? candidate : null;
+    }
+
+    private static BufferedImage decodeQuiet(byte[] raw) {
+        try {
+            return ImageIO.read(new ByteArrayInputStream(raw));
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
     /** 落盘根目录的绝对路径，与 WebMvcConfig 映射 /uploads/** 用的是同一个配置项，两边不会指到不同目录。 */
     public Path root() {
         return Paths.get(properties.getUpload().getDir()).toAbsolutePath().normalize();

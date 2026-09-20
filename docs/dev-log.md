@@ -93,7 +93,6 @@
   也就是说 31 张表目前是「严格手写 + 脚本自检」，**未经 MySQL 解析器验证**。用户跑通后若报语法错，按报错逐条修，不许改口径凑数。
 - `sensitive_word` 的 `variant_hash` 是 MD5(原文) 占位，真实变体归一化算法在 T5.x 实现后需要重刷该列。
 
-
 ---
 
 ## 2026-09-18 阶段 2（下半）—— 后端可运行 + 用户端 / 管理端骨架
@@ -134,7 +133,6 @@
 - **31 表 DDL 从未被 MySQL 解析器执行过** —— root 口令不由我持有。建库、列数比对、`contextLoads` 转绿，全部挂在这一个用户动作上。
 - 词云运行时渲染未验证；`backend/run.bat`（无 BOM + chcp 65001）与 `docs/rebuild.ps1` 未建；`mvn -o dependency:tree` 输出未存档；`gen_seed.py` 未写；OpenAPI 分组未逐条核对。（→ 2026-09-20 已核完：5 分组 / 23 operation 注解零缺失；该行其余事项仍未做）
 - 阶段 1B（开题报告 / 文献综述 / 线框图）按用户指令顺延，未开始。
-
 
 ---
 
@@ -288,7 +286,6 @@
 - GIF 重编码后**只剩首帧**；`uploads/` 目录的运维口径（磁盘配额、备份、生产环境 Nginx 前置）未定。另：`backend/uploads/` 早在阶段 0 就已被 `.gitignore` 排除（`git log -S backend/uploads` 查到是 a53469f），本轮只是**复核确认**，不是我新补的。
 - 阶段 3 其余 13 项仍 ☐，主线 T3.3 未开工；31 表 DDL 至今**从未被 MySQL 解析器执行过**；毕设材料（T1B.*）按用户指令顺延；**仍未打 git tag**（Gate 3 未过）。
 
-
 ### 同日收尾 —— 把上一节里「提前断言」的三件事真正做完
 
 上一节「同轮文档对齐」里写了「README：测试数 66 → 80、分组 6 → 7、新增 `/api/files/image`」，**但当时 README 一行都没改** —— 属提前断言，本轮实际改完并核对，记为一次自纠（本项目的口径是「每条结论必须能指到一次真实执行」）。
@@ -302,3 +299,124 @@
 | 工作树 | `git check-ignore -v backend/uploads/probe-check.png` → `.gitignore:30:backend/uploads/` 命中；`git status` 只剩 7 改 3 增的真实交付物。
 
 **仍然未做（不变）**：登录后的 200 上传链路仍无真实 HTTP 证据；`maxImagesPerPost` 无调用方；T3.3 主线未开工；31 表 DDL 仍未被 MySQL 执行过；**未打 tag**。
+
+---
+
+## 2026-09-20 阶段 3（续 2）—— T3.3 发帖状态机：真实建库 + 真 HTTP 冒烟 + 真库取证
+
+### 先销一笔挂了三轮的旧账：31 表 DDL 第一次被 MySQL 解析器执行过
+
+`docs/init-db.ps1` 自 09-18 写下后**从未端到端跑过**。实测：`information_schema.tables` 里 `mindisle` 库 **31 张表**、`VERSION()` = **9.7.1**、字符集 **utf8mb4 / utf8mb4_0900_ai_ci**、`sensitive_word` 种子 **139 行**与 classpath 快照同源。
+
+跑通过程中修掉的是**脚本自己的两个 bug**（不是 SQL 的错，都是包装层）：
+
+1. **`mysql.exe` 只认命令行第一个位置的 `--defaults-extra-file=`**：原脚本把选项文件路径当普通位置参数传，mysql 于是把它当成数据库名、再用操作系统用户免密登录 → `ERROR 1045 Access denied for user ODBC@localhost (using password: NO)`。这条报错既不提文件路径也不提选项文件，光看文本猜不到根因；用户手工执行失败也是同一处（脚本要求交互输入口令 + 环境变量注入，本机直接跑不通）。正解：口令写进**非仓库内**的 `[client]` 选项文件，命令行以 `--defaults-extra-file=<path>` 开头。
+2. **PowerShell 的 `$arr -notmatch "x"` 返回的是「不匹配的元素」而不是布尔假**：`Invoke-MySqlFile` 先把展示行写进管道再返回 stdout，数组里只要有一行不含 31，`if ($vOut -notmatch "31")` 就为真 —— **一次真正成功的建库被自己的验收语句判成失败**。改为只取管道最后一个元素，并匹配表格单元格本身（正则 `\|\s*31\s*\|`），注释里写清「为什么不能整数组匹配」。
+
+### 交付物（全部为实测计数）
+
+| 类型 | 文件 | 实测事实 |
+|---|---|---|
+| 服务 | `post/PostService.java`（新，617 行） | 八步顺序：配额与账号状态 → 字段合规 → 配图一致性（≤9 张 / ≤20MB，按服务端读盘字节） → 话题存在且已过审 → 落 `DRAFT` + 流转日志 → DFA 机审 → 终态 + 第二条日志 → 危机命中**同时**建 `alert_ticket`；`@Transactional`；`now` 由调用方传入，让配额、发布时间、SLA 落在同一时间基准 |
+| 分级 | `post/CrisisGrader.java`（新，137 行） | 词面通道输出域 {L0, L2, L3}（刻意不产 L1：需求 §5.2 的 L1 要「同一用户连续 3 条」的时间序列，单条文本判 L1 属凭空造数据）；`L3_WORDS` 11 个「方式 / 计划 / 告别」语义；L2 分 0.6 + SLA 4h，L3 分 0.9 + SLA 30min；它是任务 4.11 双通道 `RiskScorer` 的规则通道前身，接口形状不变 |
+| 接口 | `web/PostController.java`（新，55 行） | `POST /api/posts`；**REJECTED 与 HUMAN_REVIEW 都回 200**，处置结果在 `data.status` + `data.tip`；真正的入参错误才 400/10001 |
+| DTO | `post/dto/CreatePostRequest.java`、`post/dto/PostView.java`（新） | 出参字段白名单实测 15 个，**不含 `risk_level`**（等级只给服务端与管理端 · NFR8）；非树洞不出现 `autoDestroyAt` |
+| 实体与映射 | `entity/{Post,PostImage,PostTopic,PostStatusLog,AlertTicket}.java` + 同名 5 个 Mapper（新） | 列名与 DDL 逐字对齐；`TopicMapper.increasePostCnt` 走 SQL 原子自增（读出来加一再写回会覆盖别人的计数） |
+| 改造 | `post/AnonymousAliasRepository(Adapter)`、`AnonymousAliasService` | `insertIfAbsent` 返回值由 `String` 改成**整行**：发帖要写 `post.alias_id` 外键，只拿名字就得再查一次，而「再查一次」在并发下可能查到别人的行；「唯一键冲突却又查不到对手行」改为**失败关闭**（抛 IAE），绝不给匿名帖留 `alias_id=null` 的孤儿（FR1.4 要求真实身份可回溯） |
+| 改造 | `upload/ImageUploadService.java` | 新增 `inspect(url)` 与 `resolveUnderBase(base, url)`：发帖这一刻只认 URL，尺寸、类型、字节数一律由服务端重新读盘得到，客户端连「我这张图多大」都没机会谎报 |
+| 改造 | `audit/SensitiveWordEngine.CheckResult`、`audit/dto/PrecheckView` | 新增 `riskTouched()`；`hotline` 从「主因是 risk 才给」改成「**出现过 risk 命中就给**」—— 2026-09-20 真 HTTP 打预检时发现「既写自伤又留手机号」的文本主因被判成隐私泄露，按主因走最需要卡片的人恰好拿不到卡片 |
+| 改造 | `auth/AuthService`、`auth/dto/RegisterRequest` | 年级 `normalizeGrade` 白名单（FRESH/SOPH/JUNIOR/SENIOR/OTHER）+ DTO `@Pattern`：脏值不再流到 MySQL ENUM 列（否则驱动抛 1265 Data truncated → 被兜成 90002/503「数据读取不到」，排查方向完全错）。这条是真注册炸出来的 |
+| 改造 | `captcha/CaptchaService`、`config/MindisleProperties`、`application.yml` | 新增 `mindisle.captcha.enabled`（默认 true，fail-closed）；关掉时跳过校验且**启动打一条 WARN**（日志实录 15:46:47），`.env.example` 补注释「仓库模板必须留 true」 |
+| 配置 | `MindisleProperties.Crisis` / `.Post` | 阈值、SLA、证据字数、标题与正文长度、话题数、树洞销毁档位全部可配（NFR10 不写死），`application.yml` 每一项后面标需求编号 |
+| 测试 | 新增 `PostServiceTest` **13**、`CrisisGraderTest` **13**、`PrecheckViewTest` **4**、`AuthServiceGradeTest` **14**；`CaptchaServiceTest` 6→**8**、`AnonymousAliasServiceTest` 10→**12**、`ImageUploadServiceTest` 14→**17** | 全库 `mvn -o -B test` 实测 **`Tests run: 131, Failures: 0, Errors: 0, Skipped: 1` / BUILD SUCCESS**（v1.1.5 为 80），日志 `backend/target/verify-t33.log`、`verify-t33-r2.log` |
+| 冒烟 | `docs/smoke.mjs`（251 → **427 行**） | 11 步 **45 项 / 断言 41 条 / 失败 0 条 / EXIT=0**；四轮实跑 15:47:26、15:49:00、15:49:48、**15:51:41**，断言数从 36 涨到 41，每一轮都真打 HTTP |
+| 夹具 | `sql/11_smoke_fixture.sql`（新） | 幂等 upsert 一条 `PENDING` 话题（实测 id=**21**）供 30004 用例，注释写明「这是冒烟的前置，不跑就没有这条断言」 |
+
+### 本轮真金白银的 3 条 bug（两条真 bug，一条是我自己把断言写错）
+
+1. **Java 15 起允许字面量里的未知转义，正则 `\s` 少写一个反斜杠不会编译失败**：`CrisisGrader` 里的空白归一化必须是 `replaceAll("\\s+", " ")`；写成 `replaceAll("\s+", " ")` 在 JDK 17 里 `s` 是**字面空格**（不是正则的空白类），语义从「压掉所有空白」变成「压掉空格」，且**一句报错都没有**。取证方式不是用眼看，是把源码字节读出来打 charCode：实测 `92,92,115` —— 确有两个反斜杠。教训：正则一律按字节取证，肉眼和渲染器都不可信（本工具链还会把显示折叠成一种写法）。
+2. **`..%2f` 断言写错，逼出一次真正的加固**：我原先断言「百分号编码的穿越样本会被解码后再判」，实测发现当前实现**根本不解码**，`..%2f` 里那两个点在文件系统里不是目录 —— 样本既没穿越也不被拒，断言的前提（「它会解码」）是假的。先用一次真实调用证伪自己的假设，再决定改哪一边：这次**改实现**（`resolveUnderBase` 见 `%` 直接拒），理由是服务端自己生成的 URL 只含 hex、斜杠、点和扩展名，出现 `%` 就说明这地址不是本服务给的；将来这条链路换成对象存储 SDK 或 URI 解析，任何一层做 percent-decode，今天「其实逃不出去」的输入就会变成真穿越。改断言与改实现两边的理由都写进了代码注释，不许只留结论。
+3. **`PostingQuotaService` 的注释里藏着一句假承诺**：v1.1.4 写的是「T3.3 落地后会在发帖事务内用 `SELECT COUNT(*)` 校准当日额度」，而 T3.3 真落地时评估完**决定不做**，注释原样留着就是给下一个接手的人画饼。本轮改成「评估过 + 三条不做的理由（① 这是防灌水的粗粒度闸门不是账务，少算几帖由 BR5 次日重置自然兜住；② 校准 SQL 要按「自然日 + 含 REJECTED/已删除」的口径写才和缓存数对得上，口径写错会让正常用户被误限，比归零更糟；③ 每次发帖多一次范围扫描，代价落在最热的写路径上）」+ 保留「**别把计数器当审计数据用**」。**代码注释里的「将来会做」也是承诺，落地后必须回改。**
+
+### 冒烟脚本的两条顺序约束（实测出来的，不是设计时想到的）
+
+- **负面组必须排在正面前**：`assertCanPost` 是发帖流程第一道闸，额度用满之后**所有**请求（含非法参数）都回 429 —— 那时「缺标题 → 400」这类用例会以「校验坏了」的假象失败。所以第 9 步（校验与拒绝语义）跑在第 10 步（状态机正向）之前。
+- **每个正向组各注册一个新账号**（`smoke_post_<yyyyMMddHHmmss>` / `smoke_care_<…>`）：新手期 5 帖/天 + 计数在缓存 + 按自然日重置，复用固定账号会让「当天第二次跑」在第一条正向断言上撞 429。时间戳用 `slice(0,14)`（含秒），否则同名撞 `20002 用户名已占用`。第 11 步（黑词 + 危机同句）**单独再开一个账号**：它是创新点 3 唯一例外分支，任何已发过帖的账号都排不到它。
+- **10.6 的 429 断言同时钉住「REJECTED 也消耗配额」**：那 5 条里 4 条 PUBLISHED + 1 条 REJECTED，第 6 条必须被挡；若哪天有人把 REJECTED 改成不消耗，第 6 条就会 200，断言当场红。
+- 10.4 的 BLOCK 帖**故意也挂已过审话题**，就是为了下一节那个 `post_cnt` 差值能证成。
+
+### 真库取证（`post` 18..23 = 最后一轮冒烟 15:51:41 写进去的行）
+
+| id | user | type | status | risk_level | anon | alias_id | floor_no | published_at | auto_destroy_at |
+|---|---|---|---|---|---|---|---|---|---|
+| 18 | 15 | normal | PUBLISHED | L0 | 0 | NULL | NULL | 15:51:42.148 | NULL |
+| 19 | 15 | **help** | PUBLISHED | **L2** | 0 | NULL | NULL | 15:51:42.176 | NULL |
+| 20 | 15 | normal | PUBLISHED | **L3** | 0 | NULL | NULL | 15:51:42.208 | NULL |
+| 21 | 15 | normal | **REJECTED** | L0 | 0 | NULL | NULL | **NULL** | NULL |
+| 22 | 15 | **hole** | PUBLISHED | L0 | **1** | **4** | **4** | 15:51:42.340 | **2026-09-27 15:51:42.340** |
+| 23 | 16 | normal | **REJECTED** | **L2** | 0 | NULL | NULL | NULL | NULL |
+
+`alert_ticket` 三个字段级事实（注意列名是 `source_type` + `source_id`，**这张表没有 `post_id` 列**）：
+
+- id 9 · **L2** · src=post/19 · `risk_score` **0.600** · trigger_words `伤害自己` · SLA **240** 分钟 · evidence 21 字
+- id 10 · **L3** · src=post/20 · `risk_score` **0.900** · trigger_words `把东西分给室友，最后一次跟这里说说话` · SLA **30** 分钟 · evidence 29 字
+- id 11 · **L2** · src=post/**23** · 0.600 · `不想活` · SLA 240 分钟 · evidence 26 字，原文是 `冒烟·黑词里的人 他说不想活了，还要卖 **** 给我。` —— **黑词被遮成星号、危机原句保留**，FR10.5「脱敏后 200 字上下文」第一次在真库里被看见，不是推断
+- `SELECT COUNT(*) FROM alert_ticket WHERE source_id = 21` → **0**：纯黑词命中不建单。工单是危机干预资源，不能被广告贴占满，这条边界必须留在证据里。
+
+`post_status_log`：6 帖 × 2 行 = 12 行，状态链完整。第 1 行 reason 一律 `system|dict=v0.1`（写清是哪个版本的词典做的决定，申诉与复现都靠它）；第 2 行按分支：18/22 `机审通过:DFA 无拦截与复核命中`；19/20 `危机命中(L2/L3)按需求 §18.3 放行:删除等于把人推回沉默`；21 `机审命中拦截词(black)，内容已拦下`；23 `机审命中拦截词(black)，且同时命中危机词:内容拦下、工单照建`。
+
+话题计数（本轮最干净的一条量化证据）：`link_rows=6`，其中 `post.status=PUBLISHED` 的 **4** 行、非 PUBLISHED **2** 行，而 `SUM(topic.post_cnt)=4` —— **「关联行照写、`post_cnt` 只对 PUBLISHED 自增」量化成立**。topic 1「失眠夜」APPROVED cnt=4；topic 21「冒烟待审话题」PENDING cnt=0。
+
+其余实测：`post_image` 1 行（post 18，url `/uploads/2026/09/20/115c2cae4eb44bac9822d73ae9b01462.png`，sort 0，**120x40**，`hash` 为空串 —— 秒传未做）；`anonymous_alias` 4 行（四次运行四张脸：观澜 / 溪见 / 与舟 / 子衿，对应 `floor_no` 1..4 递增）；库计数 `sw=139 users=15 posts=23 tickets=11 logs=46 topics=21 links=6 imgs=1 aliases=4`；`post` 按状态 PUBLISHED 16 / REJECTED 7；`alert_ticket` 按级别 L2 pending 7 / L3 pending 4；冒烟账号 id 8 `smoke_runner` 与 id 10/11/13/15 `smoke_post_*`、12/14/16 `smoke_care_*`。SQL 与输出存档在 `_cache/mindisle-dbtmp/evidence*.sql|txt`。
+
+### 冒烟第 9 / 10 / 11 步的实测输出（摘关键几条）
+
+- 缺标题 → `400 {"code":10001,"msg":"title 标题要写点什么才好"}`；`visibility` 非法 → 「可见范围只能选公开或仅自己」；`type` 不在白名单 → 「内容形式不合法，请重新选择」；非树洞传 `autoDestroyHours` → 「到期销毁只对树洞开放，普通帖与求助帖请留空」⇒ **Bean Validation 在服务之前先挡**，服务层还有一道同义兜底（防的是绕过 Controller 的内部调用）。
+- 话题不存在 → 「这个话题不存在（id=99999999），请重新选择」；假图 URL → 「配图不存在或已失效，请重新上传」；待审话题 → **409 / 30004**「话题「冒烟待审话题」还没通过审核，通过后就能挂了」—— 用户此刻能做的是等，不是改，所以不给 400。
+- 危机文本 → **仍然 200 + PUBLISHED + `hotline=12356`**（创新点 3 的正身）；出参字段实测 `id,status,type,title,content,visibility,anonymous,displayName,topics,images,hotline,tip,publishedAt,createdAt`，**无 `risk_level`**。
+- 提示语不回传命中词面（否则等于给出一份可迭代的钓词库反馈）：10.4 → 「内容里有不能公开的部分，这条没有发出去；改一改再发也来得及。」；第 11 步 → 「…已经被拦下；但你在里面写的那句话我们看见了。改一改还能再发，也可以直接打下面的电话，不用先跟任何人解释。」
+- 429 → `{"code":10010,"msg":"今日已发 5 帖，达到上限 5 条（新注册 24 小时内限 5 帖），明天再来吧"}`。
+
+### 复跑命令（照抄可用）
+
+```powershell
+# 1) 后端：必须离线 + 指定 E 盘本地仓库（C 盘 .m2 里没有 Boot 4.1.1）
+cd backend; mvn -o -B "-Dmaven.repo.local=E:/codex workspace/_cache/m2/repository" spring-boot:run
+# 2) 单测：期望 Tests run: 131, Failures: 0, Errors: 0, Skipped: 1
+mvn -o -B "-Dmaven.repo.local=E:/codex workspace/_cache/m2/repository" test
+# 3) 真 HTTP 冒烟：需后端在 8080、根 .env 里 MINDISLE_CAPTCHA_ENABLED=false、已执行过 sql/11
+node docs/smoke.mjs            # 期望 45 项 / 断言 41 条 / 失败 0 条 / EXIT=0
+```
+
+冒烟数据是**故意留在库里的**（每跑一次 +2 账号、+6 帖、+1~2 工单、+1 张图，这是正常现象不是 bug）。要清的时候按这个顺序删，外键才不会拦：
+
+```sql
+DELETE FROM alert_ticket    WHERE user_id IN (SELECT id FROM user WHERE username LIKE "smoke\_%");
+DELETE FROM post_status_log WHERE post_id IN (SELECT id FROM post   WHERE user_id IN (SELECT id FROM user WHERE username LIKE "smoke\_%"));
+DELETE FROM post_image      WHERE post_id IN (SELECT id FROM post   WHERE user_id IN (SELECT id FROM user WHERE username LIKE "smoke\_%"));
+DELETE FROM post_topic      WHERE post_id IN (SELECT id FROM post   WHERE user_id IN (SELECT id FROM user WHERE username LIKE "smoke\_%"));
+DELETE FROM anonymous_alias WHERE user_id IN (SELECT id FROM user WHERE username LIKE "smoke\_%");
+DELETE FROM user_consent    WHERE user_id IN (SELECT id FROM user WHERE username LIKE "smoke\_%");
+DELETE FROM user_profile    WHERE user_id IN (SELECT id FROM user WHERE username LIKE "smoke\_%");
+DELETE FROM post            WHERE user_id IN (SELECT id FROM user WHERE username LIKE "smoke\_%");
+DELETE FROM user            WHERE username LIKE "smoke\_%";
+DELETE FROM topic           WHERE name = "冒烟待审话题";
+```
+
+> **口令口径（写死在这里，免得下一轮又去猜）**：MySQL root 口令**不进仓库、不进文档、不进日志、不进对话正文**，只存在于非 git 目录 `_cache/mindisle-dbtmp/rootpwd.cnf`（`[client]` 选项文件，39 字节，用完即可删）；应用账号 `mindisle` 的随机口令在项目根 `.env` 的 `DB_PASSWORD`（`.gitignore:2` 已排除 `.env`）。`mysql.exe` 传口令的唯一可用姿势是把 `--defaults-extra-file=<path>` 放在命令行**第一个位置**。
+
+### 同轮文档对齐
+
+- 手册升 **v1.1.6**：§6.1 行 3.3 补 v1.1.6 实测回写 8 条、§15 **T3.3 ☐→☑**、**T3.12 ◐→☑**（配额终于有了真实调用方 `PostService`，并明确决定不做重启 COUNT 校准）、**T3.1 ◐→☑**（「已登录 → 200 上传 + 挂图进帖」这条欠账本轮结清）、**T3.4 ◐→☑**（马甲分配第一次跑在真库上：4 张脸 + `post.alias_id` 外键 + `floor_no` 1..4）；T3.2 的「未经真实 HTTP 验证」欠账同步销掉但它**仍保持 ◐**（状态机接线与灰词人审闭环未做）。阶段 3 口径重算为 **☑ 4 / ◐ 1 / ☐ 12**；§18 Gate3 状态、§19 下一步、§20 变更表同步。
+- README：单测数 80 → **131**、新增「真 HTTP 冒烟」用法与期望输出、**把 `backend\.env` 纠正为项目根 `.env`**（`spring-boot.run` 配的是 `env-file: ../.env`，原来那句照着做会读不到口令）、补 `POST /api/posts` 契约与状态码口径。
+- 顺手清理：删 6 张未被任何 `post_image` 引用的上传图与 `_cache/probe-positions.mjs`，只保留被 post 18 引用的那一张；空目录逐层 `rmdir`（不对 `uploads/` 用递归删除）。
+
+### 仍未做（截至本轮，别自我感觉良好）
+
+- **`HUMAN_REVIEW` 帖没有进 `audit_task` 队列**：状态机有这条分支、`PostServiceTest` 也测了，但这一轮真库里**一条都没产生**（灰词 REVIEW 会被「危机放行」或「直发」吃掉），管理端看不到待审内容 —— 归 **T6.1**。
+- 工单只落库，**没有任何通知**：管理员不看表就看不见 L3 的 30 分钟 SLA —— 归 T6.4 的告警链路。这是本轮最需要被记住的产品缺口。
+- 30004 用例依赖手工先执行 `sql/11_smoke_fixture.sql`（自动建夹具会污染 `topic` 表，权衡后保留手工步骤，脚本注释里写明）。
+- 配额重启归零（本轮已明确决定不做 COUNT 校准）、`floor_no` 用 MAX+1 并发下可同号、`L3_WORDS` 与词库 v0.1 强耦合（有快照测试作 tripwire，改词必红）、`auto_destroy_at` **只写不扫**（销毁 job 属 T3.15）、`post.emotion_*` 列仍 NULL（阶段 4）。
+- **前端发布器还没对齐新契约**：`frontend/src/views/FeedView.vue` 发的仍是 `{content, topicId, mood, anonymous}` 且缺必填 `title`，接上后端必然 400 —— 归 T3.13，是阶段 3 下一步的头等事。
+- `GET /api/posts`、`/api/posts/{id}`、`/api/feed/recommend` 仍是 90001（T3.5 / T3.10 未开工）；毕设材料（T1B.*）按用户指令顺延；**仍未打 tag**（Gate 3 未过，最新 tag `stage-2-skeleton`）。
+

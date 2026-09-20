@@ -267,6 +267,59 @@ class ImageUploadServiceTest {
         assertThat(ImageUploadService.briefName("a" + (char) 0 + "b")).isEqualTo("ab");
     }
 
+    // ------------------------------------------------------------ 任务 3.3 新增：按 URL 回读真值
+
+    @Test
+    @DisplayName("inspect 按 URL 读回磁盘真值：url/类型/宽高/字节数与刚上传的那张完全一致")
+    void inspectReadsTruthFromDisk() throws IOException {
+        StoredImage stored = service.store(png(120, 60), "配图.png");
+        long onDisk = Files.size(absoluteOf(stored));
+
+        StoredImage again = service.inspect(stored.url());
+
+        assertThat(again.url()).isEqualTo(stored.url());
+        assertThat(again.kind()).isEqualTo("png");
+        assertThat(again.width()).isEqualTo(stored.width()).isEqualTo(120);
+        assertThat(again.height()).isEqualTo(stored.height()).isEqualTo(60);
+        // 字节数取的是文件真实大小，不是客户端声称的值——发帖时的「共 ≤20MB」就是靠这个数累加
+        assertThat(again.bytes()).isEqualTo(onDisk).isEqualTo(stored.bytes());
+    }
+
+    @Test
+    @DisplayName("inspect 拒绝一切服务端不认的引用：缺失文件、非图片、任意形状的 URL")
+    void inspectRejectsUnknownReferences() throws IOException {
+        StoredImage stored = service.store(png(10, 10), "ok.png");
+        String good = stored.url();
+
+        assertThat(assertThrows(BizException.class, () -> service.inspect("/uploads/2020-01-01/never-existed.png"))
+                .getErrorCode()).isEqualTo(ErrorCode.PARAM_INVALID);
+        // 服务端目录里被塞进一个非图片文件（运维事故口径），也必须拒而不是回一个 0x0 的假尺寸
+        Files.write(service.root().resolve("planted.png"), "I am not a bitmap".getBytes(StandardCharsets.UTF_8));
+        assertThat(assertThrows(BizException.class, () -> service.inspect("/uploads/planted.png"))
+                .getErrorCode()).isEqualTo(ErrorCode.PARAM_INVALID);
+        // 好 URL 本身仍然可用，证明上面的拒绝是逐条判定而不是「一旦出错就全拒」
+        assertThat(service.inspect(good).width()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("resolveUnderBase：只有 /uploads/ 打头且 normalize 后仍在根目录内的路径才给出去")
+    void resolveUnderBaseBlocksEveryEscapeShape() {
+        Path base = service.root();
+
+        assertThat(ImageUploadService.resolveUnderBase(base, "/uploads/2026-09-20/a.png"))
+                .isEqualTo(base.resolve("2026-09-20").resolve("a.png"));
+
+        for (String bad : new String[] {
+                null, "", "/upload/a.png", "/uploads", "uploads/a.png", "/uploads//a.png",
+                "../outside.png", "/uploads/../outside.png", "/uploads/../../etc/passwd",
+                "/uploads/..%2f..%2f.env", "/uploads/a.png?x=1", "/uploads/a.png#frag",
+                "C:/Windows/win.ini", "/etc/passwd"}) {
+            assertNull(ImageUploadService.resolveUnderBase(base, bad), () -> "应当拒绝：" + bad);
+        }
+        // 反斜杠单独构造：源码里不出现该字符的字面量，避免被工具链吃掉
+        assertNull(ImageUploadService.resolveUnderBase(base, "/uploads/" + (char) 92 + ".." + (char) 92 + ".env"));
+    }
+
     /** 上传目录之外的位置不该有文件，用它数一数真实落盘了几个。 */
     private long storedCount() throws IOException {
         try (var walk = Files.walk(tmp)) {
