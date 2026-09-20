@@ -65,9 +65,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\docs\start-redis.ps1
 
 # 2) 后端（8080）
 cd backend; mvn -o spring-boot:run
-#    接口文档：http://127.0.0.1:8080/swagger-ui/index.html（不是 /doc.html，本工程只有 springdoc）
+#    接口文档：http://127.0.0.1:8080/doc.html → 302 → /swagger-ui/index.html（200）；OpenAPI 描述在 /v3/api-docs（实测 20 paths / 23 operations / 5 分组）
 #    验证码：http://127.0.0.1:8080/api/auth/captcha → {captchaId, imageBase64}
 #    未建库时涉库接口返回 HTTP 503 + {"code":90002}，这是设计好的降级，不是崩了
+#    健康检查：/actuator/health/liveness 与 /readiness 免登录可查（200 UP）；/actuator/health 整体在未建库时是 503 DOWN，属设计内降级
 
 # 3) 用户端（5173）/ 管理端（5174），各自目录内
 npm install; npm run dev
@@ -86,7 +87,8 @@ npm install; npm run dev
 - [x] **阶段 1 调研文档已写完**：《同类项目调研与实现方案.md》（618 行 / §0 先给答案 · §1 检索过程 · §2 逐项目档案 · §3 横向对比 · §4 许可证核查 · §5 差异定位 · §6 实现方案 · §7 风险 R12–R21 · §8 引用清单与 Gate 1 自检 · §9 用户答复已回填）
 - [x] **SOP 强制关卡已过**：用户 2026-09-18 答复「A. 按《同类项目调研与实现方案.md》和《制作步骤文档.md》开工 / B. 选 2（MySQL 就地启用）」→ 允许编码
 - [x] **阶段 2（数据库 + 三端骨架）代码侧完工 —— 2026-09-18**：31 表 DDL + 索引 + 种子脚本落盘（**尚未在真实 MySQL 执行**）；后端 45 类编译通过、8080 启动、`mvn test` **21 通过 + 1 跳过**、`/api/auth/captcha` 与降级/401/405 全实测；`frontend`（8 视图）与 `admin`（17 文件）双端 `npm install` + `npm run build` 通过
-- [ ] **当前唯一待办（用户侧）**：本机跑 `docs\init-db.ps1` 建 `mindisle` 库与应用账号 → 把口令写进 `backend/.env` 的 `DB_PASSWORD` → 重启后端 → 涉库接口从 HTTP 503/90002 转正常，Gate 2 才能从 ◐ 转 ☑
+- [x] **2026-09-20 阶段 2 复核修正**：修 `SecurityConfig` 放行清单漏 `/actuator/health/**`（修前 liveness/readiness 被拦成 401）；OpenAPI 实测 **20 paths / 23 operations / 5 分组**、注解零缺失，`/doc.html` 经 `springdoc.swagger-ui.path` 302 到 `/swagger-ui/index.html` —— 上一版「/doc.html 是 knife4j 专属、本工程不可用」的说法**作废**；重跑 `mvn -o -B test` 仍 **21 通过 + 1 跳过**（BUILD SUCCESS，后端已在 8080 复起）
+- [ ] **当前唯一待办（用户侧）**：本机跑 `docs\init-db.ps1` 建 `mindisle` 库与应用账号 → 把口令写进 `backend/.env` 的 `DB_PASSWORD` → 重启后端（`/actuator/health` 由 503 DOWN 转 200 UP 即建库成功的信号）→ 涉库接口从 HTTP 503/90002 转正常，Gate 2 才能从 ◐ 转 ☑
 - [ ] 阶段 3：社区核心（发帖—列表—详情—互动—匿名树洞—举报—频率限制）→ 阶段 4 AI+情绪+危机 → 阶段 5 私信 → 阶段 6 管理端 → 阶段 7 推荐与实验 → 阶段 8 测试 → 阶段 9 论文
 - [ ] **阶段 1B（开题报告 / 文献综述 ≥15 篇含 ≥5 英文 / 23 页线框 / ER 图 / 架构图 3 张）—— 按用户 2026-09-18 指令「毕设材料先不用写」顺延**；风险 R21（2026-10 上旬截止）改由用户盯办
 - [x] **论文材料目录骨架**：`论文材料/`（prompts · experiments/{data,scripts,output,figs} · 截图 · 图表 · 论文草稿 · 答辩）

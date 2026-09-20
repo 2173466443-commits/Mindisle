@@ -55,6 +55,7 @@ public class SecurityConfig {
             "/ws/**",
             "/uploads/**",
             "/actuator/health",
+            "/actuator/health/**",
             "/actuator/info",
             "/error"
     };

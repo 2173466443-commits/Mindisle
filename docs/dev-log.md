@@ -118,6 +118,7 @@
 2. 单测数字：此前记成「22 通过 + 1 跳过」，surefire 实读是 **21 通过 + 1 跳过（共 22 个用例）**。跳过的是 `contextLoads`（未建库，主动 skip 比造假绿诚实）。
 3. 词云 R19 **只关了一半**：词云包只进了 `frontend/package.json` 的 deps，**全仓 .vue 零引用**；手册要求的 `docs/gate/` 目录**根本不存在**，spike 截图从未存档。所以措辞只能是「依赖层风险关闭、运行时渲染未验证」。
 4. 手册 §5.10 写的 `/doc.html` 是 knife4j 路径，本工程只引 springdoc-openapi 3.1.1 → 正确地址是 `/swagger-ui/index.html` 与 `/v3/api-docs`。已在手册内注明。
+   ⚠ **本条结论已于 2026-09-20 被实测推翻**（`/doc.html` 实际会 302 到 `/swagger-ui/index.html`），见本文末尾「2026-09-20 阶段 2 复核」的纠偏段。原文保留，不偷偷改掉。
 5. 文档声称 `docs/rebuild.ps1` 存在 —— 实测不存在。`docs` 下只有 check-env.ps1 / init-db.ps1 / start-redis.ps1 / dev-log.md / diagrams/。**「文件存在」必须 readdirSync 核，不能信上一版文档。**
 
 ### 本日新增坑（工具层，与业务无关但反复咬人）
@@ -131,5 +132,49 @@
 ### 仍未做（诚实记录）
 
 - **31 表 DDL 从未被 MySQL 解析器执行过** —— root 口令不由我持有。建库、列数比对、`contextLoads` 转绿，全部挂在这一个用户动作上。
-- 词云运行时渲染未验证；`backend/run.bat`（无 BOM + chcp 65001）与 `docs/rebuild.ps1` 未建；`mvn -o dependency:tree` 输出未存档；`gen_seed.py` 未写；OpenAPI 分组未逐条核对。
+- 词云运行时渲染未验证；`backend/run.bat`（无 BOM + chcp 65001）与 `docs/rebuild.ps1` 未建；`mvn -o dependency:tree` 输出未存档；`gen_seed.py` 未写；OpenAPI 分组未逐条核对。（→ 2026-09-20 已核完：5 分组 / 23 operation 注解零缺失；该行其余事项仍未做）
 - 阶段 1B（开题报告 / 文献综述 / 线框图）按用户指令顺延，未开始。
+
+
+---
+
+## 2026-09-20 阶段 2 复核 —— 修 actuator 放行 + 推翻上一版两处结论
+
+### 本轮实测（后端重启后逐条 `curl.exe -s -i`，全是拿回来的字节，不是推断）
+
+| 探针 / 命令 | 结果 | 结论 |
+|---|---|---|
+| `GET /actuator/health` | **503** `{"groups":["liveness","readiness"],"status":"DOWN"}` | DOWN 来自 DB；Redis 探活按 §5.4 设计 `enabled=false`。未建库时它不可能 UP，别当 bug 追 |
+| `GET /actuator/health/liveness` | 修前 **401 `{"code":10002}`** → 修后 **200 `{"status":"UP"}`** | **真 bug**：`SecurityConfig.PUBLIC_MATCHERS` 只写了 `/actuator/health`，子路径落到 `anyRequest().authenticated()` |
+| `GET /actuator/health/readiness` | 修后 **200 UP** | readiness 组不含 db 指示器，所以未建库也 UP —— 别拿它当「库通了」的判据 |
+| `GET /actuator/info` | 修后 **200 `{}`** | 端点已暴露（`include: health,info,metrics`） |
+| `GET /doc.html` | **302 + `Location: /swagger-ui/index.html`** | 🔴 推翻上一版结论：`application.yml` 的 `springdoc.swagger-ui.path=/doc.html` 生效，springdoc 3.1.1 **会**服务这个路径（做重定向），「knife4j 专属」说法作废 |
+| `GET /swagger-ui/index.html` | **200 text/html** | 真正的 UI 落点 |
+| `GET /v3/api-docs` | **20 paths / 23 operations / 5 分组**（`1 认证`5 · `2 系统`4 · `3 用户`5 · `4 内容`5 · `5 管理端`4）；23 个 operation 的 summary/operationId/responses **零缺失** | Gate 2「接口 ≥ 20」**达标** → T2.10 ◐→☑，§15 阶段 2 表改 ☑10 / ◐6 |
+| `GET /api/nope`（未登录） | **401 / 10002**，不是 404 / 90006 | Security 链排在 MVC 之前，未授权的未知路径永远走不到 90006；要复现 90006 必须带合法 JWT |
+| `GET /api/topics` | **503** + `{"code":90002,"msg":"数据暂时读取不到，请稍后重试","success":false}` + `X-Trace-Id` 头 | 响应体 msg 是**面向用户的友好文案**，与 `ErrorCode` 枚举里那句技术措辞不是同一字符串，写断言别写错 |
+| `mvn -o -B test`（改后复跑） | 重编译 45 源文件 + 4 测试类，**run 22 / pass 21 / skip 1**，BUILD SUCCESS | 放行改动没打破任何东西 |
+| 启动 | `Started MindisleApplication in 4.247 seconds`（Tomcat 8080） | WARN 3 条且全不涉业务：`ResourceHandlerUtils` 给 `uploads/` 补尾斜杠（日志里中文路径显示乱码 = 控制台 GBK 显示问题，文件本身没事）、`SpringDocAppInitializer` ×2 提示 `/v3/api-docs` 与 `/doc.html` 默认开启（生产按 §5.4 关掉即可） |
+
+### 代码改动（1 个文件、1 行）
+
+- `backend/src/main/java/com/mindisle/security/SecurityConfig.java`：`PUBLIC_MATCHERS` 里在 `"/actuator/health"` 之后**新增** `"/actuator/health/**"`（并列而非替换 —— `/**` 不匹配无斜杠的根路径本身）。
+
+### 新增坑（工具与判断层）
+
+㉖ **`requestMatchers("/actuator/health")` 不覆盖子路径**：Ant 风格下 `/health` 与 `/health/**` 是两条规则，而 Actuator 的存活/就绪探针恰好都在子路径上。只放根路径 = 探针全瞎，**而且在浏览器里看不出来**（根路径自己能打开）。凡是「清单放行 + 兜底 authenticated」的写法，必须专门测带子路径的那几个。
+㉗ **`/actuator/health` 的 status 是聚合值，`liveness` / `readiness` 是分组值，三者可以互相矛盾**：本轮实测 health=DOWN 而两个探针同时 UP。写监控、写答辩材料都要标明用的是哪一个，否则「健康检查通过」这句话本身就是错的。
+㉘ **`exec_command` 传 PowerShell 时 `$var` 会被吞**（本轮 `$wd=...` 变成空串，`Start-Process -WorkingDirectory` 直接报缺参）。规则同 ㉕：**命令行里一律不写 `$`**，路径用字面量；真需要变量就落一个带 BOM 的 .ps1 再执行。
+㉙ **别用「依赖里有哪个包」去推断「有哪些 endpoint」**：`swagger-ui.path` 是配置项，`/doc.html` 通不通只有 `curl -i` 说话算数。上一版就是没读 `application.yml` 就否掉了手册的结论 —— 手册 §14 第 10 条其实早就写对了。
+
+### 文档同步（同一轮全部落盘）
+
+- 手册：§5.6 加放行清单实测修正注；§5.10 第 2、3 条按实测重写（第 3 条转 ☑）；§15 T2.10 ◐→☑、收工口径 ☑9/◐7 → **☑10/◐6**；§18 Gate2 行、§19 v1.1.3 行与「下一步」同步。
+- README：`四·补` 接口文档地址改对 + 加健康检查行；进度区加「2026-09-20 阶段 2 复核修正」一条。
+- 需求文档与调研文档本轮**未改**（31 表口径、题目、技术栈均未变）。
+
+### 仍未做（截至本轮，别自我感觉良好）
+
+- 31 表 DDL **仍未被 MySQL 解析器执行过**；`contextLoads` 仍 skip；注册→登录→`/api/users/me` 链路仍未跑通 —— 三件都卡在 `docs\init-db.ps1` 这一个用户动作上。
+- 词云运行时渲染 spike 未做；`docs/gate/` 证据目录仍未创建；`backend/run.bat`、`docs/rebuild.ps1`、`sql/gen_seed.py` 未建；`mvn -o dependency:tree` 输出未存档。
+- 阶段 1B（开题报告 / 文献综述 / 线框图）按用户 2026-09-18 指令顺延，未开始；R21 截止由用户盯办。
