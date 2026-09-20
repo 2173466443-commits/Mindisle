@@ -178,3 +178,65 @@
 - 31 表 DDL **仍未被 MySQL 解析器执行过**；`contextLoads` 仍 skip；注册→登录→`/api/users/me` 链路仍未跑通 —— 三件都卡在 `docs\init-db.ps1` 这一个用户动作上。
 - 词云运行时渲染 spike 未做；`docs/gate/` 证据目录仍未创建；`backend/run.bat`、`docs/rebuild.ps1`、`sql/gen_seed.py` 未建；`mvn -o dependency:tree` 输出未存档。
 - 阶段 1B（开题报告 / 文献综述 / 线框图）按用户 2026-09-18 指令顺延，未开始；R21 截止由用户盯办。
+
+---
+
+## 2026-09-20 阶段 3 开工 —— 敏感词引擎 + 马甲规则 + 频率规则（只挑可离线验证的地基先做）
+
+### 交付物（全部为实测计数，不是计划）
+
+| 类型 | 文件 | 实测事实 |
+|---|---|---|
+| 引擎 | `backend/src/main/java/com/mindisle/audit/SensitiveWordEngine.java` | DFA/Trie、最长匹配优先、词级正则旁路、BLOCK/REVIEW 分级、命中位置回映射原文、`dict:version` 广播热更新；后端启动日志实录 `version=v0.1 词条=139 其中 regex=5` |
+| 归一化 | 同包 `TextNormalizer.java` | NFKC 折全半角 + 小写 + 去 Ignorable + 77 对折叠表（24 西里尔 + 53 繁简）；每对「码点 ⇄ 注释字符」已用 node 逐对校验一致 |
+| 词库 | `backend/src/main/resources/dict/sensitive_words_v0.1.txt` | 145 行 = **139 词条 / 5 条正则** / 7 大类（政治违法 20、色情低俗 20、辱骂攻击 20、自伤自杀 20、隐私泄露 19、广告导流 20、医疗越界 20） |
+| 脚本 | `docs/export-sensitive-dict.mjs` | 把 jar 内快照导出成盘外可写文件，为 `mindisle.audit.dict-path` 的热更新铺路 |
+| 业务 | `com/mindisle/post/AnonymousAliasService.java` | FR1.4 取名（前缀 + 40 名池 + 序号回绕）+ BR1 全站一匹唯一 + 幂等 + 并发撞唯一键回退对手别名 |
+| 业务 | 同包 `PostingQuotaService.java` | BR5（新手 24h 内 ≤5 帖、老用户 ≤20）+ BR6（禁言可读不可写）+ 评论 20 条每帖 |
+| 持久层 | `entity/AnonymousAlias.java`、`mapper/AnonymousAliasMapper.java` | 列与 `sql/01_account.sql` 的 `anonymous_alias` 一一对应 |
+| 接口 | `web/AuditController.java` | `POST /api/audit/precheck`（FR4.1 实时提醒）+ `GET /api/admin/audit/tasks`（未实现分支返回 `NOT_IMPLEMENTED 90001/501`，**不返回 mock**） |
+| 配置 | `MindisleProperties.Audit` + `application.yml` | 新增 `audit.dict-resource` / `dict-path` / `dict-check-millis` / `quota.*` 外置项 |
+| 测试 | 4 个新测试类 | 全项目 `mvn test` = **66 例 0 失败 1 跳过**（阶段 2 为 22 例） |
+
+### 本轮真实踩到的 8 个坑（每条都有日志或测试证据）
+
+1. **编译阻塞**：换行界写成 `split("\R")`，Java 字符串字面量里单反斜杠 + 大写 R 不是合法转义（正则的 `\R` 必须在源码里双写）。**教训：每写完一个文件立刻编译，别攒一批再 build** —— 上一轮就因此把 4 个文件的错一起引爆。
+2. `refreshIfStale` 用 `interval <= 0` 判「关闭热更新」，而配置侧期望 `0 = 每次都查`（对齐 `setDictCheckMillis(0)` 语义）→ 改为 `interval < 0` 才关闭，javadoc 写清三态。
+3. 测试语料「微信号 abc_def12」中间夹「号」字不匹配微信正则，属**假阴性**；改「微信：abcd_1234」（全角冒号靠 NFKC 自动折半角）后实测命中。
+4. `prefersExternalSnapshotWhenConfigured` 原本是**假测试**：把带 `classpath:` 前缀的值塞进 `dictPath`，拼成 `file:classpath:` 之后两个分支都回落内嵌词库，断言恒真。改成 `@TempDir` 真写盘外快照并断言 `version=external-1 / wordCount=1`（证明「优先外置」这条分支真走了），再断言文件缺失时回落 139 条 v0.1。
+5. 繁简折叠表**码点写错**：`\u68aa` 是「梪」，「槍」是 U+69CD。肉眼完全看不出来，只有逐对校验能发现 —— 改完实测繁→简折叠通过。
+6. `TextNormalizer.isIgnored` 漏删 U+00B7 间隔号，导致「敏·感词」折不成「敏感词」，这是**引擎真实缺口**而非测试问题。
+7. `Normalized.toRawRange()` 旧语义「终点取下一个保留字符起点」会把命中之后的空格一起吞进高亮区间。改为**起点 = 第一个命中单元的原文下标、终点 = 最后一个命中字符的末尾**：词内被删掉的分隔符仍覆盖，词后的空格不吞；越界与退化只做 clamp 不抛异常，并补 sourceIndex 与边界断言。
+8. **最严重：测试绿、线上红。** `dict-resource` 配裸路径 `dict/x.txt` 时，单测用 `DefaultResourceLoader` 全绿，但 Boot 运行期注入的是 **Servlet Web 容器上下文**，同一字符串被解析成 `ServletContext resource [/dict/x.txt]`，**后端启动直接失败**（日志实录「词库文件不存在：ServletContext resource [...]」）。修法三件套：Java 与 yml 两处默认值都写显式 `classpath:` 前缀 + 引擎侧 `withClasspathPrefix()` 兜底归一（放行以 `/` 开头及 `classpath:` `file:` `jar:` `http:` `https:`）+ 自写 `ServletStyleResourceLoader` 内部类复刻容器语义的回归测试 `normalizesBarePathForServletStyleLoader`。附带一条硬知识：**Spring 7 的 `ResourceLoader` 不是函数式接口**（`getResource` 与 `getClassLoader` 都是抽象方法），lambda 会报「找到多个非覆盖抽象方法」，只能写内部类；查接口方法用 `javap -cp <jar> <类全名>`。
+
+另修两处小错：`post/AnonymousAliasService.java` 漏 `import com.mindisle.entity.AnonymousAlias`（编译错误）；`PostingQuotaService` javadoc 第三条与代码不一致（null 与空串 status 实际按 ACTIVE 放行），把文档改准并在测试里钉住。
+### 实测记录（每条都对应一次真实执行）
+
+| 动作 | 结果 |
+|---|---|
+| `mvn -o -B test`（`-Dmaven.repo.local` 指 E 盘缓存） | **Tests run: 66, Failures: 0, Errors: 0, Skipped: 1** —— Engine 17 / Quota 12 / Alias 10 / Normalizer 5 / Captcha 6 / Result 7 / Jwt 8；skip 仍是需真实库的 `MindisleApplicationTests` |
+| 后端启动 | `Started MindisleApplication in 4.044 seconds`（PID 6696），Tomcat 8080；`c.m.a.SensitiveWordEngine - 敏感词库已加载：version=v0.1 词条=139 其中 regex=5` |
+| 日志里 `Filter jwtAuthFilterRegistration was not registered (disabled)` | **预期行为**，非 bug：`SecurityConfig` 用 `FilterRegistrationBean.setEnabled(false)` 防 JWT 过滤器被容器自动注册 + Security 链注册两次，类注释已写明 |
+| `POST /api/audit/precheck` 三种非法请求（无 token / 坏 token / 空白 body） | 全部 **401 + code 10002「请先登录」** ✅ 与类注释一致：precheck 不进 permitAll，避免游客拿它白嫖探测词库 |
+| `GET /api/system/info` | 200，`cacheMode=local`、`llmProvider=spring-ai`、`javaVersion=17.0.19` |
+| `GET /actuator/health` | **503**（未建库所致，属预期） |
+| `GET /v3/api-docs` | **paths 21 / operations 24**（阶段 2 为 20/23） |
+| `GET /v3/api-docs/swagger-config` 后逐分组拉取 | **6 个分组全部 200**；新分组「06-audit 内容安全」= paths 1 / ops 1（`/api/audit/precheck`）；`/api/admin/audit/tasks` 归在「05-admin 管理端」；各组 paths 相加 5+3+5+3+4+1=21 与总数吻合 |
+
+> 上一次复核时我拉 `/v3/api-docs/06-audit 内容安全` 得到 `paths: []`，据此差点写「分组不匹配」。**那是我 URL 没编码的测量假象**：分组名含空格与中文，必须 `encodeURIComponent`，重测即 200 且内容正确。结论：接口文档分组名一律含中文，任何「拉不到」先怀疑编码。
+
+### 同轮文档与 SQL 对齐
+
+- `sql/01_account.sql` 第 82 行 `alias_name` 列注释：「匿名树洞·雾屿 07」→「匿名屿民·阿澜（需求 FR1.4）」，与代码常量、需求 FR1.4 三方一致（DDL 尚未落库，改动零风险）。
+- 手册升 **v1.1.4**：§6.1 追加实测注（6 条）、§15 阶段 3 表 **T3.2 / T3.4 / T3.12 ☐→◐**（其余 14 项仍 ☐）并加「阶段 3 首批收工口径」、§18 Gate3 改「◐ 进行中」、§19 加 v1.1.4 变更行并重写「下一步」。任务总数 / 人日 / 追溯矩阵 / Gate 行数**均未变**（117 / 144.30 / 101 / 10）。
+- README：测试数 22 → 66、新增 `/api/audit/precheck`、接口文档分组 5 → 6。
+
+### 仍未做（截至本轮，别自我感觉良好）
+
+- **涉库仍是 ◐**：马甲落库只在内存 fake（`InMemoryRepository`）里验过，没碰过真表；`user_post_stat` 落库、**T3.3 发帖状态机**、T3.1 上传、T3.5–T3.17 全部未开工。阶段 3 的 17 项里 14 项还是 ☐。
+- `/api/audit/precheck` 的 **200 响应体未经真实 HTTP 验证**：`JwtService.validate` 白名单 fail-closed（`user:token:{uid}` 必须等于 jti），本地手造 token 必返 10005，而登录注册又需真实库 —— 已验证的是 401 语义、路由与安全接线、以及引擎层 17 例单测，**不许对外声称已联调**。
+- 词库热更新只接通「版本号广播 → 重载」这半条，词库来源仍是 jar 内 classpath 快照；盘外可写快照链路（`dict-path` + T6.2 管理端写操作）未建。
+- 频率计数在缓存里，**重启丢当日额度**；禁言判定 peek-then-incr **非原子**（并发最多多放 1 帖）。两条妥协已写进 javadoc，属公开债不是隐藏债。
+- 归一化删空白有**已知误报**：日期与手机号粘连可能命中银行卡正则 → 隐私泄露组只给 REVIEW 不 BLOCK，这个取舍要写进论文局限。
+- 31 表 DDL 至今**从未被 MySQL 解析器执行过**；词云运行时渲染仍未验证；`docs/gate/` 证据目录仍未创建；阶段 1B（开题 / 文献 / 线框）按用户 2026-09-18 指令顺延。
+- Git：**未打 tag**（Gate 3 未过，只提交不标记）；本轮全部代码与文档改动在同一次提交内收口。

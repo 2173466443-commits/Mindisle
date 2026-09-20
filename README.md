@@ -1,6 +1,6 @@
 # 009_心屿（MindIsle）· AI 心理陪伴与情感支持社区平台（毕业设计）
 
-> 项目编号 009 ｜ 立项 2026-09-17 ｜ 当前阶段：**阶段 2 代码侧完工**（31 表 DDL + 后端骨架 + 用户端/管理端骨架，双端构建通过、21 项单测绿）；**唯一阻塞：待用户本机跑 `docs\init-db.ps1` 建库**，在那之前所有涉库接口按设计返回 HTTP 503 + 业务码 90002。开题材料（阶段 1B）按用户 2026-09-18 指令顺延，不再排在代码之前。
+> 项目编号 009 ｜ 立项 2026-09-17 ｜ 当前阶段：**阶段 3 已开工**（首批只做可离线验证的三块地基：敏感词引擎 / 马甲规则 / 频率规则，`mvn test` 实测 **66 例 0 失败 1 跳过**；社区主线 T3.3 发帖状态机尚未开工）；**唯一阻塞：待用户本机跑 `docs\init-db.ps1` 建库**，在那之前所有涉库接口按设计返回 HTTP 503 + 业务码 90002。开题材料（阶段 1B）按用户 2026-09-18 指令顺延，不再排在代码之前。
 > 论文题目（推荐）：**《基于大语言模型与情绪感知协同过滤算法的校园心理陪伴社区平台的设计与实现》**
 > 英文题目：*Design and Implementation of a Campus Psychological Companionship Community Platform Based on Large Language Model and Emotion-Aware Collaborative Filtering*
 >
@@ -12,7 +12,7 @@
 | 文件 | 作用 |
 |---|---|
 | `需求分析文档.md`（**v1.2.1**） | 做什么、做到什么标准：FR1–FR10 / NFR / BR / 算法与实验设计 / 里程碑 / DoD / 论文章节映射；§15 风险表已并入调研新增的 **R12–R21**，§7.2 表清单口径统一为「24 个编号行 = **31** 张物理表」（v1.2.1 把「单独同意」拆成独立 `user_consent` 表） |
-| **`制作步骤文档.md`（v1.1.3）** | **怎么一步步做**：技术栈定版、阶段 0–9 施工步骤与可复制命令、Gate 验收（含 §18 Gate 判定汇总 10 行）、30 条常见故障速查、117 项任务打勾总表（**144.3 人日 ≈ 577 小时**，日历 ≈32 周）、§17 三向追溯矩阵 101 行（FR 74 + NFR 12 + BR 12 + AR 3）、§19 交付自检。**当前 v1.1.3 = 阶段 2 实测回写**：表数 30→31、`user_consent` 独立建表、申诉表定名 `post_appeal`、`00_create_db_and_user.sql` 实名、词云 R19 依赖层关闭（运行时渲染仍待验证）、§5.8 与 §5.10 逐条对账 |
+| **`制作步骤文档.md`（v1.1.4）** | **怎么一步步做**：技术栈定版、阶段 0–9 施工步骤与可复制命令、Gate 验收（含 §18 Gate 判定汇总 10 行）、30 条常见故障速查、117 项任务打勾总表（**144.3 人日 ≈ 577 小时**，日历 ≈32 周）、§17 三向追溯矩阵 101 行（FR 74 + NFR 12 + BR 12 + AR 3）、§19 交付自检。**当前 v1.1.4 = 阶段 3 首批开工回写**（其下条目为 v1.1.3 的阶段 2 回写，仍然有效）：表数 30→31、`user_consent` 独立建表、申诉表定名 `post_appeal`、`00_create_db_and_user.sql` 实名、词云 R19 依赖层关闭（运行时渲染仍待验证）、§5.8 与 §5.10 逐条对账；**v1.1.4（2026-09-20）新增**：敏感词引擎 + 马甲规则 + 频率规则三块地基落地并测绿（66 例单测）、§15 阶段 3 表 **T3.2/T3.4/T3.12 由 ☐ 升 ◐**（其余 14 项仍 ☐）、§18 Gate3 改「◐ 进行中」、OpenAPI 实测 **21 paths / 24 operations / 6 分组**、本轮修掉 **8 处真实缺陷**（最贵一条：裸路径在 Servlet 容器 ResourceLoader 下解析成 `ServletContext resource [...]`，测试绿线上红） |
 | `同类项目调研与实现方案.md`（**已定版 + §10 增补**） | ✅ Gate 1 产出：18 个同类项目档案 + 横向对比 + 许可证核查 + §6 实现方案 + §7 风险 R12–R21。**SOP 关卡已过，§0–§9 转只读**，开工后的事实以 **§10「阶段 2 施工实测回写」** 追加（表数 31、R19 只关一半、毕设材料顺延） |
 
 ## 二、项目目标（四件事缝成一条闭环）
@@ -53,7 +53,7 @@
 └─ 论文材料/        prompts/ experiments/{data,scripts,output,figs}/ 截图/ 图表/ 论文草稿/ 答辩/
 ```
 
-## 四·补 怎么跑起来（阶段 2 现状）
+## 四·补 怎么跑起来（阶段 2 完工 + 阶段 3 首批已开工）
 
 ```powershell
 # 0) 只跑一次：建库建用户（root 口令交互输入，脚本不落盘口令）
@@ -65,7 +65,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\docs\start-redis.ps1
 
 # 2) 后端（8080）
 cd backend; mvn -o spring-boot:run
-#    接口文档：http://127.0.0.1:8080/doc.html → 302 → /swagger-ui/index.html（200）；OpenAPI 描述在 /v3/api-docs（实测 20 paths / 23 operations / 5 分组）
+#    接口文档：http://127.0.0.1:8080/doc.html -> 302 -> /swagger-ui/index.html（200）；OpenAPI 描述在 /v3/api-docs（2026-09-20 实测 21 paths / 24 operations / 6 分组；分组名含中文与空格，脚本拉取必须先做 URL 编码，否则拿到空 paths 会误判成分组不匹配）
 #    验证码：http://127.0.0.1:8080/api/auth/captcha → {captchaId, imageBase64}
 #    未建库时涉库接口返回 HTTP 503 + {"code":90002}，这是设计好的降级，不是崩了
 #    健康检查：/actuator/health/liveness 与 /readiness 免登录可查（200 UP）；/actuator/health 整体在未建库时是 503 DOWN，属设计内降级
@@ -89,6 +89,13 @@ npm install; npm run dev
 - [x] **阶段 2（数据库 + 三端骨架）代码侧完工 —— 2026-09-18**：31 表 DDL + 索引 + 种子脚本落盘（**尚未在真实 MySQL 执行**）；后端 45 类编译通过、8080 启动、`mvn test` **21 通过 + 1 跳过**、`/api/auth/captcha` 与降级/401/405 全实测；`frontend`（8 视图）与 `admin`（17 文件）双端 `npm install` + `npm run build` 通过
 - [x] **2026-09-20 阶段 2 复核修正**：修 `SecurityConfig` 放行清单漏 `/actuator/health/**`（修前 liveness/readiness 被拦成 401）；OpenAPI 实测 **20 paths / 23 operations / 5 分组**、注解零缺失，`/doc.html` 经 `springdoc.swagger-ui.path` 302 到 `/swagger-ui/index.html` —— 上一版「/doc.html 是 knife4j 专属、本工程不可用」的说法**作废**；重跑 `mvn -o -B test` 仍 **21 通过 + 1 跳过**（BUILD SUCCESS，后端已在 8080 复起）
 - [ ] **当前唯一待办（用户侧）**：本机跑 `docs\init-db.ps1` 建 `mindisle` 库与应用账号 → 把口令写进 `backend/.env` 的 `DB_PASSWORD` → 重启后端（`/actuator/health` 由 503 DOWN 转 200 UP 即建库成功的信号）→ 涉库接口从 HTTP 503/90002 转正常，Gate 2 才能从 ◐ 转 ☑
+- [x] **阶段 3 首批开工 —— 2026-09-20（可离线验证的三块地基）**：
+  - `com.mindisle.audit`：**DFA 敏感词引擎**（最长匹配优先 + 词级正则旁路 + BLOCK/REVIEW 分级 + 命中位置回映射原文 + `dict:version` 广播热更新）与**变体归一化**（NFKC 折全半角、小写、去零宽与空白、77 对形近与繁简折叠）；词库快照 `dict/sensitive_words_v0.1.txt` = **139 词条 / 5 条正则 / 7 大类**；导出脚本 `docs/export-sensitive-dict.mjs`。
+  - `com.mindisle.post`：**马甲分配与 BR1 去重**（FR1.4「匿名屿民·X」、40 名池、幂等、并发撞唯一键回退）与**发帖配额与禁言语义**（BR5 新手 24h ≤5 帖 / 老用户 ≤20、跨自然日重置、BR6 禁言可读不可写且不消耗额度），含 `AnonymousAlias` 实体与 Mapper。
+  - `AuditController`：`POST /api/audit/precheck`（发布页敏感词实时提醒，未登录实测 **401 + 10002**）+ `GET /api/admin/audit/tasks`（未实现分支返回 `90001/501`，**无 mock 数据**）。
+  - 单测：`mvn -o -B test` = **Tests run: 66, Failures: 0, Errors: 0, Skipped: 1**（Engine 17 / Quota 12 / Alias 10 / Normalizer 5 + 原有 21；skip 为需真实库的 `MindisleApplicationTests`）；OpenAPI 复核 **21 paths / 24 operations / 6 分组**。
+  - **诚实边界**：涉库部分仍是 ◐（马甲与配额只在内存 fake 里验过），precheck 的 **200 响应体未经真实 HTTP 验证**（白名单 fail-closed + 无库无法登录）；配额计数在缓存中，重启丢、且 peek-then-incr 非原子最多多放 1 帖（均已写入 javadoc）。
+
 - [ ] 阶段 3：社区核心（发帖—列表—详情—互动—匿名树洞—举报—频率限制）→ 阶段 4 AI+情绪+危机 → 阶段 5 私信 → 阶段 6 管理端 → 阶段 7 推荐与实验 → 阶段 8 测试 → 阶段 9 论文
 - [ ] **阶段 1B（开题报告 / 文献综述 ≥15 篇含 ≥5 英文 / 23 页线框 / ER 图 / 架构图 3 张）—— 按用户 2026-09-18 指令「毕设材料先不用写」顺延**；风险 R21（2026-10 上旬截止）改由用户盯办
 - [x] **论文材料目录骨架**：`论文材料/`（prompts · experiments/{data,scripts,output,figs} · 截图 · 图表 · 论文草稿 · 答辩）

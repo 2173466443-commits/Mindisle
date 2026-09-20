@@ -120,6 +120,16 @@ mindisle:
     alert-ratio: 0.8
   crisis:
     hotline: ${CRISIS_HOTLINE:12356}
+  audit:                       # 任务 T3.2 敏感词引擎（需求 FR7.1）
+    dict-resource: classpath:dict/sensitive_words_v0.1.txt  # jar 内置快照；前缀必须显式写，见 MindisleProperties.Audit 注释
+    dict-path: ${MINDISLE_DICT_PATH:}             # 指向日志盘可写快照时才启用真热更新，见 §6.1 行 3.2
+    dict-check-millis: 60000                       # 两次比对版本号的节流间隔，避免每次检测读缓存
+    dict-version-key: dict:version                 # 管理端 T6.2 改词后写这个键广播
+  quota:                         # 任务 T3.12 频率与风控（需求 BR4/BR5/BR6）
+    newbie-window-hours: 24
+    newbie-daily-posts: 5
+    daily-posts: 20
+    daily-comments-per-post: 20
 
 logging:
   pattern:

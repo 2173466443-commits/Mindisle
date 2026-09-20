@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS `user_consent` (
 CREATE TABLE IF NOT EXISTS `anonymous_alias` (
   `id`               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
   `user_id`          BIGINT UNSIGNED NOT NULL COMMENT '逻辑外键 user.id',
-  `alias_name`       VARCHAR(32)     NOT NULL COMMENT '马甲名，如 匿名树洞·雾屿 07',
+  `alias_name`       VARCHAR(32)     NOT NULL COMMENT '马甲名，如 匿名屿民·阿澜（需求 FR1.4）',
   `scene`            ENUM('HOLE','HELP','FEEDBACK','ALL') NOT NULL DEFAULT 'ALL' COMMENT '生效场景，树洞/求助/建议分域匿名',
   `revealed_log_id`  BIGINT UNSIGNED NULL COMMENT '解匿审计指向 admin_op_log.id，仅 SUPER 可写（A9）',
   `created_at`       DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',

@@ -13,7 +13,7 @@ import org.springframework.context.annotation.Configuration;
 /**
  * OpenAPI 分组（springdoc-openapi 3.1.1，见手册 §5.3）。
  *
- * <p>分组口径与 Gate 2 验收一致：在 /doc.html 的下拉里能看到 5 个分组、接口总数不少于 20，
+ * <p>分组口径与 Gate 2 验收一致：在 /doc.html 的下拉里能看到分组列表（阶段 2 为 5 个，阶段 3 起增加「06-audit 内容安全」共 6 个）、接口总数不少于 20，
  * 论文第 6 章接口清单按同一口径统计，避免答辩时数字对不上。</p>
  */
 @Configuration
@@ -56,5 +56,10 @@ public class OpenApiConfig {
     @Bean
     public GroupedOpenApi adminApi() {
         return GroupedOpenApi.builder().group("05-admin 管理端").pathsToMatch("/api/admin/**").build();
+    }
+
+    @Bean
+    public GroupedOpenApi auditApi() {
+        return GroupedOpenApi.builder().group("06-audit 内容安全").pathsToMatch("/api/audit/**").build();
     }
 }
