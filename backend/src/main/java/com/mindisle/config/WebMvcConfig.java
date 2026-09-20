@@ -5,6 +5,7 @@ import java.nio.file.Paths;
 
 import com.mindisle.cache.CacheService;
 import com.mindisle.ratelimit.RateLimitInterceptor;
+import com.mindisle.upload.ImageUploadService;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
@@ -35,6 +36,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         Path dir = Paths.get(properties.getUpload().getDir()).toAbsolutePath().normalize();
-        registry.addResourceHandler("/uploads/**").addResourceLocations(dir.toUri().toString());
+        registry.addResourceHandler(ImageUploadService.URL_PREFIX + "/**")
+                .addResourceLocations(dir.toUri().toString());
     }
 }

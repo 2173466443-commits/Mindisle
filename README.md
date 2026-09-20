@@ -1,6 +1,6 @@
 # 009_心屿（MindIsle）· AI 心理陪伴与情感支持社区平台（毕业设计）
 
-> 项目编号 009 ｜ 立项 2026-09-17 ｜ 当前阶段：**阶段 3 已开工**（首批只做可离线验证的三块地基：敏感词引擎 / 马甲规则 / 频率规则，`mvn test` 实测 **66 例 0 失败 1 跳过**；社区主线 T3.3 发帖状态机尚未开工）；**唯一阻塞：待用户本机跑 `docs\init-db.ps1` 建库**，在那之前所有涉库接口按设计返回 HTTP 503 + 业务码 90002。开题材料（阶段 1B）按用户 2026-09-18 指令顺延，不再排在代码之前。
+> 项目编号 009 ｜ 立项 2026-09-17 ｜ 当前阶段：**阶段 3 已开工**（已做四项可离线验证的地基：敏感词引擎 / 马甲规则 / 频率规则 / **图片上传**，`mvn test` 实测 **80 例 0 失败 1 跳过**；上传接口另在跑着的服务上真实 HTTP 实测（未登录 401+10002、超 5MB 413、`GET /uploads/**` 静态读回 200 image/png）；社区主线 T3.3 发帖状态机尚未开工）；**唯一阻塞：待用户本机跑 `docs\init-db.ps1` 建库**，在那之前所有涉库接口按设计返回 HTTP 503 + 业务码 90002。开题材料（阶段 1B）按用户 2026-09-18 指令顺延，不再排在代码之前。
 > 论文题目（推荐）：**《基于大语言模型与情绪感知协同过滤算法的校园心理陪伴社区平台的设计与实现》**
 > 英文题目：*Design and Implementation of a Campus Psychological Companionship Community Platform Based on Large Language Model and Emotion-Aware Collaborative Filtering*
 >
@@ -12,7 +12,7 @@
 | 文件 | 作用 |
 |---|---|
 | `需求分析文档.md`（**v1.2.1**） | 做什么、做到什么标准：FR1–FR10 / NFR / BR / 算法与实验设计 / 里程碑 / DoD / 论文章节映射；§15 风险表已并入调研新增的 **R12–R21**，§7.2 表清单口径统一为「24 个编号行 = **31** 张物理表」（v1.2.1 把「单独同意」拆成独立 `user_consent` 表） |
-| **`制作步骤文档.md`（v1.1.4）** | **怎么一步步做**：技术栈定版、阶段 0–9 施工步骤与可复制命令、Gate 验收（含 §18 Gate 判定汇总 10 行）、30 条常见故障速查、117 项任务打勾总表（**144.3 人日 ≈ 577 小时**，日历 ≈32 周）、§17 三向追溯矩阵 101 行（FR 74 + NFR 12 + BR 12 + AR 3）、§19 交付自检。**当前 v1.1.4 = 阶段 3 首批开工回写**（其下条目为 v1.1.3 的阶段 2 回写，仍然有效）：表数 30→31、`user_consent` 独立建表、申诉表定名 `post_appeal`、`00_create_db_and_user.sql` 实名、词云 R19 依赖层关闭（运行时渲染仍待验证）、§5.8 与 §5.10 逐条对账；**v1.1.4（2026-09-20）新增**：敏感词引擎 + 马甲规则 + 频率规则三块地基落地并测绿（66 例单测）、§15 阶段 3 表 **T3.2/T3.4/T3.12 由 ☐ 升 ◐**（其余 14 项仍 ☐）、§18 Gate3 改「◐ 进行中」、OpenAPI 实测 **21 paths / 24 operations / 6 分组**、本轮修掉 **8 处真实缺陷**（最贵一条：裸路径在 Servlet 容器 ResourceLoader 下解析成 `ServletContext resource [...]`，测试绿线上红） |
+| **`制作步骤文档.md`（v1.1.5）** | **怎么一步步做**：技术栈定版、阶段 0–9 施工步骤与可复制命令、Gate 验收（含 §18 Gate 判定汇总 10 行）、30 条常见故障速查、117 项任务打勾总表（**144.3 人日 ≈ 577 小时**，日历 ≈32 周）、§17 三向追溯矩阵 101 行（FR 74 + NFR 12 + BR 12 + AR 3）、§19 交付自检。**当前 v1.1.5 = T3.1 图片上传回写**（其下条目为 v1.1.3 的阶段 2 回写，仍然有效）：表数 30→31、`user_consent` 独立建表、申诉表定名 `post_appeal`、`00_create_db_and_user.sql` 实名、词云 R19 依赖层关闭（运行时渲染仍待验证）、§5.8 与 §5.10 逐条对账；**v1.1.4（2026-09-20）新增**：敏感词引擎 + 马甲规则 + 频率规则三块地基落地并测绿（66 例单测）、§15 阶段 3 表 **T3.2/T3.4/T3.12 由 ☐ 升 ◐**（其余 14 项仍 ☐）、§18 Gate3 改「◐ 进行中」、OpenAPI 实测 **21 paths / 24 operations / 6 分组**、本轮修掉 **8 处真实缺陷**（最贵一条：裸路径在 Servlet 容器 ResourceLoader 下解析成 `ServletContext resource [...]`，测试绿线上红）；**v1.1.5（2026-09-20）新增**：**T3.1 图片上传**落地 —— 魔数白名单（只认 jpg/png/gif 文件头，扩展名与 Content-Type 一律不信）+ Thumbnailator 重编码去 EXIF + 按原格式回存（不用 WebP：FR4.1 白名单只有 jpg/png/gif 且 JDK 17 无 WebP 编码器）；§15 表 **T3.1 由 ☐ 升 ◐**（阶段 3 收工口径 **☑ 0 / ◐ 4 / ☐ 13**）、单测 66 → **80 例**、OpenAPI **21/24/6 → 22 paths / 25 operations / 7 分组**（新增 07-file）、本轮又挖出 **4 个坑**（最贵一条：MVC 静态映射被写成 `/uploads//**`，磁盘有文件而 HTTP 404、80 例单测却全绿 → 接线类改动必须在跑着的服务上打一次真实请求） |
 | `同类项目调研与实现方案.md`（**已定版 + §10 增补**） | ✅ Gate 1 产出：18 个同类项目档案 + 横向对比 + 许可证核查 + §6 实现方案 + §7 风险 R12–R21。**SOP 关卡已过，§0–§9 转只读**，开工后的事实以 **§10「阶段 2 施工实测回写」** 追加（表数 31、R19 只关一半、毕设材料顺延） |
 
 ## 二、项目目标（四件事缝成一条闭环）
@@ -47,13 +47,13 @@
 ├─ README.md  需求分析文档.md  制作步骤文档.md
 ├─ docs/            check-env.ps1 · init-db.ps1 · start-redis.ps1 · dev-log.md · diagrams/{01 架构,02 时序,03 双通道,04 ER}
 ├─ sql/             00_create_db_and_user · 01–08 建表（**31 表**）· 09_seed · 10_index · patch/
-├─ backend/         Spring Boot 4.1.1 工程（`src/main/java` 45 个类：web 5 Controller / security / common / cache / config / entity / mapper / auth / user / captcha / ratelimit）
+├─ backend/         Spring Boot 4.1.1 工程（`src/main/java` 58 个类：web 7 Controller / upload 图片上传 / audit 敏感词引擎 / post 马甲与配额 / ratelimit / security / common / cache / config / entity / mapper / auth / user / captcha（口径于 2026-09-20 重数纠正，上一版「45 类 / 5 Controller」是阶段 2 的旧值））
 ├─ frontend/        用户端 Vue 3（端口 5173，8 个视图：feed / ai / emotion / user / help / auth 登录注册 / 404）
 ├─ admin/           管理端 Vue 3（端口 5174，`src` 17 个文件：Dashboard / Login / Audit / Configs / 404 + 布局 + api 三件套 + store + 主题）
 └─ 论文材料/        prompts/ experiments/{data,scripts,output,figs}/ 截图/ 图表/ 论文草稿/ 答辩/
 ```
 
-## 四·补 怎么跑起来（阶段 2 完工 + 阶段 3 首批已开工）
+## 四·补 怎么跑起来（阶段 2 完工 + 阶段 3 地基四块已开工）
 
 ```powershell
 # 0) 只跑一次：建库建用户（root 口令交互输入，脚本不落盘口令）
@@ -65,10 +65,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\docs\start-redis.ps1
 
 # 2) 后端（8080）
 cd backend; mvn -o spring-boot:run
-#    接口文档：http://127.0.0.1:8080/doc.html -> 302 -> /swagger-ui/index.html（200）；OpenAPI 描述在 /v3/api-docs（2026-09-20 实测 21 paths / 24 operations / 6 分组；分组名含中文与空格，脚本拉取必须先做 URL 编码，否则拿到空 paths 会误判成分组不匹配）
+#    接口文档：http://127.0.0.1:8080/doc.html -> 302 -> /swagger-ui/index.html（200）；OpenAPI 描述在 /v3/api-docs（2026-09-20 复测 22 paths / 25 operations / 7 分组，新增 07-file 文件与上传；分组名含中文与空格，脚本拉取必须先做 URL 编码，否则拿到空 paths 会误判成分组不匹配）
 #    验证码：http://127.0.0.1:8080/api/auth/captcha → {captchaId, imageBase64}
 #    未建库时涉库接口返回 HTTP 503 + {"code":90002}，这是设计好的降级，不是崩了
 #    健康检查：/actuator/health/liveness 与 /readiness 免登录可查（200 UP）；/actuator/health 整体在未建库时是 503 DOWN，属设计内降级
+#    图片上传：POST /api/files/image（必须登录，未登录实测 401 + 10002）-> 落 backend/uploads/yyyy/MM/dd/uuid.<原格式> -> GET /uploads/** 读回（实测 200 image/png，字节与磁盘一致）；单张超 5MB 由容器先拒，返回 413 且响应体不是统一 Result 格式，前端要单独兜这一种
 
 # 3) 用户端（5173）/ 管理端（5174），各自目录内
 npm install; npm run dev
@@ -95,6 +96,13 @@ npm install; npm run dev
   - `AuditController`：`POST /api/audit/precheck`（发布页敏感词实时提醒，未登录实测 **401 + 10002**）+ `GET /api/admin/audit/tasks`（未实现分支返回 `90001/501`，**无 mock 数据**）。
   - 单测：`mvn -o -B test` = **Tests run: 66, Failures: 0, Errors: 0, Skipped: 1**（Engine 17 / Quota 12 / Alias 10 / Normalizer 5 + 原有 21；skip 为需真实库的 `MindisleApplicationTests`）；OpenAPI 复核 **21 paths / 24 operations / 6 分组**。
   - **诚实边界**：涉库部分仍是 ◐（马甲与配额只在内存 fake 里验过），precheck 的 **200 响应体未经真实 HTTP 验证**（白名单 fail-closed + 无库无法登录）；配额计数在缓存中，重启丢、且 peek-then-incr 非原子最多多放 1 帖（均已写入 javadoc）。
+
+- [x] **2026-09-20 阶段 3 续 —— T3.1 图片上传（第四块可离线验证地基）**：
+  - `com.mindisle.upload.ImageUploadService`：三道闸（字节数 → 魔数只认 jpg/png/gif 文件头 → 真解码），任一失败**不落盘**；`Thumbnails` 重编码（长边 ≤1600、只缩不放、JPEG 0.82）顺带剥掉 EXIF；按**输入原格式**回存到 `upload.dir/yyyy/MM/dd/uuid32.<ext>`，返回 `url/kind/width/height/bytes`，宽高来自回读落盘字节而非客户端声明。
+  - `web/FileController`：`POST /api/files/image`（`@RequestPart` + `@AuthenticationPrincipal`）；`ErrorCode` 新增 **70001 FILE_TOO_LARGE / 70002 FILE_TYPE_NOT_ALLOWED / 70003 FILE_DECODE_FAILED / 70004 FILE_STORE_FAILED**；`OpenApiConfig` 新增 **07-file 文件与上传** 分组；`application.yml` 的 `mindisle.upload` 由 1 字段扩到 5 字段（dir / maxBytes / maxEdge / jpegQuality / maxImagesPerPost）。
+  - 单测：新增 `ImageUploadServiceTest` **14 例**（不启 Spring、不用 Mockito，`@TempDir` 直接 new 服务）→ `mvn -o -B test` = **Tests run: 80, Failures: 0, Errors: 0, Skipped: 1**（复测于 2026-09-20 12:1x）。
+  - 真实 HTTP 实测（**默认配置实例**，非临时 env 覆盖）：未登录真 multipart（node 造合法 PNG，curl 与 node 各发）→ **401 + `{"code":10002}` 带 `X-Trace-Id`**；5MB+1KB 伪 PNG → **413**（容器 `spring.servlet.multipart` 先拒，响应体为 `{timestamp,status,error,path}`，**不是统一 Result 格式**）；往 `upload.dir` 手放 1x1 合法 PNG → `GET /uploads/probe-check.png` **200 image/png、67 字节与磁盘逐字节相同**；探针文件与目录测后已清除。
+  - **诚实边界**：登录后的 **200 成功链路仍未做真实 HTTP 验证**（白名单 fail-closed + 无库取不到 token）；`maxImagesPerPost=9` **当前无调用方**，校验点在 T3.3 发帖；GIF 重编码**只保首帧**；`upload.dir` 是相对路径，换工作目录启动会换落盘位置；**不用 WebP**（FR4.1 白名单只有 jpg/png/gif，且 JDK 17 的 ImageIO 无 WebP 写实现）。
 
 - [ ] 阶段 3：社区核心（发帖—列表—详情—互动—匿名树洞—举报—频率限制）→ 阶段 4 AI+情绪+危机 → 阶段 5 私信 → 阶段 6 管理端 → 阶段 7 推荐与实验 → 阶段 8 测试 → 阶段 9 论文
 - [ ] **阶段 1B（开题报告 / 文献综述 ≥15 篇含 ≥5 英文 / 23 页线框 / ER 图 / 架构图 3 张）—— 按用户 2026-09-18 指令「毕设材料先不用写」顺延**；风险 R21（2026-10 上旬截止）改由用户盯办

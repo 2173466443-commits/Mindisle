@@ -45,7 +45,16 @@ public class MindisleProperties {
 
     @Data
     public static class Upload {
+        /** 落盘根目录（相对后端工作目录）；静态映射 /uploads/** 见 WebMvcConfig。 */
         private String dir = "./uploads";
+        /** 单张字节上限（需求 FR4.1：单张 ≤5MB）。服务端自己的这道闸排在解码之前，不依赖容器配置。 */
+        private long maxBytes = 5L * 1024 * 1024;
+        /** 重编码后的长边上限（手册 §6.1 任务 3.1：1600px）。只缩不放，小图不会被插值放大。 */
+        private int maxEdge = 1600;
+        /** JPEG 重编码质量；PNG 与 GIF 是无损的，这个值对它们无效。 */
+        private float jpegQuality = 0.82f;
+        /** 单帖图片张数上限（需求 FR4.1：0–9 张），真正的校验发生在发帖（任务 T3.3）。 */
+        private int maxImagesPerPost = 9;
     }
 
     @Data

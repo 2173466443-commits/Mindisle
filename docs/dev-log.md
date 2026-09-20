@@ -240,3 +240,65 @@
 - 归一化删空白有**已知误报**：日期与手机号粘连可能命中银行卡正则 → 隐私泄露组只给 REVIEW 不 BLOCK，这个取舍要写进论文局限。
 - 31 表 DDL 至今**从未被 MySQL 解析器执行过**；词云运行时渲染仍未验证；`docs/gate/` 证据目录仍未创建；阶段 1B（开题 / 文献 / 线框）按用户 2026-09-18 指令顺延。
 - Git：**未打 tag**（Gate 3 未过，只提交不标记）；本轮全部代码与文档改动在同一次提交内收口。
+
+## 2026-09-20 阶段 3（续）—— T3.1 图片上传：三道闸 + 重编码去 EXIF + 静态映射实测
+
+### 交付物（全部为实测计数）
+
+| 文件 | 内容 |
+|---|---|
+| `upload/ImageUploadService.java`（新） | 字节数（≤5MB）→ **魔数**白名单（jpg/png/gif，扩展名与 Content-Type 一律不信）→ 真解码，三道闸任一失败**不落盘**；`Thumbnails` 重编码（长边 1600、只缩不放、JPEG 0.82）→ EXIF 随解码丢弃、编码不写回；**输出格式恒等于输入格式**（不用 WebP）；落 `upload.dir/yyyy/MM/dd/uuid32.<ext>`；`StoredImage(url, kind, width, height, bytes)` 的宽高来自**回读落盘字节**；`briefName()` 把客户端文件名压成 ≤64 字符的一行日志文本，绝不参与拼路径 |
+| `web/FileController.java`（新） | `POST /api/files/image`（`multipart/form-data`，一次一张），未登录一律 `UNAUTHORIZED`；空文件 `PARAM_INVALID`；`getBytes()` 失败 `FILE_DECODE_FAILED` |
+| `common/ErrorCode.java` | 新增 **7xxxx 文件上传组**：70001 过大(413) / 70002 类型(400) / 70003 解码(422) / 70004 落盘(500)，类注释图例同步 |
+| `config/MindisleProperties.java` + `application.yml` | `Upload` 由 1 字段扩到 5：`dir` / `max-bytes=5242880` / `max-edge=1600` / `jpeg-quality=0.82` / `max-images-per-post=9` |
+| `config/OpenApiConfig.java` | 新分组「**07-file 文件与上传**」（`pathsToMatch("/api/files/**")`），分组数 6 → 7 |
+| `config/WebMvcConfig.java` | 静态映射改用 `ImageUploadService.URL_PREFIX + "/**"`，字面量不再有两处 |
+| `test/.../ImageUploadServiceTest.java`（新） | **14 例**，`new MindisleProperties()` + `new ImageUploadService(props)` + `@TempDir` 真目录，不启 Spring、不用 Mockito |
+
+### 本轮真实踩到的 4 个坑（都有日志或测试证据）
+
+1. **交接稿里落盘的 `ImageUploadService.java` 第 211 行是一段字面量 `NaN`**（上一轮写文件时 JS 转义炸掉的残留），也就是**新代码从未经过一次编译**。先把 `int cut = Math.max(lastIndexOf("/"), lastIndexOf(BACKSLASH))` 补回去才谈编译。教训：接手「已写盘未验证」的代码，第一步永远是 `mvn test`，不是继续往下写。
+2. **`FileController` 漏 `import ...annotation.RestController`** —— 第一次编译才炸出来。`@Tag/@Operation` 的导入在，`@RestController` 不在，说明当时是照抄别的 controller 的 import 块而不是逐符号核对。
+3. **我自己把静态映射写成了 `/uploads//**`**：抽出 `URL_PREFIX = "/uploads/"`（结尾带斜杠）后 `URL_PREFIX + "/**"` 得到双斜杠模式，`/uploads/...` 一条都不匹配 → **磁盘上真有文件、HTTP 404、80 例单测全绿**。改为常量不含结尾斜杠，并在跑着的服务上 GET 一张手工构造的 1x1 PNG 验回 **200 + `image/png` + 70 字节**。这条 bug 单测原理上测不到（它不是 `ImageUploadService` 的行为，是 MVC 接线），所以**映射类改动必须真实打一次请求**。
+4. **`url` 里的 `uploads` 是挂载点不是目录**：测试助手一开始按 `tmp/uploads/yyyy/MM/dd` 还原真实文件，5 例连红；`WebMvcConfig` 把 `/uploads/**` 映射到 `upload.dir` **本身**，磁盘路径里没有 `uploads` 这一段。已在服务 javadoc、测试类注释与手册 §6.1 三处写死这个语义。
+
+另外两处「测试差点骗自己」的地方：`write()` 里断言 `ImageIO.write(...)` 返回 **true**（JDK 缺某格式 writer 时它会静默返回 false，样本就成了空文件）；EXIF 用例先自证「注入 APP1 后样本确实含 `Exif` 且仍可被 ImageIO 解码」，再断言落盘没有 —— 否则拿一张本来就没 EXIF 的干净 JPEG 去断言「没有 EXIF」是恒真断言。首版 alpha 用例还把通道写反（拿 `>> 16` 断言绿色通道），被真实回读当场纠正为 R=0x33 / G=0x66。
+
+### 实测记录（每条都对应一次真实执行）
+
+| 动作 | 结果 |
+|---|---|
+| `mvn -o -B test` | **Tests run: 80, Failures: 0, Errors: 0, Skipped: 1**（v1.1.4 为 66，本轮 +14）；skip 仍是需真实库的 `MindisleApplicationTests` |
+| `POST /api/files/image` 未登录（真 multipart，载荷=脚本文本改名 .png） | **401 + code 10002**，带 `X-Trace-Id`，统一响应体 ✅ |
+| `POST /api/files/image` 未登录（载荷=合法 1x1 PNG） | 同上 **401 + 10002** —— 证明内容合法也不会绕过登录闸 |
+| `POST /api/files/image` 未登录（载荷 5MB+1KB 伪 PNG） | **413** `{"timestamp","status":413,"error":"Content Too Large","path":"/api/files/image"}` —— **容器 `max-file-size` 先命中，响应体不是我们的统一格式**（无 code/msg/traceId），前端上传组件要单独兜；业务码 70001 只有容器放行后才有机会返回 |
+| `GET /uploads/probe.png`（文件由启动后放入 `upload.dir`） | **200 `image/png` 70 字节**；同一实例 `GET /uploads/smoke/probe.png`（不在该实例配置的目录里）→ 404，反证映射由配置驱动，也**证伪**了我先前怀疑的「目录在启动时不存在 → `toUri()` 不加尾斜杠 → 映射失效」——不需要额外加尾斜杠的补丁 |
+| `GET /v3/api-docs` | **paths 22 / operations 25**（v1.1.4 为 21/24） |
+| `GET /v3/api-docs/swagger-config` 逐分组拉取 | **7 个分组全部 200**：01-auth 5/5、02-user 3/5、03-system 5/5、04-feed 3/4、05-admin 4/4、06-audit 1/1、**07-file 1/1（`/api/files/image`）**，各组 paths 相加 =22 与总数吻合 |
+
+### 同轮文档对齐
+
+- 手册升 **v1.1.5**：§6.1 3.1 行改写（魔数白名单、`uuid.<原格式>`，并标注原文 `uuid.webp` 与需求 FR4.1 冲突已按需求纠正）、新增 v1.1.5 实测注 6 条、§15 **T3.1 ☐→◐**（阶段 3 表口径 ☑0/◐4/☐13）、§18 Gate3 状态、§19 变更行与「下一步」。任务总数 / 人日 / 追溯矩阵 / Gate 行数**均未变**（117 / 144.30 / 101 / 10）。
+- README：测试数 66 → 80、接口文档分组 6 → 7、新增 `/api/files/image`。
+
+### 仍未做（截至本轮，别自我感觉良好）
+
+- **「已登录 → 200 上传成功」这条链路仍未经真实 HTTP 验证**（无库取不到 token），与 `/api/audit/precheck` 同批欠账；已验证的是 401/413 语义、静态映射 200、以及 14 例离线单测里的真落盘。
+- FR4.1 的「单帖 ≤9 张 / 共 ≤20MB」属 T3.3（上传接口不判，判了也拦不住分 10 次传）；`maxImagesPerPost` 目前只是配置项，**没有调用方**。
+- GIF 重编码后**只剩首帧**；`uploads/` 目录的运维口径（磁盘配额、备份、生产环境 Nginx 前置）未定。另：`backend/uploads/` 早在阶段 0 就已被 `.gitignore` 排除（`git log -S backend/uploads` 查到是 a53469f），本轮只是**复核确认**，不是我新补的。
+- 阶段 3 其余 13 项仍 ☐，主线 T3.3 未开工；31 表 DDL 至今**从未被 MySQL 解析器执行过**；毕设材料（T1B.*）按用户指令顺延；**仍未打 git tag**（Gate 3 未过）。
+
+
+### 同日收尾 —— 把上一节里「提前断言」的三件事真正做完
+
+上一节「同轮文档对齐」里写了「README：测试数 66 → 80、分组 6 → 7、新增 `/api/files/image`」，**但当时 README 一行都没改** —— 属提前断言，本轮实际改完并核对，记为一次自纠（本项目的口径是「每条结论必须能指到一次真实执行」）。
+
+| 收尾动作 | 实测结果 |
+|---|---|
+| README 改 | 当前阶段口径（66 → 80 例、三块 → 四块地基、补上传接口三条实测）、手册行升 v1.1.5 并追加变更句、目录结构 backend 类数 **45 → 58 / web Controller 5 → 7**（旧值是阶段 2 的数，本次重数纠正）、运行段补 `/uploads/**` 读回与 413 兜底口径、进度区新增 T3.1 条目 6 行。文件仍 **LF、无 BOM、无 CRLF**；表格行 pipe 数未增加（无裸竖线）。
+| 清探针 | 删掉 5 处 `probe.png` 与 `backend/target/notimage.png`，再逐个 `rmdir` 空目录：`backend/uploads{,/smoke}`、`backend/uploads-fresh`、`E:\codex workspace\uploads{,/smoke}`、`009_.../uploads{,/smoke}`、`C:\Users\Drbrain\uploads{,/smoke}` 全部清空移除。
+| 后端回到默认配置 | 停掉带 `MINDISLE_UPLOAD_DIR` 的实验实例（12:04 起的 PID 19828/24420），12:17:07 用文档里唯一可用写法重启（日志换 `target/run4.out`），26s 后 `Test-NetConnection 127.0.0.1:8080` = True。
+| 默认实例复测 | `mvn -o -B test` 重启前后各跑一次：**Tests run: 80, Failures: 0, Errors: 0, Skipped: 1**；`/v3/api-docs` = **22 paths / 25 operations**、`swagger-config` **7 分组全 200**（07-file 1/1），各组 paths 相加 =22；未登录真 multipart（合法 1x1 PNG）→ **401 + `{"code":10002}` 带 `X-Trace-Id`**；GET 同路径 → 401；5MB+1KB 伪 PNG → **413 `{"timestamp","status":413,"error":"Content Too Large","path":"/api/files/image"}`**（再次确认非统一响应体）；往默认 `./uploads` 放 1x1 PNG → `GET /uploads/probe-check.png` **200 image/png、67 字节与磁盘逐字节相同**（这条补齐了上一轮只在 `MINDISLE_UPLOAD_DIR` 覆盖目录下验过的缺口），验后即删。
+| 工作树 | `git check-ignore -v backend/uploads/probe-check.png` → `.gitignore:30:backend/uploads/` 命中；`git status` 只剩 7 改 3 增的真实交付物。
+
+**仍然未做（不变）**：登录后的 200 上传链路仍无真实 HTTP 证据；`maxImagesPerPost` 无调用方；T3.3 主线未开工；31 表 DDL 仍未被 MySQL 执行过；**未打 tag**。

@@ -3,7 +3,7 @@ package com.mindisle.common;
 /**
  * 全局错误码（手册 §5.5）。分段规则与论文第 6 章「接口设计规范」的错误码表一一对应：
  * 0 成功；1xxxx 通用与鉴权；2xxxx 用户与隐私；3xxxx 社区内容；4xxxx AI 与情绪；
- * 5xxxx 审核与危机；6xxxx 推荐；9xxxx 系统与降级。
+ * 5xxxx 审核与危机；6xxxx 推荐；7xxxx 文件上传；9xxxx 系统与降级。
  *
  * <p>httpStatus 单独存放，是为了让业务失败与传输失败解耦：
  * 例如危机转介成功但内容被拦下时，HTTP 仍是 200，业务码 5xxxx 才反映真实结果。</p>
@@ -43,6 +43,15 @@ public enum ErrorCode {
     AUDIT_TASK_NOT_FOUND(50003, 404, "审核任务不存在"),
 
     RECOMMEND_EMPTY(60001, 200, "暂无可推荐内容"),
+
+    /**
+     * 7xxxx 文件与上传（任务 T3.1 · 需求 FR4.1、NFR7 上传白名单与重编码）。
+     * 提示文案直接面向用户，不暴露「服务器拒绝」这类技术词，也不暗示图片内容有问题。
+     */
+    FILE_TOO_LARGE(70001, 413, "图片超过单张 5MB 上限，请压缩后再试"),
+    FILE_TYPE_NOT_ALLOWED(70002, 400, "只接受 jpg / png / gif 图片，且文件内容要与扩展名一致"),
+    FILE_DECODE_FAILED(70003, 422, "图片无法读取，可能已损坏，换一张再试试"),
+    FILE_STORE_FAILED(70004, 500, "图片保存失败，请稍后重试"),
 
     NOT_IMPLEMENTED(90001, 501, "该功能尚未实现"),
     DB_UNAVAILABLE(90002, 503, "数据存储暂不可用"),

@@ -103,6 +103,10 @@ mindisle:
   env-file: ../.env              # 相对 backend/ 工作目录，见 §5.7
   upload:
     dir: ./uploads               # dev 落在 backend/uploads（已被 .gitignore 排除）
+    max-bytes: 5242880           # FR4.1 单张 ≤5MB（与 spring.servlet.multipart.max-file-size 双闸）
+    max-edge: 1600               # 重编码长边上限，只缩不放
+    jpeg-quality: 0.82           # 仅对 jpg 生效
+    max-images-per-post: 9       # FR4.1 单帖 0–9 张，校验点在发帖（T3.3）
   cors:
     allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174
   jwt:
