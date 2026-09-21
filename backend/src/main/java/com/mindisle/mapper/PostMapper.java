@@ -3,6 +3,7 @@ package com.mindisle.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.mindisle.entity.Post;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
@@ -38,4 +39,46 @@ public interface PostMapper extends BaseMapper<Post> {
    */
   @Update("UPDATE post SET view_cnt = view_cnt + #{delta} WHERE id = #{id} AND deleted = 0")
   int increaseViewCnt(long id, long delta);
+
+  /**
+   * 用真相表重算点赞/收藏数（任务 3.6 · 需求 BR2）。
+   *
+   * <p><b>为什么是「重算」而不是「INCR + 5 分钟回写」</b>：BR2 那半句是给浏览量写的
+   * （浏览是全站写得最频的动作，见 {@link com.mindisle.post.ViewCountService}）。点赞收藏的频率差两个量级，
+   * 而缓存计数器一旦崩溃重启就会和 post_like 永久对不上——「计数与真相不一致」这种问题
+   * 在答辩现场只要被问一次就说不清。重算是一条语句内的 {@code COUNT(DISTINCT user_id)} 子查询，
+   * 写路径上把列刷成真相，<b>漂移在结构上不可能发生</b>；代价是每次互动多一次带 idx_target 前缀的
+   * 计数扫描，单目标几百行了无压力，真到十万赞量级再换成增量计数器（已写进手册 §14 的边界条目）。</p>
+   *
+   * <p>子查询读的是 post_like、更新的是 post，两张不同的表，不触发
+   * {@code ER_UPDATE_TABLE_USED}；{@code target_id = post.id} 是相关子查询，走外层行值。</p>
+   */
+  @Update("UPDATE post SET like_cnt = "
+      + "(SELECT COUNT(DISTINCT user_id) FROM post_like WHERE target_type = 'post' "
+      + "AND target_id = post.id AND action_type = 'LIKE' AND deleted = 0) WHERE id = #{id}")
+  int refreshLikeCnt(@Param("id") long id);
+
+  /** 收藏数重算，口径与 {@link #refreshLikeCnt} 完全一致，只是 action_type 换成 COLLECT。 */
+  @Update("UPDATE post SET collect_cnt = "
+      + "(SELECT COUNT(DISTINCT user_id) FROM post_like WHERE target_type = 'post' "
+      + "AND target_id = post.id AND action_type = 'COLLECT' AND deleted = 0) WHERE id = #{id}")
+  int refreshCollectCnt(@Param("id") long id);
+
+  /**
+   * 主页「获赞数」（任务 3.6 · 需求 FR1.5）。
+   *
+   * <p>只统计<b>公开且非匿名</b>的已发布帖：主页上的「他收到过多少赞」如果把自己的树洞帖
+   * 也折进来，就等于向访问者承认「这个账号还有若干匿名帖」，那是需求 FR1.4 明确不许普通用户
+   * 做到的一件事（哪怕只是一个数字）。与 {@code UserPostController} 公开主页列表的三重收窄同一口径。</p>
+   */
+  @Select("SELECT COALESCE(SUM(like_cnt), 0) FROM post "
+      + "WHERE user_id = #{userId} AND status = 'PUBLISHED' AND deleted = 0 "
+      + "AND visibility = 'public' AND is_anonymous = 0 AND alias_id IS NULL")
+  long sumReceivedLikes(@Param("userId") long userId);
+
+  /** 主页「公开帖数」，过滤条件与 {@link #sumReceivedLikes} 逐字相同，否则两个数字会互相打脸。 */
+  @Select("SELECT COUNT(*) FROM post "
+      + "WHERE user_id = #{userId} AND status = 'PUBLISHED' AND deleted = 0 "
+      + "AND visibility = 'public' AND is_anonymous = 0 AND alias_id IS NULL")
+  long countPublicPosts(@Param("userId") long userId);
 }

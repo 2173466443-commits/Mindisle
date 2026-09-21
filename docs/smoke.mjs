@@ -437,6 +437,33 @@ async function main() {
     return rr.json && rr.json.data && Array.isArray(rr.json.data.list) ? rr.json.data.list : null;
   };
   const bodyOf = function (rr) { return rr.json && rr.json.data ? rr.json.data : {}; };
+  // 翻到底取整条广场流：单页被 MAX_SIZE 夹在 50，而「某条帖子不该出现」这种否定断言在一页截断上
+  // 是恒真的——它可能只是被翻页截掉了。库里公开已发布帖一超过 50 条，首页就不等于全站
+  // （本轮冒烟第 2 次跑真的挂了就是这个原因）。所以凡判存在性，先把游标翻到底。
+  // 另外待审帖 published_at 是 NULL，在 published_at DESC 里排在流尾，不翻到底必然看不到。
+  const walkFeed = async function (token, maxPages) {
+    const all = [];
+    const seenIds = new Set();
+    let pages = 0;
+    let firstRows = null;
+    let cursor = null;
+    for (let i = 0; i < (maxPages || 40); i += 1) {
+      const rr = await listGet(token, "size=50" + (cursor ? "&beforeId=" + cursor : ""));
+      const items = itemsOf(rr) || [];
+      const fresh = items.filter(function (x) { return !seenIds.has(x.id); });
+      fresh.forEach(function (x) { seenIds.add(x.id); });
+      all.push.apply(all, fresh);
+      if (firstRows === null) { firstRows = items.slice(); }
+      pages += 1;
+      if (rr.status !== 200 || items.length === 0 || fresh.length === 0) { break; }
+      cursor = rr.json && rr.json.data ? rr.json.data.nextCursor : null;
+      if (!cursor) { break; }
+    }
+    all.firstPage = firstRows || [];  // 首页只用于证明「单页确实被截断了」，不参与存在性判定
+    all.pages = pages;
+    return all;
+  };
+
   let privateId = null, pendingId = null, publicId = null;
 
   if (seenToken) {
@@ -457,23 +484,29 @@ async function main() {
     publicId = bodyOf(r).id;
     check("12", "干净文本 → PUBLISHED，作为第 12/13 步的正面样本", r.status === 200 && bodyOf(r).status === "PUBLISHED" && !!publicId, r.status + " id=" + publicId);
 
-    r = await listGet(accessToken, "size=50");
-    const others = itemsOf(r) || [];
-    check("12", "第三人广场：公开帖在列，私密帖与待审帖整条不出现（不是置灰，是没这行）",
-      r.status === 200 && others.some(function (x) { return x.id === publicId; })
+    const others = await walkFeed(accessToken);
+    const firstPage = others.firstPage;
+    check("12", "第三人广场：公开帖在列，私密帖与待审帖整条不出现（不是置灰，是没这行）"
+      + "——在整条流上判：首页被 50 条截断时「不出现」是恒真的，不构成证据",
+      firstPage.length === 50 && others.length > firstPage.length
+      && others.some(function (x) { return x.id === publicId; })
       && !others.some(function (x) { return x.id === privateId; })
       && !others.some(function (x) { return x.id === pendingId; }),
-      "n=" + others.length + " 私密在列=" + others.some(function (x) { return x.id === privateId; }));
+      "首页=" + firstPage.length + " 全流=" + others.length + " 页=" + others.pages
+      + " 私密在列=" + others.some(function (x) { return x.id === privateId; })
+      + " 待审在列=" + others.some(function (x) { return x.id === pendingId; }));
     let dr = await detailGet(accessToken, privateId);
     check("12", "第三人打别人私密帖详情 → 404/30001（报 403 就等于承认这条存在）", dr.status === 404 && code(dr) === "30001", dr.status + " code=" + code(dr));
     dr = await detailGet(accessToken, pendingId);
     check("12", "第三人打别人待审帖详情 → 404/30001", dr.status === 404 && code(dr) === "30001", dr.status + " code=" + code(dr));
 
-    r = await listGet(seenToken, "size=50");
-    const mine = itemsOf(r) || [];
+    const mine = await walkFeed(seenToken);
     const myPending = mine.find(function (x) { return x.id === pendingId; });
-    check("12", "作者广场：自己的待审帖在列且带 auditTip（先发后审要被感知，而不是「我发的帖凭空消失」）",
-      !!myPending && String(myPending.auditTip || "").length > 0, JSON.stringify(myPending || {}).slice(0, 150));
+    check("12", "作者广场：自己的待审帖在列且带 auditTip（先发后审要被感知，而不是「我发的帖凭空消失」）"
+      // 待审帖 published_at 为 NULL，在 published_at DESC 里排在流尾，只看首页必然判不到
+      + "——在整条流上判，不是在首页上判",
+      !!myPending && String(myPending.auditTip || "").length > 0,
+      "全流 n=" + mine.length + " 页=" + mine.pages + " auditTip=" + String((myPending || {}).auditTip));
     check("12", "作者的私密已发布帖不进广场列表（广场=公共流，私密走任务 3.14 的「我的帖子」）",
       !mine.some(function (x) { return x.id === privateId; }), "n=" + mine.length);
     dr = await detailGet(seenToken, privateId);
@@ -545,6 +578,243 @@ async function main() {
       "SELECT view_cnt FROM post WHERE id = " + publicId + ";");
   } else {
     info("13", "没有可用的公开帖，本步跳过（根因在第 12 步）", "");
+  }
+
+  // ---------- 14 我的帖子 / 他人主页（任务 3.13 第二批验收主项 · U11/U12 的后端口） ----------
+  // 这一整步只用第 12 步已经真实落库的那四条帖：公开、私密、待审、匿名树洞。
+  // 四个样本在同一条列表里的进出，就是三个接口全部口径的证明，不需要任何夹具数据。
+  const has = function (list, id) { return list.some(function (x) { return x.id === id; }); };
+  const idsOf = function (list) { return list.map(function (x) { return x.id; }).join(","); };
+  const myPostsGet = function (token, qs) {
+    return send("GET", "/api/users/me/posts" + (qs ? "?" + qs : ""),
+      token ? { headers: { Authorization: "Bearer " + token } } : {});
+  };
+  const profileGet = function (token, id, qs) {
+    return send("GET", "/api/users/" + id + "/posts" + (qs ? "?" + qs : ""),
+      { headers: { Authorization: "Bearer " + token } });
+  };
+  let anonHoleId = null, authorId = null;
+  if (seenToken && privateId && pendingId && publicId) {
+    r = await send("GET", "/api/users/me", { headers: { Authorization: "Bearer " + seenToken } });
+    authorId = r.json && r.json.data ? r.json.data.id : null;
+    check("14", "取到作者自己的 id（主页接口的入参就是它，前端也是这么用的）", !!authorId, "id=" + authorId);
+
+    r = await send("POST", "/api/posts", asToken(seenToken, jsonBody({
+      title: "冒烟·匿名树洞", content: "今天不想被任何人认出来。", type: "hole" })));
+    anonHoleId = bodyOf(r).id;
+    check("14", "作者补发一条匿名树洞：主页用例的负面样本必须自己就是 PUBLISHED，否则「不出现」是白捡的",
+      r.status === 200 && bodyOf(r).status === "PUBLISHED" && !!anonHoleId,
+      r.status + " status=" + bodyOf(r).status + " id=" + anonHoleId);
+
+    r = await myPostsGet(seenToken, "size=50");
+    const myItems = itemsOf(r) || [];
+    const missing = [privateId, pendingId, anonHoleId, publicId].filter(function (id) { return !has(myItems, id); });
+    check("14", "GET /api/users/me/posts：私密 + 待审 + 匿名 + 公开四条全在列（作者视角绕开公共可见性判据）",
+      r.status === 200 && missing.length === 0, "n=" + myItems.length + " 缺=" + missing.join(","));
+    const myPending = myItems.find(function (x) { return x.id === pendingId; });
+    check("14", "列表回显 status 与 auditTip：前端按状态分 Tab 不必再自己猜哪条在审核",
+      !!myPending && myPending.status === "HUMAN_REVIEW" && String(myPending.auditTip || "").length > 0,
+      JSON.stringify(myPending || {}).slice(0, 170));
+    const myPrivate = myItems.find(function (x) { return x.id === privateId; });
+    check("14", "自己的私密帖在列表里看得见 visibility（广场刻意不给的那条，正是 U12 存在的理由）",
+      !!myPrivate && myPrivate.visibility === "private", JSON.stringify(myPrivate && myPrivate.visibility));
+
+    r = await myPostsGet(seenToken, "status=PUBLISHED&size=50");
+    const pubOnly = itemsOf(r) || [];
+    check("14", "?status=PUBLISHED 只剩已发布，且仍含自己的私密已发布（状态过滤不该顺手把可见性也收窄）",
+      r.status === 200 && pubOnly.length > 0 && pubOnly.every(function (x) { return x.status === "PUBLISHED"; })
+      && has(pubOnly, privateId) && !has(pubOnly, pendingId), "n=" + pubOnly.length);
+    r = await myPostsGet(seenToken, "status=human_review&size=50");
+    check("14", "?status 大小写不敏感：库里 post.status 存大写 ENUM，前端传小写是打字习惯而不是换语义",
+      r.status === 200 && has(itemsOf(r) || [], pendingId), "n=" + (itemsOf(r) || []).length);
+    r = await myPostsGet(seenToken, "status=moment");
+    check("14", "白名单外的 status → 400/10001（与 type 同口径，不做「那就查全部」的兜底）",
+      r.status === 400 && code(r) === "10001", r.status + " code=" + code(r));
+    r = await myPostsGet(seenToken, "status=private");
+    check("14", "?status=private 被拒：visibility 的值不是 status 的值，两个维度不许混成一个参数",
+      r.status === 400 && code(r) === "10001", r.status + " code=" + code(r));
+    r = await myPostsGet(null, "");
+    check("14", "未登录打 /me/posts → 401/10002（不给匿名打别人主页的口子）",
+      r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+    r = await myPostsGet(seenToken, "size=2");
+    const mp1 = itemsOf(r) || [];
+    const mc1 = r.json && r.json.data ? r.json.data.nextCursor : null;
+    r = await myPostsGet(seenToken, "size=2&beforeId=" + mc1);
+    const mp2 = itemsOf(r) || [];
+    check("14", "我的列表翻页与广场同一套游标口径（三张列表共用 pageResult，翻页键只有一份）",
+      mp1.length === 2 && !!mc1 && mp2.length > 0 && mp2.every(function (x) { return !has(mp1, x.id); }),
+      "p1=" + idsOf(mp1) + " p2=" + idsOf(mp2));
+
+    r = await profileGet(accessToken, authorId, "size=50");
+    const stranger = itemsOf(r) || [];
+    const strangerStatus = r.status;
+    r = await profileGet(seenToken, authorId, "size=50");
+    const selfView = itemsOf(r) || [];
+    check("14", "GET /api/users/{id}/posts：本人视角与外人视角逐条相同（主页就是主页，不因为是你就多给）",
+      strangerStatus === 200 && idsOf(stranger) === idsOf(selfView),
+      "外人 n=" + stranger.length + "[" + idsOf(stranger) + "] 本人 n=" + selfView.length + "[" + idsOf(selfView) + "]");
+    check("14", "公开主页只回 public+PUBLISHED：匿名树洞、私密帖、待审帖整条不出现（FR1.4 防解匿）",
+      stranger.length > 0 && has(stranger, publicId) && !has(stranger, anonHoleId)
+      && !has(stranger, privateId) && !has(stranger, pendingId)
+      && stranger.every(function (x) { return x.visibility === "public" && x.status === "PUBLISHED" && x.anonymous === false; }),
+      "n=" + stranger.length + " 含匿名=" + has(stranger, anonHoleId) + " 含私密=" + has(stranger, privateId));
+    r = await profileGet(accessToken, 99999999, "");
+    check("14", "不存在的用户主页 → 404/20001：不存在与已注销同码，区分本身就是一条枚举通道",
+      r.status === 404 && code(r) === "20001", r.status + " code=" + code(r));
+    r = await profileGet(accessToken, "abc", "");
+    check("14", "非数字 id → 404/90006 而不是 500：路径上的数字约束挡住了 long 转换异常",
+      r.status === 404 && code(r) === "90006", r.status + " code=" + code(r) + " " + short(r, 120));
+    r = await send("GET", "/api/users/me/profile", { headers: { Authorization: "Bearer " + accessToken } });
+    check("14", "/me/posts 没有把 /me/profile 挤掉：两条字面量路径照常 200（消歧靠声明，不靠解析器优先级）",
+      r.status === 200 && code(r) === "0", r.status + " code=" + code(r));
+    info("14", "SQL 取证：这三条 id 应分别落在 私密/待审/匿名 三种行上",
+      "SELECT id,status,visibility,is_anonymous,alias_id FROM post WHERE id IN (" + [privateId, pendingId, anonHoleId, publicId].join(",") + ");");
+  } else {
+    info("14", "第 12 步的三条样本没备齐，本步整体跳过（根因在上面，不逐条报 401）", "");
+  }
+
+  // ---------- 15 点赞·收藏·关注（任务 3.6 · 需求 FR4.4、FR4.6、BR2、BR4、BR6）----------
+  // 这一步是本项目第一次「跑完就能用 SQL 反证」的写侧冒烟：每一条 check 之后，
+  // post.like_cnt 都必须等于 post_like 里的活动人数，跑完由 root 直连 SQL 复核（见 docs/dev-log.md）。
+  const actOn = function (token, id, action) {
+    return send("POST", "/api/posts/" + id + "/actions",
+      token ? asToken(token, jsonBody({ action: action })) : jsonBody({ action: action }));
+  };
+  const followOne = function (token, id, action) {
+    return send("POST", "/api/users/" + id + "/follow",
+      token ? asToken(token, jsonBody({ action: action })) : jsonBody({ action: action }));
+  };
+  const isMsg = function (rr, needle) {
+    // 统一响应体是 Result{code,msg,data,traceId}：文案在 msg 字段，不是 Spring 默认的 message。
+    const j = rr.json || {};
+    return String(j.msg !== undefined ? j.msg : (j.message !== undefined ? j.message : "")).indexOf(needle) >= 0;
+  };
+
+  if (publicId && privateId && anonHoleId && authorId && seenToken && accessToken) {
+    r = await actOn(accessToken, publicId, "like");
+    check("15", "第三人给公开帖点赞 → 200 + changed=true + likeCnt=1",
+      r.status === 200 && bodyOf(r).changed === true && bodyOf(r).liked === true && bodyOf(r).likeCnt === 1,
+      r.status + " " + short(r, 170));
+
+    r = await actOn(accessToken, publicId, "like");
+    check("15", "BR2 正向幂等：连点第二次不报错但 changed=false、likeCnt 仍是 1（一个人只能算一票）",
+      r.status === 200 && bodyOf(r).changed === false && bodyOf(r).likeCnt === 1, r.status + " " + short(r, 170));
+
+    r = await detailGet(accessToken, publicId);
+    check("15", "详情把互动态回给前端：liked=true、collected=false（PostCard 不必自己猜状态）",
+      r.status === 200 && bodyOf(r).liked === true && bodyOf(r).collected === false && bodyOf(r).likeCnt === 1,
+      "liked=" + bodyOf(r).liked + " collected=" + bodyOf(r).collected + " likeCnt=" + bodyOf(r).likeCnt);
+
+    r = await actOn(accessToken, publicId, "unlike");
+    check("15", "取消点赞 → changed=true、likeCnt 归 0",
+      r.status === 200 && bodyOf(r).changed === true && bodyOf(r).liked === false && bodyOf(r).likeCnt === 0,
+      r.status + " " + short(r, 170));
+
+    r = await actOn(accessToken, publicId, "unlike");
+    check("15", "BR2 负向幂等：取消一个没赞过的帖 200 而不是 400（前端双击/网络重发都不是错误）",
+      r.status === 200 && bodyOf(r).changed === false && bodyOf(r).likeCnt === 0, r.status + " " + short(r, 170));
+
+    r = await actOn(accessToken, publicId, "like");
+    check("15", "取消之后再赞：复用同一行、计数只回到 1（不是 2）",
+      r.status === 200 && bodyOf(r).likeCnt === 1, r.status + " likeCnt=" + bodyOf(r).likeCnt);
+
+    r = await actOn(accessToken, publicId, "collect");
+    check("15", "收藏与点赞各算各的：collectCnt=1 且 liked 依旧 true",
+      r.status === 200 && bodyOf(r).collected === true && bodyOf(r).collectCnt === 1 && bodyOf(r).liked === true,
+      r.status + " " + short(r, 170));
+
+    r = await actOn(accessToken, publicId, "uncollect");
+    check("15", "取消收藏不许把赞一起取消（两个动作同表不同 action_type，判据只认自己那一档）",
+      r.status === 200 && bodyOf(r).collected === false && bodyOf(r).collectCnt === 0 && bodyOf(r).liked === true,
+      r.status + " " + short(r, 170));
+
+    r = await actOn(seenToken, publicId, "like");
+    check("15", "BR4 自赞：允许且计入 like_cnt（=2），但回执标 selfAction=true 交给 T3.10 埋点去排除",
+      r.status === 200 && bodyOf(r).selfAction === true && bodyOf(r).likeCnt === 2,
+      r.status + " " + short(r, 170));
+
+    r = await listGet(accessToken, "size=50");
+    const likedRow = (itemsOf(r) || []).find(function (x) { return x.id === publicId; }) || {};
+    check("15", "广场列表同样回 liked/collectCnt：卡片上的红心态刷新前后不能变白",
+      r.status === 200 && likedRow.liked === true && likedRow.likeCnt === 2 && likedRow.collectCnt === 0,
+      JSON.stringify({ liked: likedRow.liked, likeCnt: likedRow.likeCnt, collectCnt: likedRow.collectCnt }));
+
+    r = await actOn(accessToken, anonHoleId, "like");
+    const anonDetail = await detailGet(accessToken, anonHoleId);
+    check("15", "匿名树洞照样能赞，且赞完之后 authorId 依旧不回（互动不成为解匿通道）",
+      r.status === 200 && bodyOf(r).likeCnt === 1 && anonDetail.status === 200
+      && anonDetail.json.data.anonymous === true && anonDetail.json.data.authorId == null,
+      "likeCnt=" + bodyOf(r).likeCnt + " anonymous=" + (anonDetail.json.data || {}).anonymous
+      + " authorId=" + String((anonDetail.json.data || {}).authorId));
+
+    r = await actOn(accessToken, publicId, "hug");
+    check("15", "白名单外的动作 → 400/10001，文案按字典序列出四个取值（Set.of 顺序随机，必须 sorted）",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "collect / like / uncollect / unlike"),
+      r.status + " code=" + code(r) + " msg=" + ((r.json && r.json.msg) || (r.json && r.json.message)));
+
+    r = await actOn(accessToken, "abc", "like");
+    check("15", "非数字帖子 id → 404/90006 而不是 500", r.status === 404 && code(r) === "90006",
+      r.status + " code=" + code(r));
+
+    r = await actOn(accessToken, privateId, "like");
+    check("15", "别人的私密帖点赞 → 404/30001（与详情同口径：报 403 就是免费的存在性枚举通道）",
+      r.status === 404 && code(r) === "30001", r.status + " code=" + code(r));
+
+    r = await actOn(null, publicId, "like");
+    check("15", "未登录点赞 → 401/10002（发起人只来自 JWT，不接受请求体里的 user_id）",
+      r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+
+    r = await followOne(accessToken, authorId, "follow");
+    check("15", "第三人关注作者 → 200 + following=true + followerCnt=1",
+      r.status === 200 && bodyOf(r).changed === true && bodyOf(r).following === true && bodyOf(r).followerCnt === 1,
+      r.status + " " + short(r, 170));
+
+    r = await followOne(accessToken, authorId, "follow");
+    check("15", "重复关注幂等：changed=false、followerCnt 仍是 1、不报错",
+      r.status === 200 && bodyOf(r).changed === false && bodyOf(r).followerCnt === 1, r.status + " " + short(r, 170));
+
+    r = await send("GET", "/api/users/" + authorId + "/profile", { headers: { Authorization: "Bearer " + accessToken } });
+    const card = bodyOf(r);
+    check("15", "GET /api/users/{id}/profile：following=true + publicPostCnt=1（私密/待审/匿名三条都不算进来）",
+      r.status === 200 && card.following === true && card.self === false && card.publicPostCnt === 1
+      && card.followerCnt === 1, r.status + " " + short(r, 200));
+    check("15", "资料卡获赞数只算公开非匿名帖：公开那条 2 赞（第三人 + 作者自赞），树洞那 1 赞不算",
+      card.receivedLikeCnt === 2, "receivedLikeCnt=" + card.receivedLikeCnt);
+    check("15", "展示名与帖子同一口径（同昵称回登录名），bio 缺行回空串而不是 null",
+      typeof card.displayName === "string" && card.displayName.length > 0 && typeof card.bio === "string",
+      "displayName=" + card.displayName + " bio=" + JSON.stringify(card.bio));
+
+    r = await send("GET", "/api/users/" + authorId + "/profile", { headers: { Authorization: "Bearer " + seenToken } });
+    check("15", "本人视角：self=true 且 following=false（不存在「关注自己」这种关系）",
+      r.status === 200 && bodyOf(r).self === true && bodyOf(r).following === false, r.status + " " + short(r, 170));
+
+    r = await followOne(accessToken, authorId, "unfollow");
+    check("15", "取关 → changed=true、followerCnt 归 0（物理删，不留软删行撞 uk_follow_pair）",
+      r.status === 200 && bodyOf(r).changed === true && bodyOf(r).following === false && bodyOf(r).followerCnt === 0,
+      r.status + " " + short(r, 170));
+
+    r = await followOne(accessToken, authorId, "unfollow");
+    check("15", "取关一个没关注的人：幂等不报错",
+      r.status === 200 && bodyOf(r).changed === false, r.status + " " + short(r, 170));
+
+    r = await followOne(seenToken, authorId, "follow");
+    check("15", "关注自己 → 400/10001「不能关注自己」（参数没有语义，不是权限问题所以不报 403）",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "不能关注自己"), r.status + " msg=" + r.json.msg);
+
+    r = await followOne(accessToken, 99999999, "follow");
+    check("15", "关注不存在的人 → 404/20001", r.status === 404 && code(r) === "20001", r.status + " code=" + code(r));
+    r = await followOne(accessToken, "abc", "follow");
+    check("15", "非数字用户 id → 404/90006", r.status === 404 && code(r) === "90006", r.status + " code=" + code(r));
+    r = await followOne(accessToken, authorId, "poke");
+    check("15", "非法关注动作 → 400/10001 且文案 sorted", r.status === 400 && code(r) === "10001"
+      && isMsg(r, "follow / unfollow"), r.status + " msg=" + r.json.msg);
+
+    info("15", "本步落库后的不变式（跑完用 root 直连 SQL 复核，不靠注释自证）",
+      "SELECT p.id,p.like_cnt,(SELECT COUNT(DISTINCT user_id) FROM post_like l WHERE l.target_type='post'"
+      + " AND l.target_id=p.id AND l.action_type='LIKE' AND l.deleted=0) AS truth FROM post p WHERE p.id IN ("
+      + publicId + "," + anonHoleId + ");");
+  } else {
+    info("15", "互动样本没备齐，本步整体跳过（根因在上面，不逐条报 401）", "");
   }
 
   console.log("");

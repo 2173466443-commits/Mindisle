@@ -100,23 +100,46 @@ public class PostingQuotaService {
     }
 
     /**
+     * BR6 判定（下半句）：当前账号还能不能「看和点」——浏览、点赞、收藏、关注。
+     *
+     * <p>这是全站<b>唯一</b>的互动资格判据。MUTED 在这里是<b>放行</b>的：禁言夺的是「说」的权利，
+     * 把点赞收藏一起收走属于需求没写的额外惩罚（类注释第 1 条）。BANNED / DELETED
+     * 以及任何看不懂的状态照旧失败关闭。</p>
+     */
+    public void assertStatusAllowsInteract(User user) {
+        String status = statusOf(user);
+        if (status.isEmpty() || "ACTIVE".equals(status) || "MUTED".equals(status)) {
+            return;
+        }
+        throw new BizException(ErrorCode.USER_DISABLED);
+    }
+
+    /**
      * BR6 判定：当前账号还能不能「说」。
      *
      * <p>公开是因为私信（阶段 5）、举报（T3.11）要走同一套口径，而不是各写一遍 switch。</p>
+     *
+     * <p><b>实现上先过互动判据、再单独处理 MUTED</b>：这样「能说的必定能点」是结构保证，
+     * 而不是两份 switch 抄得恰好一样的巧合。判据如果各写一份，将来给互动新增一档限制
+     * （比如「被举报冻结期间禁止收藏」）时，写路径一定漏改——那种 bug 单测发现不了，
+     * 因为两边各自都能自证一致。</p>
      */
     public void assertStatusAllowsWrite(User user) {
+        assertStatusAllowsInteract(user);
+        if ("MUTED".equals(statusOf(user))) {
+            throw new BizException(ErrorCode.FORBIDDEN, "账号处于禁言期，可以看和点赞，暂时不能发布内容");
+        }
+    }
+
+    /**
+     * 状态归一化。账号为空即「查无此人」（USER_NOT_FOUND）——两个判据都要在第一时间挡住它，
+     * 否则后面拿 user.getId() 会直接 NPE 变成 500。
+     */
+    private static String statusOf(User user) {
         if (user == null) {
             throw new BizException(ErrorCode.USER_NOT_FOUND);
         }
-        String status = user.getStatus() == null ? "" : user.getStatus().trim().toUpperCase();
-        if (status.isEmpty() || "ACTIVE".equals(status)) {
-            return;
-        }
-        if ("MUTED".equals(status)) {
-            throw new BizException(ErrorCode.FORBIDDEN, "账号处于禁言期，可以看和点赞，暂时不能发布内容");
-        }
-        // BANNED、DELETED 以及任何看不懂的状态一律按停用处理（失败关闭）。
-        throw new BizException(ErrorCode.USER_DISABLED);
+        return user.getStatus() == null ? "" : user.getStatus().trim().toUpperCase();
     }
 
     /** 今日发帖上限：新手期 5，常规 20（BR5）。 */

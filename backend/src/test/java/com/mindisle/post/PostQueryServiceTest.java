@@ -20,6 +20,7 @@ import com.mindisle.entity.PostTopic;
 import com.mindisle.entity.Topic;
 import com.mindisle.entity.User;
 import com.mindisle.post.PostQueryService.Relations;
+import com.mindisle.post.dto.PostListItem;
 import com.mindisle.post.dto.PostView.ImageBrief;
 
 /**
@@ -30,10 +31,11 @@ import com.mindisle.post.dto.PostView.ImageBrief;
  * <b>待审提示只能给作者本人</b>（否则等于向全广场广播「谁的内容正在被审核」）。
  * 这三件都是纯函数，能一次跑完全部状态组合。</p>
  *
- * <p><b>刻意不测 {@code applyVisible} / {@code applyCursor} 拼出来的 SQL 文本</b>：
- * 脱离 Spring 容器时 MyBatis-Plus 没有实体的 TableInfo 缓存，手工把它初始化一遍纯属给测试搭脚手架，
- * 而断言字符串里的 SQL 更是「改格式就红」。游标翻页不重叠、可见性两条分支，
- * 由 {@code docs/smoke.mjs} 第 12 步打真实 MySQL 验，那才是能证伪它的地方。</p>
+ * <p><b>本类只管纯函数，WHERE 形状在 {@code PostListSqlConditionTest}</b>。原来这里写着「刻意不测拼出来的
+ * SQL，因为脱离 Spring 就没有 TableInfo 缓存」—— 那条前提在任务 3.13 第二批被证伪：
+ * {@code TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), Post.class)}
+ * 三行就够了，先探针验真、再写断言，并把排版压成单行以避免「改格式就红」。
+ * 真库上「这些条件到底取回哪些行」仍由 {@code docs/smoke.mjs} 打 MySQL 取证，两层互不替代。</p>
  */
 class PostQueryServiceTest {
 
@@ -59,7 +61,7 @@ class PostQueryServiceTest {
     }
 
     private static Relations emptyRelations() {
-        return new Relations(Map.of(), Map.of(), Map.of(), Map.of());
+        return new Relations(Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
     }
 
     private static User user(long id, String username, String nickname) {
@@ -211,7 +213,7 @@ class PostQueryServiceTest {
         alias.setId(9L);
         alias.setAliasName("匿名屿民·雾");
         Relations relations = new Relations(Map.of(), Map.of(),
-                Map.of(AUTHOR, user(AUTHOR, "lisi", "李四")), Map.of(9L, alias));
+                Map.of(AUTHOR, user(AUTHOR, "lisi", "李四")), Map.of(9L, alias), Map.of());
         assertThat(PostQueryService.displayNameOf(post("PUBLISHED", "public", AUTHOR, 1, 9L), relations))
                 .isEqualTo("匿名屿民·雾");
         assertThat(PostQueryService.displayNameOf(post("PUBLISHED", "public", AUTHOR, 1, 404L), relations))
@@ -220,7 +222,7 @@ class PostQueryServiceTest {
         assertThat(PostQueryService.displayNameOf(post("PUBLISHED", "public", 999L, 0, null), relations))
                 .as("作者注销后批量查查不到行").isEqualTo(PostQueryService.DELETED_AUTHOR);
         Relations noNickname = new Relations(Map.of(), Map.of(),
-                Map.of(AUTHOR, user(AUTHOR, "lisi", "  ")), Map.of());
+                Map.of(AUTHOR, user(AUTHOR, "lisi", "  ")), Map.of(), Map.of());
         assertThat(PostQueryService.displayNameOf(publishedPublic(), noNickname))
                 .as("没设昵称回退登录名").isEqualTo("lisi");
     }
@@ -303,5 +305,48 @@ class PostQueryServiceTest {
         assertThat(PostQueryService.intValue(null)).isZero();
         assertThat(PostQueryService.longValue(7)).isEqualTo(7L);
         assertThat(PostQueryService.intValue(9)).isEqualTo(9);
+    }
+
+    @Test
+    @DisplayName("status 过滤：不传与空白都是「全部」，大小写不敏感，白名单外报 10001")
+    void statusFilterWhitelist() {
+        assertThat(PostQueryService.normalizeStatusFilter(null)).isNull();
+        assertThat(PostQueryService.normalizeStatusFilter("   ")).isNull();
+        // 与 type 相反，这里做 upper 归一：库里 post.status 存的就是大写 ENUM，前端传小写是打字习惯而非换语义
+        assertThat(PostQueryService.normalizeStatusFilter(" published ")).isEqualTo("PUBLISHED");
+        assertThat(PostQueryService.normalizeStatusFilter("human_review")).isEqualTo("HUMAN_REVIEW");
+        assertThatThrownBy(() -> PostQueryService.normalizeStatusFilter("moment"))
+                .isInstanceOfSatisfying(BizException.class,
+                        ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.PARAM_INVALID));
+        // visibility 的值不是 status 的值：把两者混成一个参数是最容易写错的一种「贴心」
+        assertThatThrownBy(() -> PostQueryService.normalizeStatusFilter("private"))
+                .isInstanceOfSatisfying(BizException.class,
+                        ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.PARAM_INVALID));
+    }
+
+    @Test
+    @DisplayName("状态白名单与 DDL 的 8 态逐字一致（sql/04_community.sql 的 post.status ENUM）")
+    void statusFiltersMatchTheEightStateMachine() {
+        // 改状态机要同时改这里：少一个值，用户就筛不出「被管理员下架」那一类，等于替他判定「这类不存在」；
+        // 多一个值，参数校验放过一条数据库里永远不会有的条件。
+        assertThat(PostQueryService.STATUS_FILTERS).containsExactlyInAnyOrder(
+                "DRAFT", "MACHINE_REVIEW", "HUMAN_REVIEW", "PUBLISHED",
+                "REJECTED", "APPEALING", "TAKEDOWN", "DELETED");
+        assertThat(PostQueryService.STATUS_FILTERS).contains(
+                PostService.STATUS_DRAFT, PostService.STATUS_MACHINE_REVIEW, PostService.STATUS_HUMAN_REVIEW,
+                PostService.STATUS_PUBLISHED, PostService.STATUS_REJECTED);
+    }
+
+    @Test
+    @DisplayName("列表项透传 status/visibility：作者视角要按状态分组，不能靠猜")
+    void listItemCarriesStatusAndVisibility() {
+        Post pending = post(PostService.STATUS_HUMAN_REVIEW, "private", AUTHOR, 0, null);
+        PostListItem item = PostQueryService.toListItem(pending, AUTHOR, emptyRelations(), null, NOW);
+        assertThat(item.status()).isEqualTo(PostService.STATUS_HUMAN_REVIEW);
+        assertThat(item.visibility()).isEqualTo("private");
+        // 同一条帖在别人眼里字段值不变 —— 收窄发生在 SQL 层（那行根本不会被查出来），
+        // 不在此处涂白，否则「主页不含私密」就成了靠出参遮羞的假安全。
+        assertThat(PostQueryService.toListItem(pending, OTHER, emptyRelations(), null, NOW).status())
+                .isEqualTo(PostService.STATUS_HUMAN_REVIEW);
     }
 }

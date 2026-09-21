@@ -2,10 +2,12 @@ package com.mindisle.post;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -17,11 +19,13 @@ import com.mindisle.config.MindisleProperties;
 import com.mindisle.entity.AnonymousAlias;
 import com.mindisle.entity.Post;
 import com.mindisle.entity.PostImage;
+import com.mindisle.entity.PostLike;
 import com.mindisle.entity.PostTopic;
 import com.mindisle.entity.Topic;
 import com.mindisle.entity.User;
 import com.mindisle.mapper.AnonymousAliasMapper;
 import com.mindisle.mapper.PostImageMapper;
+import com.mindisle.mapper.PostLikeMapper;
 import com.mindisle.mapper.PostMapper;
 import com.mindisle.mapper.PostTopicMapper;
 import com.mindisle.mapper.TopicMapper;
@@ -94,6 +98,7 @@ public class PostQueryService {
     private final TopicMapper topicMapper;
     private final UserMapper userMapper;
     private final AnonymousAliasMapper anonymousAliasMapper;
+    private final PostLikeMapper postLikeMapper;
     private final ViewCountService viewCountService;
     private final MindisleProperties properties;
 
@@ -103,6 +108,7 @@ public class PostQueryService {
                             TopicMapper topicMapper,
                             UserMapper userMapper,
                             AnonymousAliasMapper anonymousAliasMapper,
+                            PostLikeMapper postLikeMapper,
                             ViewCountService viewCountService,
                             MindisleProperties properties) {
         this.postMapper = postMapper;
@@ -111,6 +117,7 @@ public class PostQueryService {
         this.topicMapper = topicMapper;
         this.userMapper = userMapper;
         this.anonymousAliasMapper = anonymousAliasMapper;
+        this.postLikeMapper = postLikeMapper;
         this.viewCountService = viewCountService;
         this.properties = properties;
     }
@@ -128,7 +135,69 @@ public class PostQueryService {
         LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
         applyVisible(wrapper, viewerId, typeFilter, now);
 
+        return pageResult(wrapper, viewerId, page, now);
+    }
+
+    /**
+     * 「我的帖子」列表（任务 3.13 第二批 · 手册 §6.2 U12 · 需求 FR4.1、FR4.3、BR9）。
+     *
+     * <p><b>为什么不复用广场那条路</b>：广场的判据是「别人能不能看」（{@link #visibleTo}），
+     * 所以作者自己勾了「仅自己可见」的已发布帖<b>不进</b>广场列表 —— 那是分工不是漏洞。
+     * 但用户发完总得找得回来，于是这里按 {@code user_id} 直查，绕开公共可见性判据。
+     * 两条路的差别只有「查谁的帖」与「要不要过滤 public」，其余（游标键、排序、摘要、马甲、
+     * 求助卡片、待审提示）全部共用同一个 {@link #pageResult}，绝不复制一份逻辑以免两边判歪。</p>
+     *
+     * <p><b>这里能看到哪些状态</b>：自己的非删除行全在，包含 {@code private}、待审，
+     * 也包含机审未过（REJECTED）。未通过的帖对用户本人是「这条我没发出去」的事实信息，
+     * 藏起来只会让人怀疑系统吞帖；别人则走广场与主页接口，永远拿不到这些行。</p>
+     *
+     * <p><b>到期销毁的树洞仍然不出现</b>：与广场共用同一个 {@code auto_destroy_at} 判据
+     * （读侧先隐藏），把状态真扫成 destroyed 属任务 3.15。</p>
+     *
+     * @param status 可选状态过滤，白名单外直接 10001（与 type 同一口径：不做「猜一个」的兜底）
+     */
+    public PageResult<PostListItem> mine(long userId, String status, PageQuery query, LocalDateTime now) {
+        PageQuery page = (query == null ? new PageQuery() : query).normalize();
+        LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
+        applyOwned(wrapper, userId, normalizeStatusFilter(status), now);
+        return pageResult(wrapper, userId, page, now);
+    }
+
+    /**
+     * 某人的公开主页帖子列表（任务 3.13 第二批 · 手册 §6.2 U11 · 需求 FR1.4、FR4.1）。
+     *
+     * <p><b>这是一个刻意收窄的视图：匿名帖恒不出现</b>。接口按 {@code user_id} 查，
+     * 如果不排除「is_anonymous=1 或挂了马甲 id」的行，就等于给任何人一条把匿名帖与真实账号
+     * 逐条对上的通道 —— 那正是需求 FR1.4「匿名不可被普通用户解匿」要挡住的事。
+     * 所以判据是三重收窄：{@code status=PUBLISHED} 且 {@code visibility=public}
+     * 且既非匿名也无马甲 id。管理员的解匿审计走管理端，不经过这里。</p>
+     *
+     * <p><b>本人访问自己的主页与外人看到的内容完全一致</b>：这是「主页」的语义。
+     * 想连私密与待审一起看，用 {@link #mine}；不因为你是本人就把私密内容混进公开视图。</p>
+     */
+    public PageResult<PostListItem> profile(long viewerId, long targetUserId, PageQuery query,
+                                             LocalDateTime now) {
+        if (userMapper.selectById(targetUserId) == null) {
+            // 与详情的「不可见即 404」同口径：不存在与已注销不区分，区分本身就是一条枚举通道
+            throw new BizException(ErrorCode.USER_NOT_FOUND);
+        }
+        PageQuery page = (query == null ? new PageQuery() : query).normalize();
+        LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
+        applyPublicProfile(wrapper, targetUserId, now);
+        return pageResult(wrapper, viewerId, page, now);
+    }
+
+    /**
+     * 三种列表共用的翻页与组装：带 beforeId 走游标，否则走页码（两套都支持是 PageQuery 的既定契约）。
+     *
+     * <p>抽成一个函数的唯一理由是「翻页口径只允许有一份」。广场、我的、主页任何一处自己写一遍
+     * {@code order by published_at desc, id desc}，就总有一天会出现「A 页翻页丢条目、B 页不丢」这种
+     * 只有真机才能发现的偏差。</p>
+     */
+    private PageResult<PostListItem> pageResult(LambdaQueryWrapper<Post> wrapper, long viewerId,
+                                                 PageQuery page, LocalDateTime now) {
         if (page.useCursor()) {
+            // 锚点行只取排序键（published_at + id），不回任何内容，所以客户端拿别人的帖子 id 当游标也不泄露东西
             applyCursor(wrapper, postMapper.selectById(page.getBeforeId()), page.getBeforeId());
             wrapper.orderByDesc(Post::getPublishedAt).orderByDesc(Post::getId)
                     // size 已经被 normalize 夹在 1..50，拼进 limit 没有注入面；多取一条判 hasMore
@@ -150,11 +219,12 @@ public class PostQueryService {
         return view;
     }
 
+
     private List<PostListItem> toListItems(long viewerId, List<Post> rows, LocalDateTime now) {
         if (rows.isEmpty()) {
             return List.of();
         }
-        Relations relations = loadRelations(rows);
+        Relations relations = loadRelations(viewerId, rows);
         List<PostListItem> items = new ArrayList<>(rows.size());
         for (Post row : rows) {
             items.add(toListItem(row, viewerId, relations, crisisHotline(row), now));
@@ -169,14 +239,18 @@ public class PostQueryService {
      * 拿 post.userId 自己和自己比会恒真，于是待审帖会在别人的信息流里顶着一句与己无关的提示，
      * 顺带把「谁在被审核」这件事泄露给全广场。</p>
      */
-    private static PostListItem toListItem(Post post, long viewerId, Relations relations, String hotline,
+    /** 包级可见：与 visibleTo/excerpt 同一约定，让「出参字段有没有接错」能被单测钉住。 */
+    static PostListItem toListItem(Post post, long viewerId, Relations relations, String hotline,
                                             LocalDateTime now) {
         return new PostListItem(post.getId(), post.getType(), post.getTitle(), excerpt(post.getContent()),
                 displayNameOf(post, relations), isAnonymous(post), authorIdOf(post),
                 relations.topicNames().getOrDefault(post.getId(), List.of()),
-                relations.images().getOrDefault(post.getId(), List.of()),
+                relations.images().getOrDefault(post.getId(), List.of()), post.getStatus(), post.getVisibility(),
                 longValue(post.getViewCnt()), intValue(post.getLikeCnt()), intValue(post.getCommentCnt()),
-                post.getPublishedAt(), post.getAutoDestroyAt(), auditTipOf(post, viewerId, now), hotline);
+                post.getPublishedAt(), post.getAutoDestroyAt(), auditTipOf(post, viewerId, now), hotline,
+                hasAction(relations, post, PostInteractionService.ACTION_LIKE),
+                hasAction(relations, post, PostInteractionService.ACTION_COLLECT),
+                intValue(post.getCollectCnt()));
     }
 
     // ================================================================ 详情
@@ -193,7 +267,7 @@ public class PostQueryService {
         if (post == null || !visibleTo(post, viewerId, now)) {
             throw new BizException(ErrorCode.POST_NOT_FOUND);
         }
-        Relations relations = loadRelations(List.of(post));
+        Relations relations = loadRelations(viewerId, List.of(post));
         long viewCnt = longValue(post.getViewCnt());
         if (isOwner(post, viewerId)) {
             // 作者自看不计数（见上面那段注释），但展示值仍要把未回写的增量加上：
@@ -209,16 +283,39 @@ public class PostQueryService {
                 relations.images().getOrDefault(post.getId(), List.of()),
                 viewCnt, intValue(post.getLikeCnt()), intValue(post.getCommentCnt()),
                 post.getPublishedAt(), post.getAutoDestroyAt(), post.getCreatedAt(),
-                auditTipOf(post, viewerId, now), crisisHotline(post));
+                auditTipOf(post, viewerId, now), crisisHotline(post),
+                hasAction(relations, post, PostInteractionService.ACTION_LIKE),
+                hasAction(relations, post, PostInteractionService.ACTION_COLLECT),
+                intValue(post.getCollectCnt()));
     }
 
     // ================================================================ 纯逻辑（单测直调，不碰数据库）
 
-    /** 一次批量读出来的「周边」：配图、话题名、作者、马甲。拆出来只为了让组装能被单测覆盖。 */
+    /**
+     * 一次批量读出来的「周边」：配图、话题名、作者、马甲、当前用户的点赞收藏态。
+     *
+     * <p>拆出来只为了让组装能被单测覆盖；第 5 个字段是任务 3.6 加的，
+     * key 为 postId、value 为 {LIKE / COLLECT} 的活动动作集合——缺席即「没点过」，
+     * 所以未登录时整个 Map 是空的而不是 null（判 null 收在 {@link #hasAction} 一处）。</p>
+     */
     record Relations(Map<Long, List<PostView.ImageBrief>> images,
                      Map<Long, List<String>> topicNames,
                      Map<Long, User> users,
-                     Map<Long, AnonymousAlias> aliases) {
+                     Map<Long, AnonymousAlias> aliases,
+                     Map<Long, Set<String>> actions) {
+    }
+
+    /**
+     * 「你点过没有」——列表与详情共用这一条判据（{@code relations.actions()} 里是 LIKE / COLLECT 字符串，
+     * 取值与 {@code post_like.action_type} 的 ENUM 逐字一致）。
+     *
+     * <p>判 null 收在这一个函数里，而不是让每个调用点自己 {@code getOrDefault(...).contains(...)}：
+     * 一屏二十条绝大多数没人赞过，给它们各塞一个空 Set 是白花的内存；
+     * 而漏判一次 null 就是列表接口整页 500。这类「只有两处用到的判据」宁肯多一个静态函数。</p>
+     */
+    static boolean hasAction(Relations relations, Post post, String actionType) {
+        Set<String> actions = relations.actions().get(post.getId());
+        return actions != null && actions.contains(actionType);
     }
 
     /** 匿名帖（is_anonymous=1 或马甲 id 存在）。两个条件都认，因为历史数据里可能只有其一。 */
@@ -366,6 +463,32 @@ public class PostQueryService {
         return value;
     }
 
+    /**
+     * 「我的帖子」状态过滤白名单，取值与 {@code sql/04_community.sql} 的 post.status ENUM 逐字一致。
+     *
+     * <p>为什么不复用 {@code PostService} 的 STATUS_* 常量：那边只定义到这版代码会<b>写入</b>的 5 个态，
+     * 而 DDL 是 8 态（还含 APPEALING / TAKEDOWN / DELETED）。这里是「读侧允许按哪些态筛」，
+     * 必须跟 DDL 对齐，否则管理员下架后的帖就再也筛不出来。</p>
+     */
+    static final Set<String> STATUS_FILTERS = Set.of("DRAFT", "MACHINE_REVIEW", "HUMAN_REVIEW",
+            "PUBLISHED", "REJECTED", "APPEALING", "TAKEDOWN", "DELETED");
+
+    /** 状态过滤：null 与空串表示「全部」，白名单外报参数错（与 {@link #normalizeTypeFilter} 同口径）。 */
+    static String normalizeStatusFilter(String status) {
+        if (status == null || status.isBlank()) {
+            return null;
+        }
+        String value = status.trim().toUpperCase();
+        if (!STATUS_FILTERS.contains(value)) {
+            // 不直接拼 STATUS_FILTERS：Set.of 的迭代顺序按设计是每次随机的（同一个 JVM 两次打印都能不同），
+            // 那样同一次错误会在日志里给出两种文案，前端要断言也断不了。排序后再拼，消息才是确定的。
+            throw new BizException(ErrorCode.PARAM_INVALID, "status 只能是 "
+                    + String.join(" / ", STATUS_FILTERS.stream().sorted().toList())
+                    + " 之一，或不传表示全部");
+        }
+        return value;
+    }
+
     // ================================================================ SQL 条件拼装
 
     /**
@@ -384,6 +507,44 @@ public class PostQueryService {
         if (typeFilter != null) {
             wrapper.eq(Post::getType, typeFilter);
         }
+        applyNotExpired(wrapper, now);
+    }
+
+    /**
+     * 「我的帖子」条件：只按 {@code user_id} 收窄，不碰公共可见性判据。
+     *
+     * <p>与 {@link #applyVisible} 一样<b>不拼 deleted</b>（{@code @TableLogic} 自动追加），
+     * 也共用同一条 {@link #applyNotExpired}：到期树洞在自己的列表里同样不该出现，
+     * 否则「销毁」就成了只对别人生效的假承诺。</p>
+     */
+    static void applyOwned(LambdaQueryWrapper<Post> wrapper, long userId, String statusFilter,
+                           LocalDateTime now) {
+        wrapper.eq(Post::getUserId, userId);
+        if (statusFilter != null) {
+            wrapper.eq(Post::getStatus, statusFilter);
+        }
+        applyNotExpired(wrapper, now);
+    }
+
+    /**
+     * 公开主页条件：三重收窄，其中最要紧的一条是<b>排除匿名帖</b>。
+     *
+     * <p>{@code is_anonymous=1} 或挂了 {@code alias_id} 的行一旦能按 user_id 查出来，
+     * 这个接口就变成解匿工具（需求 FR1.4 明令禁止普通用户做到这件事）。
+     * 判据与 {@link #isAnonymous} 严格取反：{@code (is_anonymous IS NULL OR = 0) AND alias_id IS NULL}。
+     * 单测把这条钉住，不靠注释。</p>
+     */
+    static void applyPublicProfile(LambdaQueryWrapper<Post> wrapper, long userId, LocalDateTime now) {
+        wrapper.eq(Post::getUserId, userId)
+                .eq(Post::getStatus, PostService.STATUS_PUBLISHED)
+                .eq(Post::getVisibility, VISIBILITY_PUBLIC)
+                .and(real -> real.isNull(Post::getIsAnonymous).or().eq(Post::getIsAnonymous, 0))
+                .isNull(Post::getAliasId);
+        applyNotExpired(wrapper, now);
+    }
+
+    /** 未到期销毁：{@code auto_destroy_at} 为空（非树洞）或晚于当前时间。三个列表共用这一条。 */
+    static void applyNotExpired(LambdaQueryWrapper<Post> wrapper, LocalDateTime now) {
         wrapper.and(alive -> alive.isNull(Post::getAutoDestroyAt).or().gt(Post::getAutoDestroyAt, now));
     }
 
@@ -415,7 +576,14 @@ public class PostQueryService {
      * <p>不做这件事的话，20 条帖子会打出 20×4 条查询——手册 NFR3 给列表接口定的 P95 是 300ms，
      * 光往返就不够。</p>
      */
-    private Relations loadRelations(List<Post> rows) {
+    /**
+     * 签名里的 {@code viewerId} 只服务一件事：取「这个查看者对这些帖的点赞/收藏态」。
+     *
+     * <p>它必须是参数而不是字段——本类是无状态单例，把 viewer 存成字段会让所有请求共享同一个人的
+     * 已赞状态（需求 FR4.4 的「点过就高亮」立刻变成全站高亮）。{@code PostListItem} 的 auditTip
+     * 当年就是因为同样的原因走参数，此处沿用同一口径。</p>
+     */
+    private Relations loadRelations(long viewerId, List<Post> rows) {
         List<Long> postIds = rows.stream().map(Post::getId).filter(Objects::nonNull).toList();
         Map<Long, List<PostView.ImageBrief>> images = groupImages(postImageMapper.listByPosts(postIds));
         Map<Long, List<Long>> linkIds = groupTopicIds(postTopicMapper.listByPosts(postIds));
@@ -445,7 +613,35 @@ public class PostQueryService {
                 aliasById.put(alias.getId(), alias);
             }
         }
-        return new Relations(images, nameTopics(linkIds, topicById), userById, aliasById);
+        return new Relations(images, nameTopics(linkIds, topicById), userById, aliasById,
+                loadActions(viewerId, postIds));
+    }
+
+    /**
+     * 一屏帖子的「你赞没赞 / 你藏没藏」，<b>一条 SQL 取完</b>。
+     *
+     * <p>逐条查会让一屏 20 帖打出 20 条 SELECT，NFR3 给列表定的 P95 是 300ms，光往返就不够。
+     * 走 Wrapper 而不是裸 SQL 是因为 {@code PostLike} 上的 {@code @TableLogic} 会自动追加
+     * {@code deleted = 0}——「取消过的赞不算已赞」这条判据因此与写入侧同源，
+     * 只由逻辑删除位一处定义（口径同 {@code PostInteractionStoreAdapter#activeActionsOf}）。</p>
+     */
+    private Map<Long, Set<String>> loadActions(long viewerId, List<Long> postIds) {
+        Map<Long, Set<String>> actions = new LinkedHashMap<>();
+        if (viewerId <= 0L || postIds.isEmpty()) {
+            // 0 与负数都不是真实用户 id（列表接口未登录早就被过滤器挡在 401 了），
+            // 这里只是把「拿不到身份」明确降级成「谁都没赞过」，而不是拿 null 去撞唯一键。
+            return actions;
+        }
+        for (PostLike row : postLikeMapper.selectList(new LambdaQueryWrapper<PostLike>()
+                .eq(PostLike::getUserId, viewerId)
+                .eq(PostLike::getTargetType, PostInteractionService.TARGET_POST)
+                .in(PostLike::getTargetId, postIds))) {
+            if (row.getTargetId() == null || row.getActionType() == null) {
+                continue;
+            }
+            actions.computeIfAbsent(row.getTargetId(), k -> new HashSet<>()).add(row.getActionType());
+        }
+        return actions;
     }
 
     /**

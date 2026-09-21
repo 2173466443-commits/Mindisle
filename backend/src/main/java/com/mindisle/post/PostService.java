@@ -557,10 +557,12 @@ public class PostService {
     /**
      * 展示名口径，任务 3.3（发帖回显）与任务 3.5（列表/详情）共用。
      *
-     * <p>包级可见而不是 private：{@code PostQueryService} 要给出与发帖时<b>逐字相同</b>的名字，
-     * 复制一份实现就会出现「发帖显示昵称、进列表变成登录名」的口径分裂。同包复用，不为此起新的工具类。</p>
+     * <p>public 而不是 private：{@code PostQueryService} 要给出与发帖时<b>逐字相同</b>的名字，
+     * 任务 3.6 的{@code user.RelationshipService} 主页资料卡要给出与帖子<b>逐字相同</b>的名字。
+     * 复制一份实现就会出现「发帖显示昵称、进列表变成登录名、主页又变成第三种」的口径分裂；
+     * 也不为此起一个 DisplayNames 工具类——那只是给同一条规则换个住处，跨包可见性是同样的代价。</p>
      */
-    static String displayNameOf(User user) {
+    public static String displayNameOf(User user) {
         String nickname = user.getNickname();
         return nickname == null || nickname.isBlank() ? user.getUsername() : nickname.trim();
     }

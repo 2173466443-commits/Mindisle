@@ -32,6 +32,11 @@ import java.util.List;
  * @param createdAt     落库时间（待审帖没有 publishedAt，靠它显示「几小时前提交」）
  * @param auditTip      非空即「仅自己可见，还在审核」
  * @param hotline       非空即必须显示求助卡片
+ * @param liked         当前查看者是否赞过（任务 3.6）。详情页的 viewCnt 是「含未回写增量」的准数，
+ *                      但 likeCnt 直接读库列——因为点赞列在每次互动时就被重算刷平，
+ *                      它<b>本来就没有</b>未回写窗口，两个数字的时效性差别是设计而非疏漏
+ * @param collected     当前查看者是否收藏了这条
+ * @param collectCnt    收藏人数（列表项里也有，详情页多给一次是为了互动之后不用回读列表）
  */
 public record PostDetailView(
         Long id,
@@ -51,5 +56,8 @@ public record PostDetailView(
         LocalDateTime autoDestroyAt,
         LocalDateTime createdAt,
         String auditTip,
-        String hotline) {
+        String hotline,
+        boolean liked,
+        boolean collected,
+        int collectCnt) {
 }

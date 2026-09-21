@@ -153,6 +153,28 @@ class PostingQuotaServiceTest {
     }
 
     @Test
+    @DisplayName("BR6 下半句：禁言能点赞收藏、封禁不能；「能写的必定能点」是同一条判据不是两份 switch")
+    void interactIsLooserThanWriteButStillFailClosed() {
+        User muted = user(20L, "MUTED", NOW.minusDays(30));
+        assertDoesNotThrow(() -> service.assertStatusAllowsInteract(muted));
+        // 同一个账号在「写」这一侧依旧被拦：两档判据确实分了上下，不是把两个方法写成了别名
+        assertThat(codeOf(() -> service.assertStatusAllowsWrite(muted))).isEqualTo(ErrorCode.FORBIDDEN);
+
+        assertThat(codeOf(() -> service.assertStatusAllowsInteract(user(21L, "BANNED", null))))
+                .isEqualTo(ErrorCode.USER_DISABLED);
+        assertThat(codeOf(() -> service.assertStatusAllowsInteract(user(22L, "Deleted", null))))
+                .as("注销账号同样失败关闭：状态里出现任何看不懂的取值都不放行").isEqualTo(ErrorCode.USER_DISABLED);
+        assertThat(codeOf(() -> service.assertStatusAllowsInteract(user(23L, "  Unknown  ", null))))
+                .isEqualTo(ErrorCode.USER_DISABLED);
+        assertDoesNotThrow(() -> service.assertStatusAllowsInteract(user(24L, "  mutED  ", null)));
+        assertDoesNotThrow(() -> service.assertStatusAllowsInteract(user(25L, null, null)));
+        assertDoesNotThrow(() -> service.assertStatusAllowsInteract(user(26L, "", null)));
+        assertThat(codeOf(() -> service.assertStatusAllowsInteract(null)))
+                .as("账号为空即查无此人，必须先挡住，否则后面拿 id 会 NPE 变 500")
+                .isEqualTo(ErrorCode.USER_NOT_FOUND);
+    }
+
+    @Test
     @DisplayName("状态缺省（null/空串）按 ACTIVE 放行——DDL 里该列 NOT NULL，只有单测会构造出来")
     void missingStatusIsTreatedAsActive() {
         assertDoesNotThrow(() -> service.assertStatusAllowsWrite(user(12L, null, null)));

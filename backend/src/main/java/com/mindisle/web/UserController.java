@@ -32,7 +32,9 @@ import jakarta.validation.Valid;
  */
 @RestController
 @RequestMapping("/api/users")
-@Tag(name = "3 用户", description = "账号摘要、扩展资料与隐私授权开关")
+// 描述必须与 UserPostController 逐字一致：springdoc 的顶层 tags 按 name + description 去重，
+// 两处只改文案就会多出一条重复的「3 用户」，把手册 §5.3 的「7 个分组」口径弄歪（本轮实测踩过）。
+@Tag(name = "3 用户", description = "账号摘要、扩展资料、隐私授权与帖子列表（我的 / 他人主页）")
 public class UserController {
 
   private final UserService userService;
