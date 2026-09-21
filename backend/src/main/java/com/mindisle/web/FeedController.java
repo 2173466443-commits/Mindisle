@@ -4,7 +4,6 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -26,6 +25,10 @@ import io.swagger.v3.oas.annotations.tags.Tag;
  * <p>2026-09-20 任务 3.3 落地后，<b>POST /api/posts 已迁至 {@link PostController}</b>：
  * 这里的桩必须删掉，否则两条 handler 映射到同一个 POST 路径，
  * Spring MVC 在启动期就报 ambiguous mapping，整个服务起不来（不是运行期才 500）。
+ *
+ * <p>2026-09-20 任务 3.5 落地后，<b>GET /api/posts 与 GET /api/posts/{id} 两个桩同样删除</b>，
+ * 读接口现在在 {@link PostController}。本类只剩游客可访问的话题墙，以及仍属未实现的
+ * 推荐流（阶段 4 情绪感知加权，届时再迁走）。
  */
 @RestController
 @Tag(name = "4 内容", description = "话题墙、推荐流与帖子发布（阶段 3 起逐步开放）")
@@ -50,18 +53,6 @@ public class FeedController {
   @Operation(summary = "情绪感知加权推荐流（阶段 3 召回 + 阶段 4 加权）")
   public Result<Void> recommend() {
     throw BizException.notImplemented("阶段3 推荐召回与阶段4 情绪感知加权");
-  }
-
-  @GetMapping("/api/posts")
-  @Operation(summary = "帖子列表（阶段 3 实现）")
-  public Result<Void> posts() {
-    throw BizException.notImplemented("阶段3 帖子列表与分页");
-  }
-
-  @GetMapping("/api/posts/{id}")
-  @Operation(summary = "帖子详情（阶段 3 实现）")
-  public Result<Void> postDetail(@PathVariable("id") long id) {
-    throw BizException.notImplemented("阶段3 帖子详情与评论");
   }
 
   /**

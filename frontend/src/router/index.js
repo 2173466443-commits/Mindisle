@@ -13,6 +13,9 @@ const routes = [
     component: () => import('@/layouts/BasicLayout.vue'),
     children: [
       { path: 'feed', name: 'feed', component: () => import('@/views/feed/FeedView.vue'), meta: { requiresAuth: true } },
+      // U5 发布页与 U4 详情页（任务 T3.13）：详情页要计数，所以不做 keep-alive，每次进入都是真访问。
+      { path: 'publish', name: 'publish', component: () => import('@/views/post/PublishView.vue'), meta: { requiresAuth: true } },
+      { path: 'post/:id', name: 'post-detail', component: () => import('@/views/post/PostDetailView.vue'), meta: { requiresAuth: true } },
       { path: 'me', name: 'me', component: () => import('@/views/user/ProfileView.vue'), meta: { requiresAuth: true, requiresConsent: true } },
       { path: 'ai', name: 'ai-chat', component: () => import('@/views/ai/ChatView.vue'), meta: { requiresAuth: true, requiresConsent: true } },
       { path: 'emotion', name: 'emotion', component: () => import('@/views/emotion/EmotionView.vue'), meta: { requiresAuth: true, requiresConsent: true } }

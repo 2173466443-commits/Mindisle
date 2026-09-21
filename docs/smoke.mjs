@@ -415,6 +415,138 @@ async function main() {
     info("11", "账号没注册下来，本步跳过（第 9 步第一条已经决定了退出码）", "");
   }
 
+  // ---------- 12 帖子列表与可见性（任务 3.5 验收主项） ----------
+  const seenName = "smoke_seen_" + stamp;
+  r = await send("POST", "/api/auth/register", jsonBody({
+    username: seenName, password: "Smoke#2026x", nickname: "冒烟可见性账号",
+    captchaId: captchaId || "00000000000000000000000000000000", captchaCode: "ZZZZ",
+    agreeTerms: true, agreePrivacy: true, consentVersion: "v1.0", regSource: "smoke-script"
+  }));
+  const seenToken = r.json && r.json.data ? r.json.data.accessToken : null;
+  check("12", "注册「可见性用例」账号 " + seenName + "（本步要真发三条，额度必须是满的）",
+    r.status === 200 && !!seenToken, r.status + " code=" + code(r));
+
+  const listGet = function (token, qs) {
+    return send("GET", "/api/posts" + (qs ? "?" + qs : ""),
+      token ? { headers: { Authorization: "Bearer " + token } } : {});
+  };
+  const detailGet = function (token, id) {
+    return send("GET", "/api/posts/" + id, { headers: { Authorization: "Bearer " + token } });
+  };
+  const itemsOf = function (rr) {
+    return rr.json && rr.json.data && Array.isArray(rr.json.data.list) ? rr.json.data.list : null;
+  };
+  const bodyOf = function (rr) { return rr.json && rr.json.data ? rr.json.data : {}; };
+  let privateId = null, pendingId = null, publicId = null;
+
+  if (seenToken) {
+    const postAs = function (body) { return send("POST", "/api/posts", asToken(seenToken, jsonBody(body))); };
+
+    r = await postAs({ title: "冒烟·仅自己可见", content: "这本日记只有我自己翻得到。", visibility: "private" });
+    privateId = bodyOf(r).id;
+    check("12", "visibility=private 照样发得出去（PUBLISHED，可见性只决定谁能看见）",
+      r.status === 200 && bodyOf(r).status === "PUBLISHED" && bodyOf(r).visibility === "private" && !!privateId,
+      r.status + " status=" + bodyOf(r).status + " visibility=" + bodyOf(r).visibility);
+
+    r = await postAs({ title: "冒烟·转人工", content: "有件事想问，我的手机号是 13800138000。" });
+    pendingId = bodyOf(r).id;
+    check("12", "灰词（隐私）→ HUMAN_REVIEW，此刻只有作者看得见",
+      r.status === 200 && bodyOf(r).status === "HUMAN_REVIEW" && !!pendingId, r.status + " status=" + bodyOf(r).status);
+
+    r = await postAs({ title: "冒烟·被看见", content: "公开的一条，用来验翻页与浏览量。" });
+    publicId = bodyOf(r).id;
+    check("12", "干净文本 → PUBLISHED，作为第 12/13 步的正面样本", r.status === 200 && bodyOf(r).status === "PUBLISHED" && !!publicId, r.status + " id=" + publicId);
+
+    r = await listGet(accessToken, "size=50");
+    const others = itemsOf(r) || [];
+    check("12", "第三人广场：公开帖在列，私密帖与待审帖整条不出现（不是置灰，是没这行）",
+      r.status === 200 && others.some(function (x) { return x.id === publicId; })
+      && !others.some(function (x) { return x.id === privateId; })
+      && !others.some(function (x) { return x.id === pendingId; }),
+      "n=" + others.length + " 私密在列=" + others.some(function (x) { return x.id === privateId; }));
+    let dr = await detailGet(accessToken, privateId);
+    check("12", "第三人打别人私密帖详情 → 404/30001（报 403 就等于承认这条存在）", dr.status === 404 && code(dr) === "30001", dr.status + " code=" + code(dr));
+    dr = await detailGet(accessToken, pendingId);
+    check("12", "第三人打别人待审帖详情 → 404/30001", dr.status === 404 && code(dr) === "30001", dr.status + " code=" + code(dr));
+
+    r = await listGet(seenToken, "size=50");
+    const mine = itemsOf(r) || [];
+    const myPending = mine.find(function (x) { return x.id === pendingId; });
+    check("12", "作者广场：自己的待审帖在列且带 auditTip（先发后审要被感知，而不是「我发的帖凭空消失」）",
+      !!myPending && String(myPending.auditTip || "").length > 0, JSON.stringify(myPending || {}).slice(0, 150));
+    check("12", "作者的私密已发布帖不进广场列表（广场=公共流，私密走任务 3.14 的「我的帖子」）",
+      !mine.some(function (x) { return x.id === privateId; }), "n=" + mine.length);
+    dr = await detailGet(seenToken, privateId);
+    check("12", "作者本人打自己私密帖详情 → 200 + visibility=private + 正文全文可读回",
+      dr.status === 200 && dr.json.data.visibility === "private" && String(dr.json.data.content || "").length > 0,
+      dr.status + " visibility=" + (dr.json.data && dr.json.data.visibility));
+
+    r = await listGet(accessToken, "size=3");
+    const p1 = itemsOf(r) || [];
+    const cur1 = r.json.data.nextCursor;
+    check("12", "首屏（页码模式）也回 nextCursor + total + hasMore，前端只需一种翻页方式",
+      r.status === 200 && p1.length === 3 && !!cur1 && r.json.data.hasMore === true && r.json.data.total > 3,
+      "cursor=" + cur1 + " total=" + r.json.data.total);
+    r = await listGet(accessToken, "size=3&beforeId=" + cur1);
+    const p2 = itemsOf(r) || [];
+    const cur2 = r.json.data.nextCursor;
+    check("12", "游标第二页与首屏零重叠，且 nextCursor 就是本页末条 id",
+      r.status === 200 && p2.length === 3 && cur2 === p2[2].id && p1.every(function (x) { return !p2.some(function (y) { return y.id === x.id; }); }),
+      "p1=" + p1.map(function (x) { return x.id; }).join(",") + " p2=" + p2.map(function (x) { return x.id; }).join(","));
+    r = await listGet(accessToken, "size=3&beforeId=" + cur2);
+    const p3 = itemsOf(r) || [];
+    check("12", "连翻三页两两不重叠（页码分页在插新帖时必然重复，游标不会）",
+      p3.length === 3 && p3.every(function (x) { return !p1.some(function (y) { return y.id === x.id; }) && !p2.some(function (y) { return y.id === x.id; }); }),
+      "p3=" + p3.map(function (x) { return x.id; }).join(","));
+
+    r = await listGet(accessToken, "type=hole&size=50");
+    const holes = itemsOf(r) || [];
+    check("12", "type=hole 只回树洞", r.status === 200 && holes.length > 0 && holes.every(function (x) { return x.type === "hole"; }), "n=" + holes.length);
+    r = await listGet(accessToken, "type=moment");
+    check("12", "白名单外的 type → 400/10001（读接口与写接口同口径，不猜「你想看全部」）", r.status === 400 && code(r) === "10001", r.status + " code=" + code(r));
+    r = await listGet(null, "");
+    check("12", "未登录打列表 → 401/10002（广场也是登录后可见，游客只给话题墙）", r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+
+    const anonItem = others.find(function (x) { return x.anonymous === true; });
+    check("12", "列表里的匿名帖不回 authorId（抓包反查不到作者），展示名是马甲",
+      !!anonItem && (anonItem.authorId === undefined || anonItem.authorId === null)
+      && String(anonItem.displayName || "").indexOf("匿名屿民·") === 0,
+      JSON.stringify(anonItem ? { displayName: anonItem.displayName, authorId: anonItem.authorId } : null));
+    const helpItem = others.find(function (x) { return x.type === "help"; });
+    check("12", "求助帖在列表里就带 hotline=12356（卡片不该等到详情页才出现）", !!helpItem && helpItem.hotline === "12356", JSON.stringify(helpItem && helpItem.hotline));
+    const crisisItem = others.find(function (x) { return x.type !== "help" && x.hotline === "12356"; });
+    check("12", "非求助但 L2/L3 的帖子同样带 hotline（放行打标与给卡片是同一件事）", !!crisisItem, crisisItem ? "id=" + crisisItem.id : "本轮列表里没有 L2/L3 公开帖");
+  } else {
+    info("12", "账号没注册下来，本步与第 13 步整体跳过", "根因是上面那条注册失败，退出码已由它决定");
+  }
+
+  // ---------- 13 浏览量：缓存累加 + 每 5 分钟回写（任务 3.5 最硬的一条取证） ----------
+  if (publicId) {
+    r = await listGet(accessToken, "size=50");
+    const row = (itemsOf(r) || []).find(function (x) { return x.id === publicId; });
+    const base = row ? row.viewCnt : -1;
+    const shown = [];
+    for (let i = 0; i < 3; i++) {
+      const d = await detailGet(accessToken, publicId);
+      shown.push(d.json && d.json.data ? d.json.data.viewCnt : null);
+    }
+    check("13", "同一帖连开三次详情：展示值 = 基线 +1/+2/+3，既不倒退也不凭空多",
+      base >= 0 && shown[0] === base + 1 && shown[1] === base + 2 && shown[2] === base + 3,
+      "base=" + base + " 三次=" + shown.join(","));
+    r = await listGet(accessToken, "size=50");
+    const lag = (itemsOf(r) || []).find(function (x) { return x.id === publicId; });
+    check("13", "三次浏览只发了一条 UPDATE：列表(库值)只比基线多 1，其余留在缓存里", !!lag && lag.viewCnt === base + 1,
+      "列表=" + (lag && lag.viewCnt) + " 详情=" + shown[2]);
+    const self = await detailGet(seenToken, publicId);
+    const selfView = self.json && self.json.data ? self.json.data.viewCnt : null;
+    check("13", "作者自看不计数，但展示值与第三人一致（口径可以是「你不算」，数字不能比你小）",
+      self.status === 200 && selfView === shown[2], "作者视角=" + selfView + " 第三人第三次=" + shown[2]);
+    info("13", "SQL 取证：这一条的 view_cnt 应为 " + (base + 1) + "（三次浏览 / 一次回写）",
+      "SELECT view_cnt FROM post WHERE id = " + publicId + ";");
+  } else {
+    info("13", "没有可用的公开帖，本步跳过（根因在第 12 步）", "");
+  }
+
   console.log("");
   console.log("冒烟汇总：" + rows.length + " 项，断言 " + (rows.filter(function (x) { return x.ok !== null; }).length)
     + " 条，失败 " + failures + " 条");

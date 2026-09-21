@@ -420,3 +420,157 @@ DELETE FROM topic           WHERE name = "冒烟待审话题";
 - **前端发布器还没对齐新契约**：`frontend/src/views/FeedView.vue` 发的仍是 `{content, topicId, mood, anonymous}` 且缺必填 `title`，接上后端必然 400 —— 归 T3.13，是阶段 3 下一步的头等事。
 - `GET /api/posts`、`/api/posts/{id}`、`/api/feed/recommend` 仍是 90001（T3.5 / T3.10 未开工）；毕设材料（T1B.*）按用户指令顺延；**仍未打 tag**（Gate 3 未过，最新 tag `stage-2-skeleton`）。
 
+## 2026-09-20 阶段 3（续 3）—— T3.5 列表/详情 + 浏览量缓存回写，以及 T3.13 前端第一批（U3/U4/U5）
+
+### 交付物：后端（实测计数）
+
+| 文件 | 行数 | 作用 |
+|---|---|---|
+| `post/PostQueryService.java`（新） | 463 | `list()` 游标/页码双模式 + `detail()`；可见性唯一判据 `visibleTo`；页内批量取图片/话题/用户/马甲防 N+1 |
+| `post/ViewCountService.java`（新） | 106 | 浏览量进缓存、**每帖每 5 分钟最多回写一次**；展示值恒等于「库值 + 未回写增量」 |
+| `config/ViewCountConfig.java`（新） | 33 | 端口—适配器装配：`new ViewCountService(cache, postMapper::increaseViewCnt)`，业务类保持零 Spring 依赖可裸测 |
+| `post/dto/PostListItem.java`（新） | 57 | 列表出参（含 `excerpt`/`auditTip`/`hotline`/`autoDestroyAt`） |
+| `post/dto/PostDetailView.java`（新） | 56 | 详情出参（正文全文 + `visibility`） |
+| `mapper/PostMapper.java`（改） | +13 | `increaseViewCnt`：**`view_cnt = view_cnt + #{delta}`** 库内原子累加，不是「读出来加一再写回去」 |
+| `mapper/PostImageMapper.java`、`mapper/PostTopicMapper.java`（改） | +21 / +16 | 按 `post_id IN (...)` 批量取周边，页内一次查完 |
+| `web/PostController.java`（改） | +41 | `GET /api/posts`、`GET /api/posts/{id}` 收进同一个类（读写共用一套可见性判据，避免 404/403 口径分裂） |
+| `web/FeedController.java`（改） | -12 | 删掉这两个 GET 的 90001 桩。**桩不删就是启动期 ambiguous mapping，服务整个起不来**（和上一轮 POST 桩同一颗雷） |
+| `web/PostService.java`（改） | ±8 | `PostView` 出参字段对齐新 DTO |
+| `test/post/PostQueryServiceTest.java`（新） | 308 / **17 例** | 可见性矩阵、游标不重叠、`type` 白名单、匿名不回 `authorId`、`hotline` 判据、到期树洞读侧隐藏、作者自看不计数 |
+| `test/post/ViewCountServiceTest.java`（新） | 147 / **5 例** | 窗口翻转、`getAndDelete` 不重复累加、展示值不倒退 |
+
+`mvn -o -B test`（离线 + E 盘本地仓库）实测 **`Tests run: 153, Failures: 0, Errors: 0, Skipped: 1` / BUILD SUCCESS**（上一轮 131，净增 22 = 17 + 5），日志 `backend/target/verify-t35b.log`。服务重启为 **run13**：`Started MindisleApplication in 4.353 seconds`，无 ambiguous mapping，只有验证码关闭时那条预期 WARN。
+
+
+### 交付物：前端 T3.13 第一批（U3 广场 / U4 详情 / U5 发布器）
+
+| 文件 | 行数 | 作用 |
+|---|---|---|
+| `src/api/post.js`（新） | 16 | `listPosts` / `postDetail` / `createPost` + `POST_TYPES` 常量；读接口 `silent:true` |
+| `src/api/audit.js`（新） | 8 | `precheck(text, scene)`，silent —— 防抖自动调的接口不该每 300ms 弹一次红条 |
+| `src/api/file.js`（新） | 11 | `uploadImage` 走 http 实例拼 `FormData`（只有这样才能自动带上 Authorization） |
+| `src/api/feed.js`（改） | 9 | 只剩 `topics` / `recommend`，posts 三件套移走归位 |
+| `src/stores/feed.js`（重写） | 111 | 游标状态机：`fetchPage({replace})` / `applyRows` 去重回填 `nextCursor`、`hasMore`、`total`；`setType` / `prepend` / `dismiss` / `reset` |
+| `src/utils/format.js`（新） | 64 | `toDate`（后端给的是**无时区本地 ISO 串**，`"YYYY-MM-DD HH:mm:ss"` 手工补 T，Safari 不认空格分隔）、`fromNow`、`countdown`、`fmtDateTime`、`fmtCount` |
+| `src/components/CrisisCard.vue`（新） | 44 | 12356 求助卡片（`level=inline/card` 两种形态），发布器 / 详情 / 列表三处共用 |
+| `src/components/PostCard.vue`（新） | 81 | 列表卡片：形式标签 / 马甲名 / 匿名标记 / 相对时间 / 树洞倒计时 / 图片预览 / `auditTip` / `hotline` / 三个计数 / 「不感兴趣」 |
+| `src/components/PostComposer.vue`（新） | 402 | U5 发布器主体：形式切换、标题≤50、正文≤5000、话题≤3、可见性、匿名（树洞强制开且禁用）、销毁档位 24/72/168h、配图≤9、**防抖 300ms 预检**、localStorage 草稿、发布结果三态回显、413 特判 |
+| `src/views/post/PostDetailView.vue`（新） | 142 | U4 详情；`30001` 文案写「这条内容你现在看不到」而**不写「不存在」**（前端也不能替服务端承认存在性）；不做本地 +1 |
+| `src/views/post/PublishView.vue`（新） | 60 | `/publish` 独立页，复用同一个 composer + 四条规则说明 |
+| `src/views/feed/FeedView.vue`（重写） | 230 | U3 广场：composer 紧凑形态 + 全部/树洞/求助/分享 Tab + `IntersectionObserver` 无限滚动 + total 行 + `errorCode`→`StageNotice` + 推荐占位 + 话题墙 |
+| `src/router/index.js`、`src/layouts/BasicLayout.vue`、`src/api/auth.js`（改） | +3 / +1 / 32 | 新增 `publish`、`post/:id`（name `post-detail`）；导航加「发布」；`NOT_IMPLEMENTED_YET` 按 web 层真实 `@*Mapping` 重写为 11 条 |
+
+`npm run build` **exit 0 / `✓ built in 5.80s`**（日志 `E:/codex workspace/_cache/mindisle-dbtmp/build-t313.log`），产物含 `PostComposer-*.js 11.79 kB`、`FeedView-*.js 10.06 kB`、`PostDetailView-*.js 4.66 kB`；只剩 500 kB chunk 那条老警告。
+
+**前端→后端真取数（Vite 5173 代理到 8080，不是 mock）**：注册 `fecheck_*` 200 → `GET /api/posts?size=3` **200 / total=21 / nextCursor=26 / 首条 id=32 / `publishedAt="2026-09-20T17:29:22.92"`**；不带 token 打同一路径 **401 / 10002**。
+
+> ⚠ **浏览器渲染未经实测**：`cua.getState()` 本轮返回 `errors:["Browsers: Error: Codex auth token is unavailable"]`，没有任何可驱动的浏览器。所以「U3/U4/U5 视觉与交互已验证」这句话**本轮不成立**，只能主张 build 通过 + 代理级 HTTP 取数通过。Gate 3 里「前端可交互、无 console 红字」那条仍记 ☐。
+
+### 冒烟脚本扩到 13 步（`docs/smoke.mjs` 428 → **560 行**，+132）
+
+实跑命令（需要后端在 8080、根 `.env` 里验证码关闭、`sql/11` 夹具已执行）：
+
+```powershell
+$env:SMOKE_PENDING_TOPIC_ID="21"; node docs/smoke.mjs
+```
+
+结果：**68 项 / 断言 63 条 / 失败 0 条 / exit=0**（上一轮 45 项 / 41 断言），全文存 `E:/codex workspace/_cache/mindisle-dbtmp/smoke5.txt`。新增两步逐条实测值：
+
+- **第 12 步 · 可见性**：注册 `smoke_seen_20260920092921` 200；`visibility=private` 照样 **200/PUBLISHED/visibility=private**（可见性只决定谁能看见，不影响能不能发）；手机号 → **HUMAN_REVIEW**；干净文本 → **PUBLISHED id=32**。第三人 `size=50` 拉全量：**n=21**，公开帖在列、私密帖与待审帖**整条不出现**；第三人打这两条详情 **404 / 30001**（报 403 等于承认这条存在）。作者自己的列表里待审项带 `auditTip`（实测 `{"id":31,...,"authorId":19}`）；作者的**私密已发布帖不在广场列表**（n=22，走 T3.14「我的帖子」）；但作者本人打自己私密帖详情 **200 + 正文全文可读回**。
+- **第 12 步 · 翻页与过滤**：页码首屏也回 `nextCursor`（实测 `cursor=26 total=21 hasMore=true`）；连翻三页 **p1=32,28,26 / p2=25,24,22 / p3=20,19,18** 两两零重叠，且 `nextCursor === p2[2].id`；`type=hole` **n=5 全是 hole**；`type=moment`（白名单外）**400/10001**；无 token **401/10002**；匿名项出参 `{"displayName":"匿名屿民·南栖"}` 且 **`authorId` 字段整个不出现**；help 项 `hotline="12356"`；非 help 但 L2/L3 的 **id=26** 同样带 hotline。
+- **第 13 步 · 浏览量**：`base=0`，同一帖连开三次详情展示值 **1 / 2 / 3**；列表（读库值）只比基线多 **1**，而详情是 **3** —— 这就是「三次浏览只发了一条 UPDATE」的直接证据；作者自看展示值 **3**，与第三人一致（计数口径是「你不算」，展示口径必须全平台一致）。
+
+### 真库取证（root 直连，逐字照抄）
+
+```
+post:      18|1   26|0   29|0   30|0 private   31|0 HUMAN_REVIEW   32|1 PUBLISHED public user_id=19
+alert_ticket: 13  L3  source_id=26  pending  0.900    |  14  L2  source_id=29  pending  0.600
+topic:       21  冒烟待审话题  PENDING
+```
+
+`post 32 view_cnt=1` 与上面「列表=1 / 详情=3」互为印证：展示值 = 库值(1) + 未回写增量(2) = 3。`post 18 view_cnt=1` 是上一轮手工探测留下的，本轮 SQL 复核**仍为 1**，说明第 13 步没有误伤旧数据。
+
+### 🔧 用户那条「执行不成功」的 mysql 口令：根因定位与可用写法（本轮用户明确要求写进日志）
+
+用户反馈同一条 mysql 命令跑不出来。root 口令已由用户口头提供，**明文不进任何文件、日志、回复**，只写进非 git 目录 `_cache/mindisle-dbtmp/rootpwd.cnf`（`[client]` 段，39 字节）。定位结果是**两条叠加**，都不是口令本身错：
+
+1. **中文输出被按 GBK 解码成了乱码**（看起来像「跑失败」）。两头都要改：`mysql.exe` 要显式带 `--default-character-set=utf8mb4`，PowerShell 侧要先 `$OutputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)`。少任何一头，`SELECT name FROM topic` 回来的就是 `ð̴` 一类的方块，人立刻怀疑命令写错了。
+2. **查了不存在的列**，报 `ERROR 1054 (42S22): Unknown column`。两张表的列名和直觉不一致，**本轮我自己也踩了同样两条**：`topic.status` → 真名 **`topic.audit_status`**；`alert_ticket.post_id` → 真名是 **`source_type` + `source_id`**（工单不止能挂帖子）。所以写 SQL 前先看 `sql/*.sql` 里的 DDL，别按需求文档里的中文措辞猜列名。
+3. 附带一条老坑仍会复现：`--defaults-extra-file=` 必须是**命令行第一个参数**，放后面会被当普通参数丢掉，于是拿系统当前用户免密去连，报 `1045 Access denied for user 'ODBC'@'localhost'` —— 错误里的用户名和口令都不来自你填的那份，极其误导人反复改口令。
+
+**照抄可用**：
+
+```powershell
+$OutputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
+& 'C:\Program Files\MySQL\MySQL Server 9.7\bin\mysql.exe' `
+  "--defaults-extra-file=E:\codex workspace\_cache\mindisle-dbtmp\rootpwd.cnf" `
+  --default-character-set=utf8mb4 -N -B -D mindisle -e "SELECT id, name, audit_status FROM topic"
+```
+
+- `-N` 去表头、`-B` 走批次模式（输出 `\t` 分隔，管道里不会被 ASCII 表格框吞掉），要人读就去掉 `-N -B`。
+- 口令永远走选项文件，**不要**在命令行写 `-p<明文>`：它会留在 PowerShell 历史与进程列表里，且违反本项目「口令不入仓库/日志/对话」的口径。
+
+### 本轮真实踩到的坑（都有证据）
+
+1. **列表 SQL 与详情 `visibleTo` 是两套判据，必须各自测**：私密已发布帖「不进广场」但「作者详情可读回」，这是分工不是 bug。若只测详情，就会写出一个「广场能刷到自己私密帖」的实现而全绿。
+2. **`auditTip` 早期用 `isOwner(post, post.getUserId())` 恒真** —— 待审提示会贴到别人的信息流上，顺带把「谁在被审核」泄露给全广场。修法是 `toListItems(viewerId, ...)` 一路把 viewerId 传到底。
+3. **删桩比加接口更容易致命**：`FeedController` 里两个 GET 桩不删，`mvn test` 全绿、`spring-boot:run` 直接起不来（启动期 ambiguous mapping）。上一轮 POST 桩已付过一次学费，本轮提前想到并写进了类注释。
+4. **窗口判定不能用缓存 TTL**：本地降级实现 Caffeine 的条目「逻辑过期但未清理」时 `asMap().compute` 仍可能看到旧值，把「key 不存在」当窗口边界，最坏结果是窗口永不翻转、增量一直堆在缓存里不落库 —— 比丢几个数更糟。改成显式存「本窗口起始秒」+ 判定只依赖比较，且 `now` 由调用方注入（与 `PostService.publish` 同口径）。
+5. **`view_cnt` 回写用 `view_cnt = view_cnt + delta` 而不是 `set view_cnt = ?`**：后者是读—算—写，两个实例各拿旧值回写就把对方覆盖掉。`WHERE` 刻意不带 `status`（帖子在这一个窗口里被下架，浏览量也是已发生的事实），但带 `deleted = 0`。
+6. **PowerShell 里 `node -e "…含正则字面量的串…"` 会因引号解析炸成 `Invalid or unexpected token`**：凡涉及正则和文件内容检查，改在 node REPL 里做。
+7. **`cua` 浏览器驱动不可用（auth token unavailable）**：这不是「前端不用测」的理由，而是**必须把没测的部分写白**的理由。
+
+
+### 本轮库里净增了什么（跑一次冒烟就会永久改库）
+
+- **+2 账号**：`smoke_seen_20260920092921`（id=19，第 12/13 步的正面作者）、`fecheck_20260920095710`（前端代理取数用）。
+- **+3 帖**：post 30（private/PUBLISHED）、31（HUMAN_REVIEW）、32（PUBLISHED public，`view_cnt=1`）。
+- **工单、话题、图片零净增**（第 12/13 步不再产生危机词与图片）；`topic 21` 仍是上一轮的 `PENDING` 夹具。
+
+清理按外键顺序，**前缀要两个都写**（`fecheck` 不在 `smoke\_%` 里）：
+
+```sql
+SET @p1 = "smoke\_%"; SET @p2 = "fecheck\_%";
+DELETE FROM alert_ticket    WHERE user_id IN (SELECT id FROM user WHERE username LIKE @p1 OR username LIKE @p2);
+DELETE FROM post_status_log WHERE post_id IN (SELECT id FROM post   WHERE user_id IN (SELECT id FROM user WHERE username LIKE @p1 OR username LIKE @p2));
+DELETE FROM post_image      WHERE post_id IN (SELECT id FROM post   WHERE user_id IN (SELECT id FROM user WHERE username LIKE @p1 OR username LIKE @p2));
+DELETE FROM post_topic      WHERE post_id IN (SELECT id FROM post   WHERE user_id IN (SELECT id FROM user WHERE username LIKE @p1 OR username LIKE @p2));
+DELETE FROM anonymous_alias WHERE user_id IN (SELECT id FROM user WHERE username LIKE @p1 OR username LIKE @p2);
+DELETE FROM user_consent    WHERE user_id IN (SELECT id FROM user WHERE username LIKE @p1 OR username LIKE @p2);
+DELETE FROM user_profile    WHERE user_id IN (SELECT id FROM user WHERE username LIKE @p1 OR username LIKE @p2);
+DELETE FROM post            WHERE user_id IN (SELECT id FROM user WHERE username LIKE @p1 OR username LIKE @p2);
+DELETE FROM user            WHERE username LIKE @p1 OR username LIKE @p2;
+-- 顺带：上一轮 6 条冒烟账号一起清时把 @p1 换成 LIKE "smoke\_%" 即可；topic 夹具单独 DELETE FROM topic WHERE name = "冒烟待审话题";
+```
+
+> 上面这段用 `SET @p1` 而不是把 LIKE 串抄九遍，是因为 `\_` 手写第二次就会漏反斜杠 —— 漏了之后 `smoke_%` 会连 `smokeXabc` 一起匹配，清库清过头。
+
+### 复跑命令（照抄可用）
+
+```powershell
+# 后端单测：期望 Tests run: 153, Failures: 0, Errors: 0, Skipped: 1
+cd backend; mvn -o -B "-Dmaven.repo.local=E:/codex workspace/_cache/m2/repository" test
+# 起服务（.env 在项目根，spring-boot.run 配的是 env-file: ../.env）
+mvn -o -B "-Dmaven.repo.local=E:/codex workspace/_cache/m2/repository" spring-boot:run
+# 冒烟：期望 68 项 / 63 断言 / 0 失败 / EXIT=0（需先执行 sql/11 并把 SMOKE_PENDING_TOPIC_ID 指到 PENDING 话题）
+$env:SMOKE_PENDING_TOPIC_ID="21"; node docs/smoke.mjs
+# 前端：npm 缓存已在 E:/codex workspace/_cache/npm；期望 exit 0
+cd frontend; npm run build
+```
+
+
+### 同轮文档对齐
+
+- 手册升 **v1.1.7**：§6.1 行 3.5 标「已落地」并追加 v1.1.7 实测回写 8 条；§15 **T3.5 ☐→☑**、**T3.13 ☐→◐（第一批）**，阶段 3 口径重算为 **☑ 5 / ◐ 2 / ☐ 10**；§18 Gate3、§19 变更表与下一步同步。**任务总数、人日、追溯矩阵、Gate 行数未变：117 条 / 144.30 人日 / 101 行 / 10 行。**
+- README：单测 131 → **153**、冒烟 45 项 → **68 项 / 63 断言**、补 `GET /api/posts` 与 `GET /api/posts/{id}` 契约、新增前端文件清单；`/v3/api-docs` 复测仍是 **22 paths / 25 operations / 7 分组**（本轮读写接口路径未增减）。
+- 全局《复利与踩坑日志》补 009 第 4 轮，重点是上面「mysql 取证三连」与「未实现清单必须按控制器反推」两条。
+
+### 仍未做（截至本轮，别自我感觉良好）
+
+- **`GET /api/posts` 只按发布时间倒序**，「热门」Tab 现在还是走同一份数据（`sort` 参数未实现），需求 U3 的「最新/热门」两个 Tab 只算一个半 —— 归 T3.6 之后补。
+- **作者私密已发布帖在 UI 上无路可达**：后端刻意不让它进广场，而「我的帖子」还没做（T3.14 / U12）。当前用户发一条私密帖，除了自己记住链接就没有第二次见到的办法。
+- **前端只做过代理级取数，没做过浏览器渲染**（见上面写白那条）。`PostComposer` 的草稿恢复、图片九宫格、Tab 切换、无限滚动的真实交互全部未经点击验证。
+- 浏览量未回写增量**只存在于缓存**，进程重启会丢（最多一帖一窗口），与配额重启归零同类，进答辩局限清单。
+- `HUMAN_REVIEW` 仍不进 `audit_task` 队列（T6.1）；工单仍无任何通知（T6.4）；`auto_destroy_at` 仍只写不扫（读侧已隐藏，扫表销毁属 T3.15）；`post.emotion_*` 仍为 NULL（阶段 4）。
+- U1 首页 / U6 话题圈 / U11 主页 / U12 我的、点赞收藏关注（T3.6）、评论（T3.7）、举报通知（T3.11）、埋点（T3.10）全部未开工；毕设材料（T1B.*）按用户指令继续顺延；**仍未打 tag**（Gate3 未过，最新 tag `stage-2-skeleton`）。
+

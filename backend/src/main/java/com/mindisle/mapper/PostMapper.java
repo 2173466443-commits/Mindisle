@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.mindisle.entity.Post;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 /**
  * 帖子 Mapper（任务 3.3 · 手册 §5.2）。
@@ -25,4 +26,16 @@ public interface PostMapper extends BaseMapper<Post> {
    */
   @Select("SELECT COALESCE(MAX(floor_no), 0) + 1 FROM post WHERE type = 'hole'")
   Integer nextHoleFloor();
+
+  /**
+   * 浏览量批量回写（任务 3.5 · 手册 §6.1 3.5 行）。
+   *
+   * <p><b>为什么是 {@code view_cnt = view_cnt + n} 而不是 {@code set view_cnt = ?}</b>：
+   * 前者是数据库内的原子累加，多个实例同时回写也不会丢计数；后者是「读—算—写」，
+   * 两个实例各拿到旧值再回写，就会把对方那一笔覆盖掉。<br>
+   * <b>WHERE 不带 status</b>：即使帖子在这个窗口里被下架，浏览量也是已经发生的事实，
+   * 没理由丢掉；但 deleted=0 要带，否则注销清理后的残留增量会写进一个永远不再读的行。</p>
+   */
+  @Update("UPDATE post SET view_cnt = view_cnt + #{delta} WHERE id = #{id} AND deleted = 0")
+  int increaseViewCnt(long id, long delta);
 }

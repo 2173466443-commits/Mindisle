@@ -1,29 +1,43 @@
-
 <template>
   <div class="feed">
-    <!-- 1 树洞发帖：后端 POST /api/posts 在阶段 3 落地（先审后发 + 危机分流），
-         阶段 2 把 90001 直接显示出来，不放假数据（手册 §5.8 第 1 条）。 -->
+    <!-- 1 U5 发布器（紧凑形态，与 /publish 同一组件） -->
     <section class="mi-card">
-      <div class="sec-head">
-        <h2>此刻想说点什么</h2>
-        <el-tag size="small" type="info">树洞默认匿名</el-tag>
-      </div>
-      <el-input v-model="draft.content" type="textarea" :rows="3" maxlength="2000" show-word-limit
-                placeholder="这里可以先说说话。若出现自伤或伤人的表达，系统会先给你 12356 等求助入口。" />
-      <div class="cmp-row">
-        <el-select v-model="draft.topicId" placeholder="选择话题（可不选）" clearable class="w240">
-          <el-option v-for="t in topicList" :key="t.id" :label="'# ' + t.name" :value="t.id" />
-        </el-select>
-        <el-select v-model="draft.mood" placeholder="当前心情" class="w140">
-          <el-option v-for="m in MOODS" :key="m.value" :label="m.label" :value="m.value" />
-        </el-select>
-        <el-button type="primary" :loading="busy.publish" @click="doPublish">发布</el-button>
-        <span class="hint">心情字段供阶段 4 情绪感知加权使用，阶段 2 不落库</span>
-      </div>
-      <stage-notice :code="codes.publish" stage="3" api-name="POST /api/posts"
-                    extra="发帖牵涉内容安全链（敏感词预审 → 危机识别 → 人工复审）与图片上传，阶段 3 才接通；现在点发布拿到的是后端 90001，不是接口故障。" />
+      <post-composer compact :topic-list="topicList" @published="onPublished" />
     </section>
 
+    <!-- 2 U3 广场：游标翻页的信息流 -->
+    <section class="plaza">
+      <div class="tabs mi-card">
+        <el-radio-group v-model="activeType" size="small" @change="switchType">
+          <el-radio-button v-for="t in TABS" :key="t.value" :value="t.value">{{ t.label }}</el-radio-button>
+        </el-radio-group>
+        <div class="tab-right">
+          <span class="hint">{{ totalLine }}</span>
+          <el-button size="small" text :loading="feed.loading" @click="reload">刷新</el-button>
+        </div>
+      </div>
+
+      <stage-notice v-if="feed.errorCode" :code="feed.errorCode" stage="3" api-name="GET /api/posts"
+                    :extra="listExtra" />
+
+      <template v-else>
+        <p v-if="!feed.items.length && !feed.loading" class="hint empty">
+          这里暂时没有能看的帖子。广场只放「已过审且公开」的内容，你自己的私密帖与审核中的帖不在这条流里。
+        </p>
+        <div v-for="item in feed.items" :key="item.id" class="row">
+          <post-card :item="item" @dismiss="dismiss" />
+        </div>
+        <div ref="sentinel" class="sentinel">
+          <el-button v-if="feed.hasMore && !feed.loading" size="small" :loading="feed.loading" @click="loadMore">
+            加载更多
+          </el-button>
+          <span v-else-if="feed.loading" class="hint">加载中…</span>
+          <span v-else-if="feed.items.length" class="hint">到这里就是全部了（共 {{ feed.items.length }} 条已加载）</span>
+        </div>
+      </template>
+    </section>
+
+    <!-- 3 推荐流：后端仍是 90001，占位说明保留（阶段 6/7 才接真逻辑） -->
     <section class="mi-card">
       <div class="sec-head">
         <h2>为你推荐</h2>
@@ -37,6 +51,7 @@
       </ul>
     </section>
 
+    <!-- 4 官方话题墙 -->
     <section class="mi-card">
       <div class="sec-head">
         <h2>官方话题墙</h2>
@@ -55,16 +70,7 @@
           </div>
         </div>
       </div>
-      <p class="hint">数据来自 topic 表（audit_status=PASS 且 is_official=1，按 hot_score 倒序）。看不到内容多半是数据库还没建。</p>
-    </section>
-
-    <section class="mi-card">
-      <div class="sec-head">
-        <h2>屿友动态</h2>
-        <el-button size="small" text :loading="busy.posts" @click="loadPosts">刷新</el-button>
-      </div>
-      <stage-notice v-if="codes.posts" :code="codes.posts" stage="3" api-name="GET /api/posts" />
-      <el-empty v-else description="还没有动态" />
+      <p class="hint">数据来自 topic 表（audit_status=APPROVED，按 hot_score 倒序）。看不到内容多半是数据库还没建。</p>
     </section>
 
     <section class="mi-card todo">
@@ -77,30 +83,42 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
-import { topics, posts, publish, recommend } from '@/api/feed'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { topics, recommend } from '@/api/feed'
 import { NOT_IMPLEMENTED_YET } from '@/api/auth'
+import { useFeedStore } from '@/stores/feed'
 import { useUserStore } from '@/stores/user'
+import { CODE } from '@/api/errorCode'
+import PostCard from '@/components/PostCard.vue'
+import PostComposer from '@/components/PostComposer.vue'
 import StageNotice from '@/components/StageNotice.vue'
 
-const MOODS = [
-  { value: 'joy', label: '开心' },
-  { value: 'trust', label: '安心' },
-  { value: 'neutral', label: '平静' },
-  { value: 'sadness', label: '难过' },
-  { value: 'fear', label: '害怕' },
-  { value: 'anger', label: '烦躁' },
-  { value: 'disgust', label: '反感' }
+const TABS = [
+  { value: '', label: '全部' },
+  { value: 'hole', label: '树洞' },
+  { value: 'help', label: '求助' },
+  { value: 'normal', label: '分享' }
 ]
 
+const feed = useFeedStore()
 const user = useUserStore()
 const topicList = ref([])
 const recList = ref([])
 const pending = NOT_IMPLEMENTED_YET
-const draft = reactive({ content: '', topicId: null, mood: 'neutral' })
-const busy = reactive({ topics: false, posts: false, publish: false, recommend: false })
-// 每个动作各自记一个后端码：null 表示这次调用成功（不弹提示条）
-const codes = reactive({ topics: null, posts: null, publish: null, recommend: null })
+const activeType = ref('')
+const busy = reactive({ topics: false, recommend: false })
+const codes = reactive({ topics: null, recommend: null })
+const sentinel = ref(null)
+let observer = null
+
+const totalLine = computed(() => (feed.total >= 0 ? '广场共 ' + feed.total + ' 条可见内容' : '已加载 ' + feed.items.length + ' 条'))
+const listExtra = computed(() => {
+  if (Number(feed.errorCode) === CODE.DB_UNAVAILABLE) {
+    return '数据库暂不可用：帖子列表要读 post 表，后端已按「库挂了也让页面活着」的口径降级，这里是空态而不是白屏。'
+  }
+  return ''
+})
 
 function fmtHot(v) {
   const n = Number(v)
@@ -121,19 +139,6 @@ async function loadTopics() {
   }
 }
 
-async function loadPosts() {
-  busy.posts = true
-  codes.posts = null
-  try {
-    const data = await posts({ page: 1, size: 20 })
-    recList.value = Array.isArray(data && data.records) ? data.records : []
-  } catch (e) {
-    codes.posts = e.code || 'network'
-  } finally {
-    busy.posts = false
-  }
-}
-
 async function loadRecommend() {
   busy.recommend = true
   codes.recommend = null
@@ -147,33 +152,71 @@ async function loadRecommend() {
   }
 }
 
-async function doPublish() {
-  if (!draft.content.trim()) return
-  busy.publish = true
-  codes.publish = null
-  try {
-    await publish({ content: draft.content, topicId: draft.topicId, mood: draft.mood, anonymous: true })
-    draft.content = ''
-  } catch (e) {
-    codes.publish = e.code || 'network'
-  } finally {
-    busy.publish = false
+async function reload() {
+  await feed.fetchPage({ replace: true })
+}
+
+async function loadMore() {
+  if (!feed.hasMore) return
+  await feed.fetchPage()
+}
+
+async function switchType(value) {
+  await feed.setType(value)
+}
+
+function onPublished(data) {
+  if (!data) return
+  if (data.status === 'PUBLISHED') {
+    ElMessage.success('已发布')
+    // 直接回第一屏：服务端刚写完库，前端自己拼一条列表项反而会出现「本地有、刷新没」的不一致。
+    reload()
+  } else if (data.status === 'HUMAN_REVIEW') {
+    ElMessage.warning('已提交人工审核，这条现在只有你自己看得到')
+  } else {
+    ElMessage.info('这条内容没有发出去，原因见上方提示')
   }
 }
 
-onMounted(() => {
+function dismiss(id) {
+  feed.dismiss(id)
+  ElMessage.info('已从当前界面移除（真正的「不感兴趣」反馈要等阶段 7 写进召回过滤）')
+}
+
+// 无限滚动用 IntersectionObserver 而不是 scroll 事件：列表用 flex 布局，
+// 滚动容器其实是 window，scroll 监听每帧都算一次高度；哨兵元素进视野才发请求，天然带去抖。
+function bindObserver() {
+  if (!sentinel.value || typeof IntersectionObserver === 'undefined') return
+  observer = new IntersectionObserver(function (entries) {
+    if (entries.some(function (x) { return x.isIntersecting; })) loadMore()
+  }, { rootMargin: '240px' })
+  observer.observe(sentinel.value)
+}
+
+onMounted(async () => {
   loadTopics()
-  if (user.isLogged) loadPosts()
+  loadRecommend()
+  if (user.isLogged) {
+    await reload()
+    await nextTick()
+    bindObserver()
+  }
+})
+onUnmounted(() => {
+  if (observer) observer.disconnect()
 })
 </script>
 
 <style scoped>
 .feed { display: flex; flex-direction: column; gap: 18px; }
+.plaza { display: flex; flex-direction: column; gap: 12px; }
 .sec-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 h2 { margin: 0; font-size: 16px; color: var(--mi-mist); letter-spacing: 1px; }
-.cmp-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
-.w240 { width: 240px; }
-.w140 { width: 140px; }
+.tabs { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 18px; }
+.tab-right { display: flex; align-items: center; gap: 12px; }
+.row { scroll-margin-top: 80px; }
+.sentinel { display: flex; justify-content: center; align-items: center; min-height: 44px; }
+.empty { padding: 18px; }
 .hint { font-size: 12px; color: var(--mi-text-dim); }
 .formula { font-size: 12px; color: var(--mi-text-dim); font-family: Consolas, monospace; margin: 0 0 8px; }
 .topics { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
@@ -182,4 +225,5 @@ h2 { margin: 0; font-size: 16px; color: var(--mi-mist); letter-spacing: 1px; }
 .t-desc { font-size: 12px; color: var(--mi-text-dim); margin: 6px 0; min-height: 32px; }
 .t-meta { display: flex; gap: 12px; font-size: 12px; color: var(--mi-mist); }
 .lines { margin: 0; padding-left: 20px; line-height: 2; font-size: 13px; }
+.todo h2 { margin-bottom: 8px; }
 </style>

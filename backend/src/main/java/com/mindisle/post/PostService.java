@@ -554,7 +554,13 @@ public class PostService {
         return "ALL";
     }
 
-    private static String displayNameOf(User user) {
+    /**
+     * 展示名口径，任务 3.3（发帖回显）与任务 3.5（列表/详情）共用。
+     *
+     * <p>包级可见而不是 private：{@code PostQueryService} 要给出与发帖时<b>逐字相同</b>的名字，
+     * 复制一份实现就会出现「发帖显示昵称、进列表变成登录名」的口径分裂。同包复用，不为此起新的工具类。</p>
+     */
+    static String displayNameOf(User user) {
         String nickname = user.getNickname();
         return nickname == null || nickname.isBlank() ? user.getUsername() : nickname.trim();
     }

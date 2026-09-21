@@ -8,6 +8,7 @@
       </div>
       <nav class="mi-nav">
         <router-link to="/feed">广场</router-link>
+        <router-link to="/publish">发布</router-link>
         <router-link to="/ai">屿灵</router-link>
         <router-link to="/emotion">情绪</router-link>
         <router-link to="/me">我的</router-link>

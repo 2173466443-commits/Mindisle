@@ -1,6 +1,6 @@
 # 009_心屿（MindIsle）· AI 心理陪伴与情感支持社区平台（毕业设计）
 
-> 项目编号 009 ｜ 立项 2026-09-17 ｜ 当前阶段：**阶段 3 进行中（☑ 4 / ◐ 1 / ☐ 12）**——真实 MySQL 已建库（**31 张表 / 9.7.1**），社区主线 **T3.3 发帖 + 状态机 + 危机工单** 已落地并跑通：`mvn -o -B test` 实测 **131 例 0 失败 0 错误 1 跳过**，另有一条**真 HTTP 冒烟脚本** `docs/smoke.mjs` 实测 **45 项 / 41 条断言 / 0 失败**（注册→登录→发帖→机审拦截→危机转人工→工单落库→马甲去重→配额 429 全链路，跑完回查数据库取证）。上传接口的登录后 200 链路、precheck 的 200 响应体、马甲与配额的落库行为**均已在本轮由真库证据销账**。未做：`GET /api/posts` 与详情（T3.5）、前端发布器契约对齐（T3.13）等 12 项按设计返回 **90001/501，不用 mock 糊弄演示**。开题材料（阶段 1B）按用户 2026-09-18 指令顺延，不排在代码之前。
+> 项目编号 009 ｜ 立项 2026-09-17 ｜ 当前阶段：**阶段 3 进行中（☑ 5 / ◐ 2 / ☐ 10）**——真实 MySQL 已建库（**31 张表 / 9.7.1**），社区主线 **T3.3 发帖 + 状态机 + 危机工单** 与 **T3.5 列表 / 详情** 已落地并跑通：`mvn -o -B test` 实测 **153 例 0 失败 0 错误 1 跳过**，另有一条**真 HTTP 冒烟脚本** `docs/smoke.mjs` 实测 **68 项 / 63 条断言 / 0 失败**（13 步：注册→登录→发帖→机审拦截→危机转人工→工单落库→马甲去重→配额 429→上传挂图→**可见性（私密与待审整行不出现）→翻页零重叠→浏览量缓存回写**，跑完回查数据库取证）。**T3.5**：`GET /api/posts`（游标 `beforeId` + `size≤50`，未登录 401/10002）与 `GET /api/posts/{id}`（不可见与不存在统一 **404/30001**，绝不 403）已带真库证据；浏览量走**每帖每 5 分钟最多回写一次**的写延迟缓存（SQL 复核 `post 32 view_cnt=1`，与「列表读到 1、详情读到 3」互证）。**T3.13 前端第一批（U3 广场 / U4 详情 / U5 发布器）代码已落地**，但证据只有两条：`npm run build` **✓ built in 5.80s** 与经 Vite 代理的真取数，**未经浏览器渲染实测**（写白，不宣称可用）。未做：互动 / 评论 / 举报 / 埋点（T3.6–T3.11）、U1/U6/U11/U12 前端等 **10 项**按设计返回 **90001/501，不用 mock 糊弄演示**。开题材料（阶段 1B）按用户 2026-09-18 指令顺延，不排在代码之前。
 > 论文题目（推荐）：**《基于大语言模型与情绪感知协同过滤算法的校园心理陪伴社区平台的设计与实现》**
 > 英文题目：*Design and Implementation of a Campus Psychological Companionship Community Platform Based on Large Language Model and Emotion-Aware Collaborative Filtering*
 >
@@ -12,7 +12,7 @@
 | 文件 | 作用 |
 |---|---|
 | `需求分析文档.md`（**v1.2.1**） | 做什么、做到什么标准：FR1–FR10 / NFR / BR / 算法与实验设计 / 里程碑 / DoD / 论文章节映射；§15 风险表已并入调研新增的 **R12–R21**，§7.2 表清单口径统一为「24 个编号行 = **31** 张物理表」（v1.2.1 把「单独同意」拆成独立 `user_consent` 表） |
-| **`制作步骤文档.md`（v1.1.6）** | **怎么一步步做**：技术栈定版、阶段 0–9 施工步骤与可复制命令、Gate 验收（含 §18 Gate 判定汇总 10 行）、30 条常见故障速查、117 项任务打勾总表（**144.3 人日 ≈ 577 小时**，日历 ≈32 周）、§17 三向追溯矩阵 101 行（FR 74 + NFR 12 + BR 12 + AR 3）、§19 交付自检。**当前 v1.1.6 = T3.3 发帖状态机 + 危机工单回写（v1.1.4 / v1.1.5 条目仍然有效）**（其下条目为 v1.1.3 的阶段 2 回写，仍然有效）：表数 30→31、`user_consent` 独立建表、申诉表定名 `post_appeal`、`00_create_db_and_user.sql` 实名、词云 R19 依赖层关闭（运行时渲染仍待验证）、§5.8 与 §5.10 逐条对账；**v1.1.4（2026-09-20）新增**：敏感词引擎 + 马甲规则 + 频率规则三块地基落地并测绿（66 例单测）、§15 阶段 3 表 **T3.2/T3.4/T3.12 由 ☐ 升 ◐**（其余 14 项仍 ☐）、§18 Gate3 改「◐ 进行中」、OpenAPI 实测 **21 paths / 24 operations / 6 分组**、本轮修掉 **8 处真实缺陷**（最贵一条：裸路径在 Servlet 容器 ResourceLoader 下解析成 `ServletContext resource [...]`，测试绿线上红）；**v1.1.5（2026-09-20）新增**：**T3.1 图片上传**落地 —— 魔数白名单（只认 jpg/png/gif 文件头，扩展名与 Content-Type 一律不信）+ Thumbnailator 重编码去 EXIF + 按原格式回存（不用 WebP：FR4.1 白名单只有 jpg/png/gif 且 JDK 17 无 WebP 编码器）；§15 表 **T3.1 由 ☐ 升 ◐**（阶段 3 收工口径 **☑ 0 / ◐ 4 / ☐ 13**）、单测 66 → **80 例**、OpenAPI **21/24/6 → 22 paths / 25 operations / 7 分组**（新增 07-file）、本轮又挖出 **4 个坑**（最贵一条：MVC 静态映射被写成 `/uploads//**`，磁盘有文件而 HTTP 404、80 例单测却全绿 → 接线类改动必须在跑着的服务上打一次真实请求）；**v1.1.6（2026-09-20）新增**：**31 表 DDL 第一次被真实 MySQL 解析执行**（`docs/init-db.ps1` 端到端跑通，`information_schema` 实测 31 表 / 9.7.1）、**T3.3 ☐→☑**（发帖八步判定顺序 + 危机 L2·L3 建 `alert_ticket` + `post_status_log` 状态日志）、**T3.12 ◐→☑**（配额有了真实调用方，明确决定不做重启 COUNT 校准）、**T3.1 ◐→☑**（登录 200 上传 + 挂图进帖）、**T3.4 ◐→☑**（马甲分配第一次跑在真库上），阶段 3 口径 **☑ 4 / ◐ 1 / ☐ 12**；单测 80 → **131 例**、新增**真 HTTP 冒烟** `docs/smoke.mjs`（45 项 / 41 断言 / 0 失败）；§6.1 追加 v1.1.6 实测回写 8 条（最贵一条：Java 15+ 把字符串字面量里的 `s` **静默当成空格**，正则失效而 131 例单测照样全绿，最后靠打印 charCode 才抓出来） |
+| **`制作步骤文档.md`（v1.1.7）** | **怎么一步步做**：技术栈定版、阶段 0–9 施工步骤与可复制命令、Gate 验收（含 §18 Gate 判定汇总 10 行）、30 条常见故障速查、117 项任务打勾总表（**144.3 人日 ≈ 577 小时**，日历 ≈32 周）、§17 三向追溯矩阵 101 行（FR 74 + NFR 12 + BR 12 + AR 3）、§19 交付自检。**当前 v1.1.6 = T3.3 发帖状态机 + 危机工单回写（v1.1.4 / v1.1.5 条目仍然有效）**（其下条目为 v1.1.3 的阶段 2 回写，仍然有效）：表数 30→31、`user_consent` 独立建表、申诉表定名 `post_appeal`、`00_create_db_and_user.sql` 实名、词云 R19 依赖层关闭（运行时渲染仍待验证）、§5.8 与 §5.10 逐条对账；**v1.1.4（2026-09-20）新增**：敏感词引擎 + 马甲规则 + 频率规则三块地基落地并测绿（66 例单测）、§15 阶段 3 表 **T3.2/T3.4/T3.12 由 ☐ 升 ◐**（其余 14 项仍 ☐）、§18 Gate3 改「◐ 进行中」、OpenAPI 实测 **21 paths / 24 operations / 6 分组**、本轮修掉 **8 处真实缺陷**（最贵一条：裸路径在 Servlet 容器 ResourceLoader 下解析成 `ServletContext resource [...]`，测试绿线上红）；**v1.1.5（2026-09-20）新增**：**T3.1 图片上传**落地 —— 魔数白名单（只认 jpg/png/gif 文件头，扩展名与 Content-Type 一律不信）+ Thumbnailator 重编码去 EXIF + 按原格式回存（不用 WebP：FR4.1 白名单只有 jpg/png/gif 且 JDK 17 无 WebP 编码器）；§15 表 **T3.1 由 ☐ 升 ◐**（阶段 3 收工口径 **☑ 0 / ◐ 4 / ☐ 13**）、单测 66 → **80 例**、OpenAPI **21/24/6 → 22 paths / 25 operations / 7 分组**（新增 07-file）、本轮又挖出 **4 个坑**（最贵一条：MVC 静态映射被写成 `/uploads//**`，磁盘有文件而 HTTP 404、80 例单测却全绿 → 接线类改动必须在跑着的服务上打一次真实请求）；**v1.1.6（2026-09-20）新增**：**31 表 DDL 第一次被真实 MySQL 解析执行**（`docs/init-db.ps1` 端到端跑通，`information_schema` 实测 31 表 / 9.7.1）、**T3.3 ☐→☑**（发帖八步判定顺序 + 危机 L2·L3 建 `alert_ticket` + `post_status_log` 状态日志）、**T3.12 ◐→☑**（配额有了真实调用方，明确决定不做重启 COUNT 校准）、**T3.1 ◐→☑**（登录 200 上传 + 挂图进帖）、**T3.4 ◐→☑**（马甲分配第一次跑在真库上），阶段 3 口径 **☑ 4 / ◐ 1 / ☐ 12**；单测 80 → **131 例**、新增**真 HTTP 冒烟** `docs/smoke.mjs`（45 项 / 41 断言 / 0 失败）；§6.1 追加 v1.1.6 实测回写 8 条（最贵一条：Java 15+ 把字符串字面量里的 `s` **静默当成空格**，正则失效而 131 例单测照样全绿，最后靠打印 charCode 才抓出来）；**v1.1.7（2026-09-20）新增**：**T3.5 ☐→☑**（游标分页 `beforeId` + 唯一可见性判据 `visibleTo` + 浏览量**每帖每 5 分钟最多回写一次**的写延迟缓存，回写 SQL 用 `view_cnt = view_cnt + #{delta}` 库内原子累加）、**§6.4 第 1 条 ☐→☑**（灰词转人审的双账号可见性第一次被真库实测：第三人列表整条不出现、详情 404/30001、作者侧带 `auditTip`）、**T3.13 ☐→◐ 第一批**（U3/U4/U5 代码落地，**证据只有 build + 代理级取数，未经浏览器渲染实测**）、阶段 3 口径 **☑ 5 / ◐ 2 / ☐ 10**、单测 131 → **153 例**、冒烟 45 项/41 断言 → **68 项 / 63 断言**（11 步 → 13 步）、§6.1 追加 v1.1.7 实测回写 9 条（最贵一条：`auditTip` 判据写成 `isOwner(post, post.getUserId())` 恒真且漏传 `viewerId`，会把「谁在被审核」泄露给全广场 —— 靠双账号冒烟抓出） |
 | `同类项目调研与实现方案.md`（**已定版 + §10 增补**） | ✅ Gate 1 产出：18 个同类项目档案 + 横向对比 + 许可证核查 + §6 实现方案 + §7 风险 R12–R21。**SOP 关卡已过，§0–§9 转只读**，开工后的事实以 **§10「阶段 2 施工实测回写」** 追加（表数 31、R19 只关一半、毕设材料顺延） |
 
 ## 二、项目目标（四件事缝成一条闭环）
@@ -47,13 +47,13 @@
 ├─ README.md  需求分析文档.md  制作步骤文档.md
 ├─ docs/            check-env.ps1 · init-db.ps1 · start-redis.ps1 · dev-log.md · diagrams/{01 架构,02 时序,03 双通道,04 ER}
 ├─ sql/             00_create_db_and_user · 01–08 建表（**31 表**）· 09_seed · 10_index · patch/
-├─ backend/         Spring Boot 4.1.1 工程（`src/main/java` **73 个类 / 8 个 Controller**：web 认证·用户·系统·社区·管理·审计·文件·**发帖** / post **发帖状态机与危机分级**与马甲与配额 / audit 敏感词引擎 / upload 图片上传 / ratelimit / security / common / cache / config / entity 12 / mapper 12 / auth / user / captcha（口径于 2026-09-20 重数纠正，上一版「58 类 / 7 Controller」是 T3.3 开工前的旧值））
-├─ frontend/        用户端 Vue 3（端口 5173，8 个视图：feed / ai / emotion / user / help / auth 登录注册 / 404）
+├─ backend/         Spring Boot 4.1.1 工程（`src/main/java` **78 个类 / 8 个 Controller**：web 认证·用户·系统·社区·管理·审计·文件·**发帖** / post **发帖状态机与危机分级**与马甲与配额 / audit 敏感词引擎 / upload 图片上传 / ratelimit / security / common / cache / config / entity 11 / mapper 11 / auth / user / captcha；`post` 包 8 类 + `post/dto` 4 类）（口径于 2026-09-20 **两次**重数纠正：「58 类 / 7 Controller」是 T3.3 开工前的旧值、「73 类 / entity 12 / mapper 12」是 T3.5 开工前的旧值，现值由 `Get-ChildItem -Recurse -Filter *.java` 实数得出）
+├─ frontend/        用户端 Vue 3（端口 5173，10 个视图文件、`src` 共 33 个文件：feed 广场 / **post 详情 + post 发布** / ai / emotion / user / help / auth 登录注册 / 404，另有 `components/{PostComposer,PostCard,CrisisCard,EmotionPill,StageNotice}.vue` 与 `utils/format.js`）
 ├─ admin/           管理端 Vue 3（端口 5174，`src` 17 个文件：Dashboard / Login / Audit / Configs / 404 + 布局 + api 三件套 + store + 主题）
 └─ 论文材料/        prompts/ experiments/{data,scripts,output,figs}/ 截图/ 图表/ 论文草稿/ 答辩/
 ```
 
-## 四·补 怎么跑起来（**后端已连真实 MySQL**；含 131 例单测 + 45 项真 HTTP 冒烟）
+## 四·补 怎么跑起来（**后端已连真实 MySQL**；含 153 例单测 + 68 项真 HTTP 冒烟）
 
 ```powershell
 # 0) 建库建用户：2026-09-20 已在本机跑通（31 张表 / MySQL 9.7.1 / utf8mb4_0900_ai_ci，root 口令交互输入不落盘），脚本幂等可重跑
@@ -65,11 +65,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\docs\start-redis.ps1
 
 # 2) 后端（8080）
 cd backend; mvn -o spring-boot:run
-#    接口文档：http://127.0.0.1:8080/doc.html -> 302 -> /swagger-ui/index.html（200）；OpenAPI 描述在 /v3/api-docs（2026-09-20 复测 22 paths / 25 operations / 7 分组，新增 07-file 文件与上传；分组名含中文与空格，脚本拉取必须先做 URL 编码，否则拿到空 paths 会误判成分组不匹配）
+#    接口文档：http://127.0.0.1:8080/doc.html -> 302 -> /swagger-ui/index.html（200）；OpenAPI 描述在 /v3/api-docs（2026-09-20 复测 22 paths / 25 operations / 7 分组，新增 07-file 文件与上传；分组名含中文与空格，脚本拉取必须先做 URL 编码，否则拿到空 paths 会误判成分组不匹配）；**2026-09-20 再次复核仍是 22 / 25 / 7**：T3.5 的两个 GET 落在既有 `/api/posts` 与 `/api/posts/{id}` 路径上，未增减路径数
 #    验证码：http://127.0.0.1:8080/api/auth/captcha → {captchaId, imageBase64}
 #    涉库接口在库不可用时按设计返回 HTTP 503 + {"code":90002}（降级，不是崩了）；未实现的接口返回 90001/501，绝不返回 mock 数据
 #    健康检查：/actuator/health/liveness 与 /readiness 免登录可查（200 UP）；/actuator/health 整体在未建库时是 503 DOWN，属设计内降级
 #    图片上传：POST /api/files/image（**登录态 200** 与未登录 401+10002 均已真 HTTP 实测，200 链路由冒烟第 11 步覆盖）-> 落 backend/uploads/yyyy/MM/dd/uuid32.<原格式> -> GET /uploads/** 读回（200 image/png，字节与磁盘一致）；单张超 5MB 由容器先拒，返回 413 且响应体不是统一 Result 格式，前端要单独兜这一种
+#    帖子读接口：GET /api/posts（游标 beforeId + size≤50，未登录 401/10002，type 白名单外 400/10001）与 GET /api/posts/{id}（不可见与不存在统一 404/30001，绝不 403；作者本人可读回自己的私密与待审帖并带 auditTip）
 
 # 3) 用户端（5173）/ 管理端（5174），各自目录内
 npm install; npm run dev
@@ -80,9 +81,9 @@ npm install; npm run dev
 
 # 5) 真 HTTP 冒烟（后端与 MySQL 必须在跑；退出码 0 = 全部断言通过，可直接接 CI）
 $env:SMOKE_PENDING_TOPIC_ID = "21"; node docs\smoke.mjs
-#    本机实测 2026-09-20 15:51：45 项 / 41 条断言 / 0 失败
-#    覆盖：健康→验证码→注册→登录→专题→precheck→发帖正反侧→危机工单→马甲去重→配额 429→上传挂图
-#    注意：每跑一次会新增 2 个账号 / 6 帖 / 1~2 张工单 / 1 张图，属正常；清理 SQL 见 docs/dev-log.md
+#    本机实测 2026-09-20 17:0x：68 项 / 63 条断言 / 0 失败（退出码 0）；冒烟脚本由 428 行扩到 560 行 / 13 步
+#    覆盖：健康→验证码→注册→登录→专题→precheck→发帖正反侧→危机工单→马甲去重→配额 429→上传挂图→**私密与待审帖整行不出现 + 详情 404/30001**→**游标翻页三页零重叠 + 浏览量 5 分钟窗口回写**
+#    注意：每跑一次会新增 2 个账号 / 6 帖（第 12 步另加 1 账号 / 3 帖）+ 1~2 张工单 / 1 张图，属正常；本轮库净增 2 账号 / 3 帖 + `post 32 view_cnt=1`；**按外键顺序的清理 SQL 见 docs/dev-log.md**
 
 ```
 
@@ -121,7 +122,18 @@ $env:SMOKE_PENDING_TOPIC_ID = "21"; node docs\smoke.mjs
   - 真 HTTP 冒烟：`docs/smoke.mjs` 扩到 **427 行 / 11 步**，本机实测 **45 项 / 41 条断言 / 0 失败**；跑完用 mysql 回查 `posts`、`alert_ticket`、`post_status_log`、`post_image`、`anonymous_alias` 取证（本轮 post 18–23 六条、状态日志 12 行、马甲 4 张脸且 floor_no 1..4）。
   - **仍未做（不算完工）**：HUMAN_REVIEW 未同步进 `audit_task`（人审队列取不到这类帖）、工单无通知与 SLA 扫描、`auto_destroy_at` 只写不扫、禁言（BR6）只有单测证据缺真库冒烟、**前端发布器仍发旧契约**（`FeedView.vue` 缺必填 `title`，接上后端必 400） → 归 **T3.13**，是阶段 3 下一步的头等事。
 
-- [ ] **阶段 3 进行中（☑ 4 / ◐ 1 / ☐ 12）**：已完 T3.1 上传 / T3.3 发帖状态机 / T3.4 马甲落库 / T3.12 频率限制；T3.2 敏感词引擎仍 ◐（状态机接线与灰词人审闭环未做）；下一步 **T3.13 前端发布器对齐契约 → T3.5 列表与详情 → T3.15 危机闭环**；再往后：阶段 4 AI+情绪+危机 → 阶段 5 私信 → 阶段 6 管理端 → 阶段 7 推荐与实验 → 阶段 8 测试 → 阶段 9 论文
+- [x] **2026-09-20 阶段 3（续 3）—— T3.5 帖子读接口 + 浏览量写延迟回写 + T3.13 前端第一批（U3/U4/U5）**：
+  - 后端新增：`post/PostQueryService`(463 行) / `post/ViewCountService`(106) / `config/ViewCountConfig`(33，端口—适配器装配，业务类零 Spring 依赖可裸测) / `post/dto/{PostListItem,PostDetailView}`；`PostMapper` +13（`increaseViewCnt` 用 `view_cnt = view_cnt + #{delta}` 库内原子累加，`WHERE` 带 `deleted = 0` 而**不带 `status`**：这个窗口里帖子被下架，浏览量也是已发生的事实）、`PostImageMapper` +21、`PostTopicMapper` +16；`web/PostController` +41 挂上两个 GET（读写同一控制器，避免「谁负责 404、谁负责 403」口径分裂）、`web/FeedController` -12（删掉两条 `NOT_IMPLEMENTED_YET` 桩，不删即启动期 ambiguous mapping）、`PostService` ±8。
+  - **可见性唯一判据** `visibleTo`：别人只见 `public + PUBLISHED`，作者额外可见自己的 `MACHINE_REVIEW/HUMAN_REVIEW` 并带 `auditTip`，`REJECTED/TAKEDOWN/DELETED/DRAFT` 谁都看不见；不可见与不存在统一 **404/30001**（报 403 等于送出一条免费的枚举通道）；`type` 白名单外 400/10001；不透出 `riskLevel/qualityScore/reportCnt/deleted`；匿名不回 `authorId`；`help` 或 L2/L3 帖回 `hotline = 12356`；到期树洞读侧先隐藏。分页 = 游标 `beforeId` + `(published_at DESC, id DESC)`（与 `idx_status_pub` 同序）、`size ≤ 50`、**首屏也回 `nextCursor`**。
+  - 浏览量口径：详情走缓存给准数、列表给库值，**展示值 = 库值 + 未回写增量**（`viewCnt += pending`，否则「别人 12 我这里 9」会被当成丢数）；作者自看不计数；回写节流 = **每帖每 5 分钟最多一次**。
+  - 单测：新增 `PostQueryServiceTest` **17 例** + `ViewCountServiceTest` **5 例** → `mvn -o -B test` = **Tests run: 153, Failures: 0, Errors: 0, Skipped: 1**（BUILD SUCCESS，日志 `backend/target/verify-t35b.log`），后端 8080 复起 `Started MindisleApplication in 4.353 seconds`。
+  - 真 HTTP 冒烟：`docs/smoke.mjs` **428 → 560 行 / 11 → 13 步**，本机实测 **68 项 / 63 条断言 / 0 失败**；第 12/13 步新增断言含「第三人 `size=50` 只回 n=21 且私密与待审整条不出现」「两者详情 **404/30001**」「作者列表里该待审项带 `auditTip`（id 31）而第三人没有」「私密帖不进作者广场 n=22 但详情 200 + 正文全文」「游标连翻三页 **32,28,26 / 25,24,22 / 20,19,18** 零重叠」「`type=hole` n=5、`type=moment` 400/10001」「无 token 401/10002」「匿名项只回 `displayName`」「help 帖 `hotline=12356`」「浏览量 base=0 → 1,2,3」。
+  - 真库取证（root 直连 SQL）：`post 32 view_cnt = 1` 与「详情读到 3、列表读到 1」互证回写窗口生效；`post 30 visibility=private`、`post 31 HUMAN_REVIEW`、`alert_ticket` 13(L3)/14(L2) pending、`topic 21 PENDING`。本轮库净增 **2 账号 / 3 帖**（`smoke_seen_*`、`fecheck_*`），按外键顺序的双前缀清理 SQL 已写进 `docs/dev-log.md`。
+  - 前端（T3.13 第一批）：新增 `components/PostComposer.vue`(402) + `PostCard.vue`(81) + `CrisisCard.vue`(44) + `views/post/PostDetailView.vue`(142) + `PublishView.vue`(60)、重写 `views/feed/FeedView.vue`(230) 与 `stores/feed.js`(111 游标状态机)、新增 `utils/format.js`(64) 与 `api/{post,audit,file}.js`；路由 `/publish`、`/post/:id`。发布器含防抖 300ms 预检、localStorage 草稿、九图上传（413 特判）、树洞销毁档位 24/72/168h、匿名（树洞强制）、发布结果三态回显。**只有 `PostDetailView` 里 30001 的文案写「这条内容你现在看不到」而不写「不存在」** —— 前端不替服务端承认存在性。
+  - 前端证据（写白）：**`npm run build` exit 0 / ✓ built in 5.80s**；经 Vite 代理打到真后端取到真实数据 —— `GET /api/posts?size=3` → **200 / total=21 / nextCursor=26 / 首条 id=32**，不带 token → **401 / 10002**。**没有做任何浏览器渲染与点击实测**（本机无可驱动浏览器，`cua.getState()` 返回 `Codex auth token is unavailable`），因此「U3/U4/U5 视觉与交互已验证」**不成立**，§6.4 第 4 条仍判 ☐。
+  - **仍未做（不算完工）**：① 作者私密帖在 UI 上**没有稳定入口**（`GET /api/users/me/posts` 与 U12 未做，发完只能靠链接找回）；② `HUMAN_REVIEW` 仍未进 `audit_task` 队列 —— 本轮让作者自己看见了，管理员依旧看不见，**读侧闭环、写侧未闭环**；③ 未回写的浏览量增量只在缓存里，重启最多丢「一帖一窗口」；④ 只有「最新发布」排序，「热门」Tab 复用同一份数据；⑤ U1/U6/U11/U12、点赞收藏关注（T3.6）、评论（T3.7）、举报与通知（T3.11）、埋点（T3.10）全部未开工。
+
+- [ ] **阶段 3 进行中（☑ 5 / ◐ 2 / ☐ 10）**：已完 T3.1 上传 / T3.3 发帖状态机 / T3.4 马甲落库 / T3.12 频率限制 / **T3.5 列表与详情（含浏览量缓存回写）**；T3.2 敏感词引擎仍 ◐（灰词转人审的管理端放行未闭环：`HUMAN_REVIEW` 不进 `audit_task`）、**T3.13 前端 ◐ 第一批**（U3 广场 / U4 详情 / U5 发布器代码已落地，未经浏览器实测）；下一步 **T3.13 第二批（U11 主页 + U12 我的 + `GET /api/users/me/posts`）→ 浏览器渲染取证 → T3.6 点赞/收藏/关注 → T3.7 评论 → T3.11 举报与通知**；再往后：阶段 4 AI+情绪+危机 → 阶段 5 私信 → 阶段 6 管理端 → 阶段 7 推荐与实验 → 阶段 8 测试 → 阶段 9 论文
 - [ ] **阶段 1B（开题报告 / 文献综述 ≥15 篇含 ≥5 英文 / 23 页线框 / ER 图 / 架构图 3 张）—— 按用户 2026-09-18 指令「毕设材料先不用写」顺延**；风险 R21（2026-10 上旬截止）改由用户盯办
 - [x] **论文材料目录骨架**：`论文材料/`（prompts · experiments/{data,scripts,output,figs} · 截图 · 图表 · 论文草稿 · 答辩）
 
