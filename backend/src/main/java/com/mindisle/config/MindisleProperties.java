@@ -126,6 +126,8 @@ public class MindisleProperties {
         private int maxTitleChars = 50;
         /** 正文最长字符数（FR4.1：≤5000）。 */
         private int maxContentChars = 5000;
+        /** 评论最长字符数（FR4.4「≤1000 字」，与 DDL 的 comment.content VARCHAR(1000) 同宽）。 */
+        private int maxCommentChars = 1000;
         /** 单帖话题数上限：需求只写「+ 话题」没给数字，取 3（超过 3 个属于引流，FR1.7 防刷屏）。 */
         private int maxTopics = 3;
         /**

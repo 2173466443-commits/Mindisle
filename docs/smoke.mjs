@@ -817,6 +817,193 @@ async function main() {
     info("15", "互动样本没备齐，本步整体跳过（根因在上面，不逐条报 401）", "");
   }
 
+  // ---------- 16 评论与楼中楼（任务 T3.7 · 需求 FR4.3、FR4.4、FR7.3、BR1、BR4、BR6）----------
+  // 这一步只验「接线」：两级压平的两个 id 到底落没落对、待审评论在别人的查询里到底出不出现、
+  // comment_cnt 与 comment 表真相是否一致。规则分支本身由 CommentServiceTest 的 43 条钉死，两边不重复。
+  // 本脚本一步就能把「60 次/分」的全局限流（T2.17）打满，而它和评论配额是两件事：
+  // 不加这层保护，第 16 步测出来的 429 到底是 30003 配额还是 10010 限流都分不清。
+  // 所以每条请求都带上「剩余配额不足就等下一个 60s 窗口」的自愈逻辑——这是脚本的问题，不该记到接口头上。
+  const waitNextBucket = function () {
+    const ms = 60000 - (Date.now() % 60000) + 300;
+    info("16", "全局限流窗口将满，等 " + Math.ceil(ms / 1000) + "s 进下一个 60s 窗口再继续", "");
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  };
+  const rlSafe = async function (make) {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const rr = await make();
+      if (code(rr) === "10010") { await waitNextBucket(); continue; }
+      const left = rr.headers ? rr.headers["x-ratelimit-remaining"] : undefined;
+      if (left !== undefined && Number(left) <= 3) { await waitNextBucket(); }
+      return rr;
+    }
+    return make();
+  };
+  const cAdd = function (token, postId, body) {
+    const opts = token ? asToken(token, jsonBody(body)) : jsonBody(body);
+    return rlSafe(function () { return send("POST", "/api/posts/" + postId + "/comments", opts); });
+  };
+  const cList = function (token, postId, qs) {
+    const opts = token ? { headers: { Authorization: "Bearer " + token } } : {};
+    return rlSafe(function () {
+      return send("GET", "/api/posts/" + postId + "/comments" + (qs ? "?" + qs : ""), opts);
+    });
+  };
+  const cmt = function (rr) { return bodyOf(rr).comment || {}; };
+  const tipHas = function (value, needle) { return String(value || "").indexOf(needle) >= 0; };
+  let anonUsedByThird = 0;
+  if (publicId && anonHoleId && privateId && seenToken && accessToken) {
+    const cntBefore = bodyOf(await rlSafe(function () { return detailGet(accessToken, publicId); })).commentCnt;
+
+    r = await cAdd(accessToken, publicId, { content: "  先抱抱楼主，写得真好  " });
+    const rootC = cmt(r);
+    check("16", "第三人发一级评论 → 200/PUBLISHED：落库的是 trim 过的正文，parentId 与 rootId 都是 null",
+      r.status === 200 && code(r) === "0" && !!rootC.id && rootC.status === "PUBLISHED"
+      && rootC.content === "先抱抱楼主，写得真好" && rootC.parentId == null && rootC.rootId == null,
+      r.status + " " + short(r, 200));
+
+    r = await cAdd(seenToken, publicId, { content: "谢谢你的拥抱", parentId: rootC.id });
+    const reply1 = cmt(r);
+    check("16", "回复一级评论：parent_id 与 root_id 都指向它，回执 replyToName 用被回复者的展示名（不是登录名）",
+      r.status === 200 && !!reply1.id && reply1.parentId === rootC.id && reply1.rootId === rootC.id
+      && reply1.replyToName === rootC.authorName,
+      "parentId=" + reply1.parentId + " rootId=" + reply1.rootId + " replyToName=" + reply1.replyToName);
+
+    r = await cAdd(accessToken, publicId, { content: "那我也插一句", parentId: reply1.id });
+    const reply2 = cmt(r);
+    check("16", "回复楼中楼：parent_id 指向真正被回复的那条，root_id 沿用一级评论——页面因此只有两层缩进",
+      r.status === 200 && !!reply2.id && reply2.parentId === reply1.id && reply2.rootId === rootC.id,
+      "parentId=" + reply2.parentId + " rootId=" + reply2.rootId);
+
+    r = await cList(accessToken, publicId, "size=50");
+    const threads = bodyOf(r).list || [];
+    const tree = threads.find(function (t) { return t.root && t.root.id === rootC.id; }) || {};
+    check("16", "GET 评论列表：一级评论分页，子树预览 2 条、replyTotal 也是 2（预览数与真相数在这一刻相等）",
+      r.status === 200 && code(r) === "0" && !!tree.root && tree.replies.length === 2 && tree.replyTotal === 2,
+      r.status + " total=" + bodyOf(r).total + " n=" + threads.length);
+
+    const cntAfter = bodyOf(await rlSafe(function () { return detailGet(accessToken, publicId); })).commentCnt;
+    check("16", "写侧不变式：详情 commentCnt = 之前的值 + 本次公开的 3 条（冗余列按真相重算，不是 += 1 累加）",
+      cntAfter === cntBefore + 3, cntBefore + " -> " + cntAfter);
+
+    r = await cAdd(accessToken, anonHoleId, { content: "我也有过这种时候", anonymous: true });
+    const anonC = cmt(r);
+    anonUsedByThird++;
+    check("16", "匿名评论：回执 authorId=null、展示名是马甲名（前缀 匿名屿民·），绝不回真实昵称",
+      r.status === 200 && anonC.authorId == null && anonC.anonymous === true
+      && String(anonC.authorName).indexOf("匿名屿民·") === 0,
+      JSON.stringify({ authorId: anonC.authorId, authorName: anonC.authorName }));
+
+    r = await cAdd(accessToken, anonHoleId, { content: "有事直接找我13800138000", anonymous: true });
+    const masked = cmt(r);
+    anonUsedByThird++;
+    check("16", "匿名评论里的手机号落库前就被遮掉且 tip 说明原因：字数不变（换成 ＊），身份也不泄露",
+      r.status === 200 && String(masked.content).indexOf("13800138000") < 0
+      && masked.content.length === "有事直接找我13800138000".length && tipHas(bodyOf(r).tip, "联系方式"),
+      "content=" + masked.content);
+
+    r = await cAdd(accessToken, publicId, { content: "实名就不用遮：有事找我13900139000" });
+    const namedC = cmt(r);
+    check("16", "实名评论不遮联系方式（口径与匿名帖一致：作者本来就露着身份，遮它属于越权改内容）",
+      r.status === 200 && cmt(r).content === "实名就不用遮：有事找我13900139000",
+      "content=" + cmt(r).content + " status=" + cmt(r).status);
+
+    r = await cAdd(seenToken, publicId, { content: "你就是个傻逼" });
+    const pendingC = cmt(r);
+    check("16", "灰词评论转人审：HTTP 仍 200、status=PENDING、tip 是人话（与发帖同一契约，不是 4xx）",
+      r.status === 200 && pendingC.status === "PENDING" && tipHas(bodyOf(r).tip, "人工审核"),
+      r.status + " status=" + pendingC.status);
+
+    const asOther = bodyOf(await cList(accessToken, publicId, "size=50"));
+    const asAuthor = bodyOf(await cList(seenToken, publicId, "size=50"));
+    const inTree = function (page, id) {
+      return (page.list || []).some(function (t) {
+        return t.root.id === id || (t.replies || []).some(function (x) { return x.id === id; });
+      });
+    };
+    // 一级评论与楼中楼回复在同一次返回里是两层结构，判「某条评论出不出现」必须两层都看，
+    // 只看 replies 会把「它其实是以一级评论出现的」误判成不可见（本脚本第一版就踩在这）。
+    const rowOf = function (page, id) {
+      const all = [];
+      (page.list || []).forEach(function (t) {
+        all.push(t.root);
+        (t.replies || []).forEach(function (x) { all.push(x); });
+      });
+      return all.find(function (x) { return x.id === id; }) || {};
+    };
+    const authorRow = rowOf(asAuthor, pendingC.id);
+    check("16", "FR7.3 待审评论只对作者可见：第三人那次查询里根本没有这一条，作者视角带「审核中，仅自己可见」",
+      inTree(asOther, rootC.id) && !inTree(asOther, pendingC.id) && inTree(asAuthor, pendingC.id)
+      && authorRow.auditTip === "审核中，仅自己可见" && authorRow.status === "PENDING",
+      "otherTotal=" + asOther.total + " authorTotal=" + asAuthor.total + " auditTip=" + authorRow.auditTip);
+
+    check("16", "同一条规则对另一个人同样成立：第三人自己那条待审评论（留手机号被灰词转人审）在他自己视角带提示、在楼主视角整条不出现",
+      inTree(asOther, namedC.id) && !inTree(asAuthor, namedC.id)
+      && rowOf(asOther, namedC.id).auditTip === "审核中，仅自己可见" && rowOf(asOther, namedC.id).status === "PENDING",
+      "namedId=" + namedC.id + " otherTotal=" + asOther.total + " authorTotal=" + asAuthor.total);
+
+    r = await cAdd(seenToken, publicId, { content: "那我回复自己这条", parentId: pendingC.id });
+    check("16", "待审评论不能当父级（哪怕是自己发的那条）：放行就会造出别人看不见的孤儿子树",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "不能被回复"),
+      r.status + " code=" + code(r) + " msg=" + (r.json && r.json.msg));
+
+    r = await cAdd(seenToken, publicId, { content: "想伤害自己，可是看到这条社区还在", parentId: rootC.id });
+    check("16", "FR10.3 评论里的危机词走同一套分级：放行不删、hotline=12356、工单建不建由 SQL 取证复核",
+      r.status === 200 && cmt(r).status === "PUBLISHED" && bodyOf(r).hotline === "12356",
+      "hotline=" + bodyOf(r).hotline + " status=" + cmt(r).status);
+
+    r = await cAdd(accessToken, publicId, { content: "   " });
+    check("16", "纯空白评论 → 400/10001「评论内容不能为空」：先拒再落库，不靠 NOT NULL 约束兜底",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "不能为空"), r.status + " msg=" + (r.json && r.json.msg));
+
+    r = await cAdd(accessToken, publicId, { content: "啊".repeat(1001) });
+    check("16", "FR4.4 超 1000 字 → 400/10001 且文案带上限数字",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "1000"), r.status + " msg=" + (r.json && r.json.msg));
+
+    r = await cAdd(accessToken, publicId, { content: "回复一个不存在的父级", parentId: 99999999 });
+    check("16", "父级不存在 → 400/10001「要回复的评论不存在或已被删除」：越帖与不存在同一句话",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "不存在或已被删除"),
+      r.status + " code=" + code(r) + " msg=" + (r.json && r.json.msg));
+
+    r = await cAdd(accessToken, privateId, { content: "这条根本不该写进去" });
+    check("16", "FR7.3 别人的私密帖不能评论 → 404/30001，与详情同口径：评论接口不是存在性枚举通道",
+      r.status === 404 && code(r) === "30001", r.status + " code=" + code(r));
+
+    r = await cList(accessToken, privateId, "");
+    check("16", "看不见的帖子也拿不到评论列表 → 404/30001（判帖在前，评论 id 轮不到说话）",
+      r.status === 404 && code(r) === "30001", r.status + " code=" + code(r));
+
+    r = await cList(accessToken, publicId, "rootId=" + reply1.id);
+    check("16", "rootId 传一条楼中楼回复 → 400/10001：展开只认一级评论，不许拿子树中间节点当入口",
+      r.status === 400 && code(r) === "10001", r.status + " code=" + code(r) + " msg=" + (r.json && r.json.msg));
+
+    r = await cAdd(null, publicId, { content: "游客也要说话" });
+    check("16", "未登录评论 → 401/10002：发起人只来自 JWT，不接受请求体里的 user_id",
+      r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+
+    r = await cList(null, publicId, "");
+    check("16", "未登录取评论列表 → 401/10002：可见性判据里有登录身份，这条接口天然不能对游客开放",
+      r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+
+    let quotaHit = 0, quotaStatus = 0, quotaAccepted = 0;
+    for (let i = 1; i <= 30; i++) {
+      const q = await cAdd(accessToken, anonHoleId, { content: "配额验证第" + i + "条" });
+      if (code(q) === "30003") { quotaHit = i; quotaStatus = q.status; break; }
+      if (q.status === 200) { quotaAccepted++; anonUsedByThird++; }
+    }
+    check("16", "BR4 单用户单帖每自然日 20 条：第 " + (anonUsedByThird + 1) + " 次尝试返 429/30003，配额是缓存计数不是库表",
+      quotaStatus === 429 && quotaHit > 0 && anonUsedByThird === 20,
+      "accepted_before=" + (20 - quotaAccepted) + " loop_accepted=" + quotaAccepted + " status=" + quotaStatus);
+
+    info("16", "SQL 取证（跑完用 root 直连复核，别信脚本自证）：两个 id 的压平关系、comment_cnt 全表不变式、危机工单",
+      "SELECT id,post_id,parent_id,root_id,status,is_anonymous,alias_id FROM comment WHERE post_id IN ("
+      + publicId + "," + anonHoleId + ") ORDER BY id; "
+      + "SELECT COUNT(*) AS bad FROM post p JOIN (SELECT post_id,COUNT(*) c FROM comment WHERE status='PUBLISHED'"
+      + " AND deleted=0 GROUP BY post_id) t ON t.post_id=p.id WHERE p.comment_cnt<>t.c;"
+      + " SELECT id,source_type,source_id,`level`,risk_score,sla_at FROM alert_ticket ORDER BY id DESC LIMIT 5;");
+  } else {
+    info("16", "第 12/14 步的样本帖没备齐，本步整体跳过（根因在上面，不逐条报 401）", "");
+  }
+
   console.log("");
   console.log("冒烟汇总：" + rows.length + " 项，断言 " + (rows.filter(function (x) { return x.ok !== null; }).length)
     + " 条，失败 " + failures + " 条");

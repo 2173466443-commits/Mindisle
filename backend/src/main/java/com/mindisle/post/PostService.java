@@ -256,7 +256,10 @@ public class PostService {
 
         // 8 内容处置与危机处置是两条独立的线：内容被拦（REJECTED）也照样建单
         if (decision.care()) {
-            AlertTicket ticket = newTicket(userId, post, checkText, result, decision, crisis, now);
+            // source_type 里 hole 与 post 分开：管理员从工单点进来源走的是两条路——
+            // 树洞要经匿名映射，普通帖直接落到作者主页，混成一类就会在错误的入口找人。
+            AlertTicket ticket = newTicket(userId, TYPE_HOLE.equals(post.getType()) ? "hole" : "post",
+                    post.getId(), checkText, result, decision, crisis, now);
             alertTicketMapper.insert(ticket);
             // 这行日志是「工单没弹出来」这类投诉的唯一现场证据，级别用 warn：发帖量里它是小概率但高价值事件
             log.warn("危机工单已生成 postId={} userId={} level={} sourceType={} slaAt={} evidenceChars={}",
@@ -399,18 +402,23 @@ public class PostService {
         return new String(buf);
     }
 
-    /** 组一张危机工单（FR10.5）。SLA 直接落库，不靠管理端「当前时间减一减」现算。 */
-    private AlertTicket newTicket(long userId, Post post, String checkText, CheckResult result,
-                                  MachineDecision decision, MindisleProperties.Crisis crisis,
-                                  LocalDateTime now) {
+    /**
+     * 组一张危机工单（FR10.5）。SLA 直接落库，不靠管理端「当前时间减一减」现算。
+     *
+     * <p><b>包级 static 而不是 private 实例方法</b>：评论（任务 3.7）也要建同一种工单，
+     * 抄第二份的话，SLA 算法、风险分基准值、触发词截断长度三处只要有一处漂了，
+     * 两条通道的工单定级就不一致——而管理员看到的是同一张队列。来源维度改成入参
+     * （sourceType / sourceId），而不是继续吃整个 Post 对象：评论建单时手里只有 post_id。</p>
+     */
+    static AlertTicket newTicket(long userId, String sourceType, long sourceId, String checkText,
+                                CheckResult result, MachineDecision decision,
+                                MindisleProperties.Crisis crisis, LocalDateTime now) {
         boolean urgent = CrisisGrader.L3.equals(decision.riskLevel());
         AlertTicket ticket = new AlertTicket();
         ticket.setLevel(decision.riskLevel());
         ticket.setUserId(userId);
-        // source_type 里 hole 与 post 分开：管理员从工单点进来源走的是两条路——
-        // 树洞要经匿名映射，普通帖直接落到作者主页，混成一类就会在错误的入口找人。
-        ticket.setSourceType(TYPE_HOLE.equals(post.getType()) ? "hole" : "post");
-        ticket.setSourceId(post.getId());
+        ticket.setSourceType(sourceType);
+        ticket.setSourceId(sourceId);
         ticket.setEvidenceText(CrisisGrader.evidence(checkText, result, crisis.getEvidenceChars()));
         // 词面通道只有一个布尔「像不像危机」，分数是配置里的定级基准值（不是模型输出的连续概率），
         // 存小数是为了和阶段 4 模型通道的 DECIMAL(4,3) 同构，届时取两路高分即可，字段不用再改。
@@ -552,6 +560,11 @@ public class PostService {
             return "HELP";
         }
         return "ALL";
+    }
+
+    /** 匿名内容联系方式被遮过时给用户的那句话（任务 3.7 的匿名评论复用同一文案）。 */
+    static String tipContactMasked() {
+        return TIP_CONTACT_MASKED;
     }
 
     /**

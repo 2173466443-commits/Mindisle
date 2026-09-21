@@ -303,6 +303,65 @@ async function runProbe(bundleCode, accessToken) {
   const detailLinkOk = docText().indexOf('评论') >= 0
   check('8', '互动条没把「浏览/评论」挤掉（旧字段还在，只是位置让给了按钮）', detailLinkOk)
 
+  // ---------- 9 U4 评论区：匿名树洞帖（post 141，19 条一级评论，其中一条是马甲发的） ----------
+  const secRows = function () {
+    return Array.prototype.slice.call(w.document.querySelectorAll('.comments .row'))
+  }
+  const secThreads = function () {
+    return Array.prototype.slice.call(w.document.querySelectorAll('.comments article.thread'))
+  }
+  const secText = function (sel) {
+    const el = w.document.querySelector(sel)
+    return el ? el.textContent.replace(/\s+/g, ' ').trim() : ''
+  }
+  await w.__probeRouter.push('/post/141')
+  const cmt141 = await until(function () { return secThreads().length === 19 }, 15000, 'comments-141')
+  check('9', 'U4 详情页评论区真渲染出 19 棵一级楼（GET /api/posts/141/comments 走的是 Vite 代理）',
+    cmt141, 'threads=' + secThreads().length + ' rows=' + secRows().length)
+  check('9', '匿名评论显示马甲名：第一楼作者名以「匿名屿民·」开头',
+    secText('.comments article.thread .row .who').indexOf('匿名屿民·') === 0,
+    secText('.comments article.thread .row .who'))
+  // 这条不是「页面上没画 id」：authorId 为 null 时出参里连字段都没有（Jackson NON_NULL），
+  // 所以前端就算想画也拿不到 —— 解匿面在响应体这一层，不在 CSS 这一层。
+  check('9', '翻到底之后不再给「查看更多」按钮，改出一行「共 19 条一级评论」',
+    w.document.querySelectorAll('.comments .more').length === 0
+    && docText().indexOf('共 19 条一级评论') >= 0, secText('.comments .pager'))
+  check('9', '评论区加载全程没有弹全局消息条（读接口是 silent 的）',
+    w.document.querySelectorAll('.el-message').length === 0)
+  check('9', '发表框、字数计数、匿名勾选三样都在（没登录时才不画，这一版登录着）',
+    w.document.querySelectorAll('.comments .box textarea').length === 1
+    && w.document.querySelectorAll('.comments .send').length === 1
+    && secText('.comments .len') === '0 / 1000', secText('.comments .len'))
+
+  // ---------- 10 楼中楼：预览截断 + 展开整棵 + 两级压平（post 140，一号楼 5 条回复） ----------
+  await w.__probeRouter.push('/post/140')
+  const cmt140 = await until(function () { return secThreads().length === 1 }, 15000, 'comments-140')
+  const previewRows = secRows().length
+  check('10', '一号楼默认只给 3 条回复预览（后端 REPLY_PREVIEW=3，replyTotal=5）',
+    cmt140 && previewRows === 4, 'rows=' + previewRows)
+  const expandBtn = secText('.comments .expand')
+  check('10', '预览不够就出现「查看 5 条回复」，数字来自后端 replyTotal 而不是页面自己数',
+    expandBtn === '查看 5 条回复', expandBtn)
+  const btn = w.document.querySelector('.comments .expand')
+  if (btn) btn.click()
+  const expandedAll = await until(function () { return secRows().length === 6 }, 12000, 'expand-140')
+  check('10', '点展开 → 整棵子树 5 条回复都出来了（rootId 分支一次给完），按钮随即消失',
+    expandedAll && w.document.querySelectorAll('.comments .expand').length === 0,
+    'rows=' + secRows().length)
+  check('10', '压平成两级：回复里有「回复 @某某」这句话，但没有第三层缩进',
+    docText().indexOf('回复 @') >= 0
+    && w.document.querySelectorAll('.comments .row.indent .row.indent').length === 0,
+    secText('.comments article.thread .row.indent:nth-child(4) .text'))
+  check('10', '「楼主」标只出现在本帖作者的评论上（authorIsPostOwner 真接到了界面）',
+    Array.prototype.slice.call(w.document.querySelectorAll('.comments article.thread .el-tag'))
+      .filter(function (x) { return x.textContent.trim() === '楼主' }).length === 2,
+    'n=' + Array.prototype.slice.call(w.document.querySelectorAll('.comments .el-tag'))
+      .filter(function (x) { return x.textContent.trim() === '楼主' }).length)
+  check('10', '危机词那条评论正常显示（已被分级、工单已落库，但内容不隐藏：L2 不删帖）',
+    docText().indexOf('想伤害自己') >= 0)
+  check('10', '换帖之后评论区是干净重挂的：上一帖的 19 楼没有留在这页',
+    secThreads().length === 1)
+
   const lastText = docText()
   dom.window.close()
   notes.push('tail DOM text: ' + lastText.slice(0, 120))

@@ -776,7 +776,7 @@ D_表行数  user 43 / post 111 / post_like 16 / user_follow 0
 6. **内存 fake 必须照 DDL 的 `NOT NULL DEFAULT 0` 初始化计数列**。fake 的默认值是 `null`、数据库的默认值是 `0`，「零写入」路径在 fake 上拿到 `null` 会当场假失败 —— 断言没错、实现没错，是替身不像本体。
 7. **`[IO.File]::ReadAllBytes('相对路径')` 按 .NET 进程 CWD 解析**，与 `cd` 不同步；一律写绝对路径。`Set-Content -Encoding utf8LF` 这个参数不存在（写文件改用 Node）。node_repl 里 `process` 不可用、最终表达式常被吞，输出走 `nodeRepl.write(...)` 且写完必回读字节数核验。
 8. **明文口令一旦进了 `docs/dev-log.md` 就等于进了 git**：本轮写「`-p` 空格挂起」这条坑时，把 root 口令的字面值抄进了日志 4 次 —— 提交前用 `split(pw).join('<root口令>')` 全部掩码，并全仓扫描（`Get-ChildItem -Recurse -File | Where { $_.FullName -notmatch '\\(node_modules|target|dist|\.git)\\' }` + `[IO.File]::ReadAllText().Contains($pw)`）确认仓库内归零，只剩仓库外的 `rootpwd.cnf` 与三个 `_cache` 辅助脚本。**教训：解释「某种写法能连上」时，示例里放占位符，不放真值。**
-8. **多行 PowerShell here-string 会把输出吞掉**，改文档的脚本一律用 Node + JSON ops（本轮 `mdpatch.mjs` 走行替换、新写 `strpatch.mjs` 走子串替换，每条 op 带 `done` 标记，锚点缺失即抛错且不写盘，可安全复跑）。
+9. **多行 PowerShell here-string 会把输出吞掉**，改文档的脚本一律用 Node + JSON ops（本轮 `mdpatch.mjs` 走行替换、新写 `strpatch.mjs` 走子串替换，每条 op 带 `done` 标记，锚点缺失即抛错且不写盘，可安全复跑）。
 
 ### 环境事实（下一轮照着跑，不用重新摸）
 
@@ -798,3 +798,79 @@ D_表行数  user 43 / post 111 / post_like 16 / user_follow 0
 - 探针**没有点过任何写接口**；**真浏览器仍未测**（`cua` 依旧返回 Codex auth token unavailable），§6.4 第 4 条与 Gate 3 的界面项继续挂 ☐。
 - `HUMAN_REVIEW` 不进 `audit_task`（T6.1）、危机工单无通知（T6.4）、`auto_destroy_at` 只写不扫（T3.15）、`post.emotion_*` 恒 NULL（阶段 4）不变。
 - 毕设材料（T1B.*）按用户指令继续顺延；**仍未打 tag**（Gate3 未过，最新 tag `stage-2-skeleton`）。
+
+## 2026-09-21 阶段 3（续 6）—— T3.7 评论与楼中楼 + U4 评论区：「先审后发」第一次同时贯穿帖子与评论两条写路径
+
+### 本轮挑这件事的理由
+
+- T3.6 之后，社区主链只剩「评论」这一能让详情页 U4 从「能看能赞」变成「能说话」；而且评论是**第一条同时把 3.2 机审、3.4 马甲、FR7.3 可见性、FR10.5 危机工单串起来的写路径** —— 做完它，等于给阶段 4 的危机分级多验证一条真实入口。
+- 更现实的理由：§6.4 Gate 3 的判定项里，评论是唯一一块**表已建、判据已定、只差代码**的（`comment` 表与 `idx_post_status`、`idx_parent` 在阶段 2 的 DDL 里就位），性价比最高。
+
+### 交付物：后端（行数 = 去掉行尾换行后的实数，非估算）
+
+- `backend/src/main/java/com/mindisle/entity/Comment.java`(82)：八态 `status` 常量 + `parent_id`/`root_id`/`reply_to_user_id`/`alias_id`/`like_cnt`，字段与 `sql/04_community.sql` 的 `comment` 表逐列对齐。
+- `mapper/CommentMapper.java`(31)：`countPublished(postId)`（给冗余列重算用）+ 批量按 root 取子树。
+- **`post/CommentService.java`(586，本轮主产出)**：`comment()` 写侧七步 = 取帖并判可见（不可见 **404/30001**，与详情同口径，评论接口不是存在性枚举通道）→ 账号状态与 BR4 当日评论配额 → 内容合规（换行归一 + trim + 空内容 400/10001 + **码点**长度 ≤1000）→ `findParent` 定位父级 → 3.2 机审 → 匿名遮联系方式与马甲分配 → 落库 + `refreshCommentCnt` + 危机工单；`list()` 读侧 = 一级评论正序翻页（每棵子树预览 `REPLY_PREVIEW=3` 条、带回 `replyTotal`）或 `rootId` 一次展开整棵（`MAX_SUBTREE_REPLIES=500` 封顶）。静态方法 `isVisibleTo`/`toItem`/`auditTipOf` 全部**包级可见**，让 43 例单测不打桩 Spring 就能直接钉判据。
+- `post/CommentStoreAdapter.java`(156)：`CommentStore` 端口的 MyBatis 实现，业务类零 Spring 依赖可裸测（沿用 T3.5/T3.6 的端口—适配器分工）。
+- 4 个 DTO：`CommentCreateRequest`(16)、`CommentCreateView`(15，含 `comment`/`tip`/`hotline`)、`CommentItem`(41)、`CommentThread`(17)。
+- 端点收进 `web/PostController.java`(128 → **187**)：`POST /api/posts/{id:\d+}/comments`、`GET /api/posts/{id:\d+}/comments`，**恒返 200**（被机审拦下、转人工、遮罩都是「请求成功、内容被处置」），只有真入参错误走 4xx。**为什么不新建 `CommentController`**：可见性判据要「先问帖再问这条评论」，另起一类就是把判据复制第二份；且 Swagger `@Tag` 分组数被 `docs/openapi-check` 的断言写死，多一个分组会打挂既有校验。
+- 复用而非抄写：`post/PostService.java`(625 → **638**) 把组工单抽成 `static newTicket(userId, sourceType, sourceId, ...)` 并暴露 `tipContactMasked()`；`mapper/PostMapper.java`(84 → **99**) 加 `refreshCommentCnt`；`config/MindisleProperties.java` 加 `mindisle.post.max-comment-chars = 1000`（与 DDL `VARCHAR(1000)` 同宽）。
+
+### 三条设计口径（写下来是因为它们都「反直觉一次」）
+
+1. **两级展示不等于两级存储**：库里 `parent_id` 存**真实父子**（回复谁就挂谁），`root_id` 存一级祖先；页面只画两层，第三层的「你在回复谁」用 `replyToName` 那句话表达。真库实证：评论 37 的 `parent_id=36` 而 `root_id=35`。DOM 探针 **L101** 钉的是「回复文案在」且「没有 `.indent .indent`」。
+2. **待审评论不能当父级**：`findParent` 只认 `PUBLISHED`，**故意不复用** `isVisibleTo` —— 作者对自己那条 `PENDING` 是可见的，照可见性放行就能回复一条尚未公开的内容，机审一驳回就造出谁都看不见的孤儿子树。这条判据最初真被写成 `isVisibleTo(parent, parentId)`（参数个数一样、编译通过），现在由单测与冒烟 **L126**（400/10001「这条评论现在不能被回复」）两头钉住。
+3. **`comment_cnt` 与点赞同法不同式**：同样是子查询覆盖写（漂移在结构上不可能发生），但① 数**行**不数人（评论无「一人一条」唯一键，同一人可合法发十楼；数人的点赞用 `COUNT(DISTINCT user_id)`）② 只数 `PUBLISHED`（把待审算进去就出现「卡片写 3 条、点进去 2 条」）。
+
+### 一处已知妥协（写白不藏）
+
+- `alert_ticket.source_type` 的 ENUM 只有 `chat/post/hole/pm`，**没有 `comment`**（DDL 定稿于阶段 2，当时没预料评论也建工单）。评论触发的危机工单因此记成**来源帖子**（`post`/`hole` + `post.id`），并把评论 id **追加**到 `evidence_text` 末尾。真库实证：工单 50 / 46 / 42 三条 `level=L2, risk_score=0.600, status=pending`，证据文本结尾分别是「（评论 id=42）/（id=34）/（id=8）」。
+- 为什么宁可记错也不省这一枪：需求 §18.3 对自伤类内容要的是「人不能被推回沉默」—— 来源指针不精确是可解释的瑕疵，漏一条 L2/L3 预警是事故。**只能追加不能前缀**：`CrisisGrader.evidence()` 按命中偏移量在原文上切片，改原文会把证据切错位置。修法（ENUM 加值）挂阶段 6 与 T3.15 一并做。
+
+### 交付物：前端 U4 评论区
+
+- **新建 `frontend/src/components/CommentSection.vue`(374 行 / 16713 B)**：一级评论列表 +「查看更多」页码翻页 +「查看 N 条回复」走 `?rootId=` 展开（翻到底改出一行「共 N 条一级评论」而不是留一颗死按钮）+ 发表框（`0 / 1000` 码点计数、匿名勾选、楼主「回复 @某某」占位）+ 三态回显（`PUBLISHED` 立刻在列 / `PENDING` 带「审核中，仅自己可见」/ `REJECTED` **不画**）+ `el-skeleton` 骨架 + `reset()` 换帖即清空（丢草稿是故意的）。
+- **发完不重拉列表、也不本地插草稿，而是用后端回执画**：`applyReceipt` 的判据与后端 `isVisibleTo` 逐字对齐。理由有两条，一是全站 60 次/分/身份的限流不该为一楼新评论再交一次列表请求，二是内容没过机审就把「未通过」当众渲染出来是错的。
+- **游客连 GET 都不发**：这条接口的登录身份参与 SQL 谓词，天然不能对游客开放；发出去只换来 401 和一条刺眼的红色「登录已过期」—— 把「请你去登录」说成「你操作失败」是两类事（与 v1.1.9「未登录点互动不发请求」同一条规矩）。
+- `frontend/src/api/post.js`(53 → **79**)：`listComments`（`silent: true`，读接口自己画空态）、`addComment`（**非 silent**，后端那句 `msg` 就是该给用户看的下一句话）、`COMMENT_MAX_CHARS`/`COMMENT_PAGE_SIZE`/`COMMENT_SUBTREE_CAP` 三个与后端同源常量、`commentLength()` 用 `Array.from` **按码点**数（后端 `codePointCount`，一个 emoji 算 1 字，前端若用 `.length` 会算成 2 个 → 界面说还剩 3 字、提交被拒）。
+- `frontend/src/views/post/PostDetailView.vue`(164 → **175**)：`<comment-section v-if="post" :post-id="postId" @published="onCommentPublished" />`，页脚「评论 N」随新发的公开评论 +1，口径与后端一致（只数 `PUBLISHED`，含楼中楼）；删掉 v1.1.7 那句「评论树要等 3.7」的过期脚注和失效的 `.footnote` 样式。
+- **刻意不画的东西**：评论点赞按钮（后端只有 `like_cnt` 列、没有端点）、删除按钮（T3.15 未做）、@通知（T3.11 未做）。画一颗不能用的按钮比不画更坏。
+
+### 取证（每条都能指到一次真实执行的日志行号）
+
+- 单测：`mvn -o -B test` **185 → 228 例 / 0 失败 / 1 跳过**，日志 `E:\codex workspace\_cache\mindisle-dbtmp\verify-t37-2.log` **L124**（`CommentServiceTest` 43 例）、**L164**（汇总）、**L167**（BUILD SUCCESS）。算式 185 + 43 = 228，测试类 18 → **19**。
+- 真 HTTP 冒烟：`node docs/smoke.mjs` **113 → 137 项 / 断言 105 → 127 / 失败 0 / 约 47s**，日志 `smoke_t37c.txt` **L139** 汇总行、第 16 步 21 条在 **L114–L137**；脚本 `docs/smoke.mjs` 829 → **1016 行**。这一步覆盖：一级/二级/三级压平、`replyTotal`、匿名回执、灰词转人审、**FR7.3 待审只对作者可见**（第三人整条不出现）、待审不能当父级、危机评论 `hotline=12356`、空白/超 1000 字/父级不存在/不可见帖/未登录各有专属错误码、**BR4 第 21 条 429/30003**。
+- 前端构建：`npm run build` **exit 0 / ✓ 1774 modules transformed / ✓ built in 871ms**（`build-t37.log` **L7 / L101**，`dist/assets/PostDetailView-DMZxv_ne.js` **L94** = 13.75 kB）。
+- DOM 级：`node frontend/probe/domprobe.mjs` **30 → 42 项 / 0 失败**（`domprobe_t37.txt` **L105** 汇总；新增第 9、10 两组 **L93–L104** = 19 棵楼渲染、马甲名「匿名屿民·柏舟」、翻到底无死按钮、silent 无全局消息条、计数初值、预览 3 行、`查看 5 条回复` → 点完 6 行且按钮消失、无第三层缩进、楼主标 n=2、危机评论可见、换帖干净重挂）。
+- 真库：`ev_t37.sql` 八条谓词，跑法见下面「环境事实」，输出 `ev_t37.out.txt`（**72 行 / 0 个 ERROR**）。A 全表 `comment_cnt` 不变式 **0 条不一致**；B 140/141 = **6/6 与 19/19**；C 逐行压平；D 匿名评论留真实 `user_id` 且有 `alias_id` **6/6**；E 孤儿子树与跨帖 root **0**；F `PENDING` 9 / `PUBLISHED` 53；G 三条工单；H 行数 user 52 / post 141 / comment 62 / alias 27 / ticket 50。
+- 出参形状核对：`inspect-comments-t37.out.txt` —— post 140 一页里 root 1 个 + 预览 3 条 + `replyTotal=5`；`?rootId=35` 一次给 5 条；post 141 `total=19 / n=19 / hasMore=false`；匿名项**无 `authorId` 键**；评论 36/42 `authorIsPostOwner=true`，而匿名的 38 即使作者就是楼主也不透出该标（反解匿）。
+
+### 环境事实（下一轮照着跑，不用重新摸）
+
+- **含中文的 SQL 交给 mysql 的唯一安全姿势 = cmd 的 `<` 重定向**：`E:\codex workspace\_cache\mindisle-dbtmp\run-ev-t37.cmd` 里是 `"...mysql.exe" --defaults-extra-file="...rootpwd.cnf" --default-character-set=utf8mb4 -t -D mindisle < ev_t37.sql > ev_t37.out.txt 2>&1` → exit 0。反面姿势：`Get-Content -Raw` + `-e` 传参会把 UTF-8 无 BOM 的中文按 ANSI 读 → 乱码 + `ERROR 1064`（本轮第一次就栽在这上面）。
+- **凭据边界**：root 口令只存**仓库外**的 `_cache\mindisle-dbtmp\rootpwd.cnf`（`--defaults-extra-file` 必须是**第一个**参数、路径含空格必须整体加引号）；仓库内的文档、日志、脚本、commit message 一律占位符，提交前扫一遍 `git diff --cached`。`-p <口令>`（带空格）会让 mysql 转去等 TTY 而**永久挂起**，`-p<口令>`（紧贴）能连但会打一条 insecure warning —— **判据用 exit code，不用有没有红字**。
+- **`alert_ticket` 的真实列名是 `level` / `risk_score` / `sla_at`**，不是 `risk_level` / `sla_deadline_at`（后者属 `chat_risk_alert`）。列名一律回 DDL 逐行核对再写谓词。
+- **往 shell 里内联 powershell 命令时 `$` 会被吃掉**（`$_`、`$LASTEXITCODE`、`$env:X` 变空 → ParserError）。一律落成 `.ps1`/`.cmd` 文件再执行；含中文的 `.ps1` 必须 UTF-8 **带 BOM**，而 `.md`/`.mjs`/`.java`/`.vue` 恰恰**不能**带 BOM。
+- **`Tee-Object -FilePath` 默认写 UTF-16LE**（`build-t37.log` 就是这份），按 UTF-8 读它搜关键词必然 0 命中 —— 别把「搜不到」当成「没构建」。改 `Out-File -Encoding utf8` 或显式按 utf16le 解。
+- 后端 8080 = `_cache\mindisle-dbtmp\start-backend-20.ps1` 起的 run20，`/actuator/health` = UP；Vite dev 5173 curl=200（探针与冒烟共用，别杀）。
+- 本轮为造「预览 3 / 真值 5」的样本，用 `_cache\mindisle-dbtmp\seed-reply-t37.mjs` 让 user 23 对 post 140 的评论 35 追发 2 条回复 → **comment 61/62，status=PUBLISHED**；这不是脏数据（是真实账号发的合规评论），但**引用 H 表行数时要知道它含这 2 条**，重跑 `run-ev-t37.cmd` 即可复现同一组数字。
+
+### 文档回写
+
+- 手册升 **v1.2.0**：`制作步骤文档.md` 1744 → **1765 行**（本轮勘误后再 +1 → 终值 1766，见文末勘误块）（CRLF、无 BOM、无 Tab）——§6.1 行 3.7 整行按实测重写 + 新增 v1.2.0 实测回写 **15 行**；§6.2 U4 行标「v1.2.0 评论区已接」并改写「仍欠」；§14 速查表新增 **31–35** 五条；§15 的 T3.7 ☐→☑、T3.13 行两处过期口径改正（③ 举报仍未做、⑥ 用户摘要 v1.1.9 已补）、阶段 3 收工口径 **☑ 6 → 7 / ☐ 9 → 8** 并把数字同步到 228 / 137 / 42；§18 Gate3 同步；§19 新增 v1.2.0 行与「下一步」整段重写。**任务总数、人日、追溯矩阵、Gate 行数均未变：117 / 144.30 / 101 / 10。**
+- README 与本 dev-log 同步；全局《复利与踩坑日志》补 009 **第 7 轮**（mysql 口令取证：凭据从头到尾是对的、失败的是写法与判据）与**第 8 轮**（本轮：中文 SQL 的 cmd 重定向姿势 + 四条新工具坑）。
+
+### 仍未做（截至本轮，别自我感觉良好）
+
+- **举报 + 站内通知（T3.11）**、**`user_action` 埋点（T3.10）**、**话题（T3.8）**、**搜索（T3.9）**、**编辑与销毁（T3.15）**、**通知中心（T3.16）**、**关注流与举报分类（T3.17）**：本轮之后「点了没反馈」依然只剩通知没做。
+- **评论的点赞 / 删除 / @通知界面未开放**（库里 `comment.like_cnt` 是空列，界面刻意不画）；`rootId` 展开单次封顶 500 条，超楼的「万楼层」只能分页看一级。
+- 探针这一轮**仍只 GET**，新增 12 项全是渲染与展开断言，**一颗写按钮都没点过**；写路径的证据在冒烟第 16 步与 root SQL 里。**jsdom 不是真浏览器**，真浏览器仍未测（`cua` 依旧 auth token unavailable，备选 Playwright）。
+- `HUMAN_REVIEW` 不进 `audit_task`（T6.1）、危机工单无通知（T6.4）、`auto_destroy_at` 只写不扫（T3.15）、工单 `source_type` 没有 `comment`（本轮妥协）、`post.emotion_*` 恒 NULL（阶段 4）不变。
+- 毕设材料（T1B.*）按用户指令继续顺延；**仍未打 tag**（Gate3 未过，最新 tag `stage-2-skeleton`）。
+
+### 勘误（2026-09-21 本轮收尾自查，全部由 `git show HEAD:<path>` 与工作区文件同一条命令现量）
+
+- **上一轮手稿里 5 个「before 行数」是滞后的或口径不一致的**，已全部订正：`web/PostController.java` **157 → 128**（HEAD 实数 128，187 为现值）、`post/PostService.java` **617 → 625**、`frontend/src/api/post.js` **61 → 53**（现值 79，不是 80）、`PostDetailView.vue` **165 → 164**（现值 175）、`docs/smoke.mjs` **828 → 829**。根因有两条：① `Get-Content` 与 node「去掉行尾换行再数」的口径差 1 行；② 引用了 T3.5/T3.6 期间的中间值而不是提交时的 HEAD 值。**今后统一**：前后两个数在同一次 node 调用里量出，`--before` 走 `git show HEAD:<path>`。
+- **README 首稿把 `comment_cnt` 的机制写成了「`comment_cnt = comment_cnt + 1` 库内原子累加」，这是错的**。真实现 = `PostMapper.refreshCommentCnt`（**L53–L56**）的 `UPDATE post SET comment_cnt = (SELECT COUNT(*) FROM comment WHERE post_id = post.id AND status = 'PUBLISHED' AND deleted = 0) WHERE id = #{id}`，即**按真相表重算覆盖写**；调用链是 `CommentService`(L218) → 端口 `refreshPostCommentCnt` → `CommentStoreAdapter`(L74–L77)。源码注释原文就是「漂移在结构上不可能发生，而不是『+1 再定期回写』」。**教训：机制描述和数字一样要回源码读一遍，「记得大概」在文档里会产生和代码相反的事实。**
+- 手册 `制作步骤文档.md` 的行数：HEAD 1744 → 本轮回写后 1765 → 再补 §14 第 36 条（行数口径与机制描述必须现量现读）后**终值 1766**；README 与手册目录里的 §14 计数同步为 **36 条**（目录行原本还写着「30 条」，属第二个滞后值，一并改）。
+- `docs/smoke.mjs` 第 16 步打印的「跑完回查 SQL」里 `alert_ticket` 用了 `risk_level` —— 那是 `chat_risk_alert` 的列名，照抄必报 `Unknown column`。已改成 **`level`, `risk_score`, `sla_at`**。**注意：本次只改了脚本里的提示字符串、未复跑冒烟**（冒烟的既有 137 项 / 127 断言 / 0 失败 仍以 `smoke_t37c.txt` **L139** 为准，字符串不参与断言、不影响退出码，但下一次复跑前别把它当成新证据）。

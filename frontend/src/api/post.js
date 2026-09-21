@@ -12,6 +12,32 @@ export const createPost = (payload) => http.post('/posts', payload)
 // 就是要让人看见，闷着不响只会留下一个「点了没反应」的界面。
 export const actOnPost = (id, action) => http.post('/posts/' + id + '/actions', { action })
 
+// 评论与楼中楼（任务 T3.7 · FR4.3 / FR4.4 / FR7.3）。
+// 读接口照旧 silent：评论区取不到数据时，详情页要把「为什么没有评论」就地写在评论区里，
+// 而不是在正文上面盖一条全局红条。写接口刻意不 silent —— 被限流（10010）、被当日配额
+// 挡住（30003）时，后端那句 msg 就是给用户看的下一句话，没必要让页面再翻译一遍。
+export const listComments = (id, params) => http.get('/posts/' + id + '/comments', { params, silent: true })
+export const addComment = (id, payload) => http.post('/posts/' + id + '/comments', payload)
+
+/** 评论字数上限：与后端 mindisle.post.max-comment-chars（默认 1000）和 DDL 的 VARCHAR(1000) 同源。 */
+export const COMMENT_MAX_CHARS = 1000
+
+/** 一级评论每页条数：与后端 PageQuery.DEFAULT_SIZE 同值，改这里要同时确认后端 normalize 的 1..50 区间。 */
+export const COMMENT_PAGE_SIZE = 20
+
+/** 单棵楼中楼一次能给完的回复上限：与后端 CommentService.MAX_SUBTREE_REPLIES 同值，只用来决定「先看到这儿」这句话要不要说。 */
+export const COMMENT_SUBTREE_CAP = 500
+
+/**
+ * 按码点计数，不是按 String.length。
+ * 后端用 codePointCount（一个 emoji 算 1 个字），前端若用 length 会算成 2 个：
+ * 于是出现「界面说还剩 3 个字，提交却被 10001 拒了」。宁可这里严格一点也不能松，
+ * 但既然要严格就两边同一口径。代理对用 Array.from 天然拆开。
+ */
+export function commentLength(value) {
+  return Array.from(value || '').length
+}
+
 // 开关到动作名的映射只留这一份：PostCard、详情页、composable 里各自写一遍 ternary，
 // 就是给未来「某一处忘了取反」留位置。
 export const POST_ACTION_PAIRS = {

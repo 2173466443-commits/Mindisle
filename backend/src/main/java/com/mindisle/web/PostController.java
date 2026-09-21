@@ -16,9 +16,13 @@ import com.mindisle.common.ErrorCode;
 import com.mindisle.common.PageQuery;
 import com.mindisle.common.PageResult;
 import com.mindisle.common.Result;
+import com.mindisle.post.CommentService;
 import com.mindisle.post.PostInteractionService;
 import com.mindisle.post.PostQueryService;
 import com.mindisle.post.PostService;
+import com.mindisle.post.dto.CommentCreateRequest;
+import com.mindisle.post.dto.CommentCreateView;
+import com.mindisle.post.dto.CommentThread;
 import com.mindisle.post.dto.CreatePostRequest;
 import com.mindisle.post.dto.PostActionRequest;
 import com.mindisle.post.dto.PostActionView;
@@ -48,6 +52,11 @@ import jakarta.validation.Valid;
  * 读接口和写接口动的是同一张 post 表、同一套可见性判据，拆在两个 Controller 里
  * 就会出现「谁负责 404、谁负责 403」的口径分裂。路径前缀本来就是同一个 {@code /api/posts}，
  * 读接口也照样要求登录——需求 FR7.3 的广场是「登录后可见」，游客只给话题墙。</p>
+ *
+ * <p><b>任务 3.7 的评论端点同样留在这个类里</b>：评论挂在帖子上，可见性判据要先问帖子
+ * （{@code PostQueryService.visibleTo}）再问评论本身，与详情接口是同一条判据；另起一个
+ * {@code CommentController} 只会把这条判据复制第二份。还有一个更硬的工程理由：Swagger 的
+ * {@code @Tag} 分组数被 docs/openapi-check 断言写死，凭空多一个分组会把既有校验打挂。</p>
  */
 @RestController
 @RequestMapping("/api/posts")
@@ -57,12 +66,15 @@ public class PostController {
   private final PostService postService;
   private final PostQueryService postQueryService;
   private final PostInteractionService postInteractionService;
+  private final CommentService commentService;
 
   public PostController(PostService postService, PostQueryService postQueryService,
-                        PostInteractionService postInteractionService) {
+                        PostInteractionService postInteractionService,
+                        CommentService commentService) {
     this.postService = postService;
     this.postQueryService = postQueryService;
     this.postInteractionService = postInteractionService;
+    this.commentService = commentService;
   }
 
   @PostMapping
@@ -124,5 +136,52 @@ public class PostController {
     }
     return Result.ok(postInteractionService.act(current.id(), id,
         request == null ? null : request.action(), LocalDateTime.now()));
+  }
+
+  /**
+   * 发一条评论 / 回复（任务 3.7 · 需求 FR4.3、FR4.4、FR7.3）。
+   *
+   * <p><b>恒返 200</b>，与发帖同一口径：评论被机审拦下（REJECTED）、转人工（PUBLISHED 但待审）、
+   * 匿名联系方式被遮罩，都是「请求成功、内容被处置」，处置结果在
+   * {@code data.comment.status}、{@code data.tip} 与 {@code data.hotline} 里。
+   * 只有真正的入参错误走 4xx：空内容与超字数 400/10001、父级评论不属于本帖 400/10001、
+   * 帖子不可见与不存在统一 404/30001（不区分二者，否则就成了私密帖的枚举通道）。</p>
+   *
+   * <p><b>求助卡片只在命中危机时给</b>：{@code data.hotline} 非空即代表这一次评论触发了
+   * 工单，前端据此渲染 12356 卡片；没命中就回 null，不是回一个空串——空串在 Vue 里
+   * 是 falsy 但会被 v-if 之外的地方当成「有值」，null 才是「这次没有」。</p>
+   */
+  @PostMapping("/{id:\\d+}/comments")
+  @Operation(summary = "发表评论或回复（先审后发；楼中楼压平成两级展示，危机词走同一套分级与工单）")
+  public Result<CommentCreateView> comment(@PathVariable("id") long id,
+      @RequestBody(required = false) CommentCreateRequest request,
+      @AuthenticationPrincipal AuthUser current) {
+    if (current == null) {
+      throw new BizException(ErrorCode.UNAUTHORIZED);
+    }
+    return Result.ok(commentService.comment(current.id(), id, request, LocalDateTime.now()));
+  }
+
+  /**
+   * 评论列表（任务 3.7 · 两级展示）。
+   *
+   * <p>不带 {@code rootId}：按一级评论正序翻页，每条带前 3 条回复预览与该子树回复总数；
+   * 带 {@code rootId}：整棵子树一次给完（上限 500 条，边界见手册 §14）。</p>
+   *
+   * <p>待审评论（PENDING）只有作者自己看得见，所以<b>登录用户的身份参与 SQL 谓词</b>，
+   * 这条接口不开放给游客。评论 id 非法或不属于本帖时是 400/10001，不是 404：
+   * 帖子的存在性在这次请求里已经通过了，再拿 404 区分「不存在」与「被删」就是多余的泄漏。</p>
+   */
+  @GetMapping("/{id:\\d+}/comments")
+  @Operation(summary = "评论列表（一级评论分页 + 楼中楼预览；rootId 非空时展开整棵子树）")
+  public Result<PageResult<CommentThread>> comments(@PathVariable("id") long id,
+      @Parameter(description = "要展开的一级评论 id；不传表示翻页取一级评论")
+      @RequestParam(name = "rootId", required = false) Long rootId,
+      PageQuery page,
+      @AuthenticationPrincipal AuthUser current) {
+    if (current == null) {
+      throw new BizException(ErrorCode.UNAUTHORIZED);
+    }
+    return Result.ok(commentService.list(id, current.id(), rootId, page, LocalDateTime.now()));
   }
 }

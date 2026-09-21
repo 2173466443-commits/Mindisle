@@ -41,6 +41,21 @@ public interface PostMapper extends BaseMapper<Post> {
   int increaseViewCnt(long id, long delta);
 
   /**
+   * 评论数重算（任务 3.7 · 手册 §6.1 行 3.7）。
+   *
+   * <p>口径与 {@link #refreshLikeCnt} 完全一致：每次写之后把冗余列刷成真相表的重算值，
+   * <b>漂移在结构上不可能发生</b>，而不是「+1 再定期回写」。两点差别要写清：
+   * ① 这里数的是行而不是人（{@code COUNT(*)}），因为评论没有「一人一条」的唯一键，
+   * 同一个人可以合法地发十楼；② 只数 {@code PUBLISHED}，待审评论仅作者可见，
+   * 计进卡片数字就会出现「卡片写 3 条、点进去只有 2 条」——同一取舍见
+   * {@link com.mindisle.mapper.CommentMapper#countPublished}。</p>
+   */
+  @Update("UPDATE post SET comment_cnt = "
+      + "(SELECT COUNT(*) FROM comment WHERE post_id = post.id "
+      + "AND status = 'PUBLISHED' AND deleted = 0) WHERE id = #{id}")
+  int refreshCommentCnt(@Param("id") long id);
+
+  /**
    * 用真相表重算点赞/收藏数（任务 3.6 · 需求 BR2）。
    *
    * <p><b>为什么是「重算」而不是「INCR + 5 分钟回写」</b>：BR2 那半句是给浏览量写的

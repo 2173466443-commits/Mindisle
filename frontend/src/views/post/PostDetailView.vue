@@ -57,7 +57,7 @@
 
       <!-- 点赞/收藏已经接上真接口（T3.6），这条互动条就是它的落点：
            详情页是「一个人反复进出同一帖」的地方，所以按钮态一律用后端回执初始化，不做本地记忆。
-           评论树（T3.7）与相似帖推荐（FR5.6 / 阶段 6）确实还没有接口，这里留空而不是摆假数据。 -->
+           相似帖推荐（FR5.6 / 阶段 6）确实还没有接口，这里留空而不是摆假数据。 -->
       <div class="acts">
         <el-button class="act" :class="{ 'act-on': post.liked }" :type="post.liked ? 'primary' : 'default'"
                    size="small" round :plain="!post.liked" :disabled="isBusy(post, 'like')"
@@ -71,8 +71,11 @@
         </el-button>
         <span class="acts-note">计数由后端按真实互动记录重算，与广场卡片上看到的应是同一个数。</span>
       </div>
-      <p class="footnote">评论区排在任务 3.7、相似推荐排在阶段 6，本期此处为空白是正常的。</p>
     </article>
+
+    <!-- 评论区（任务 T3.7 · U4）：单独一张卡。未登录、加载失败、空列表三种状态由组件自己画，
+         详情页不参与——同一句「看不到评论」在三种情况下的成因完全不同，混在父页面里判就容易判错。 -->
+    <comment-section v-if="post" :post-id="postId" @published="onCommentPublished" />
   </div>
 </template>
 
@@ -84,6 +87,7 @@ import { usePostInteract } from '@/composables/usePostInteract'
 import { CODE } from '@/api/errorCode'
 import { fromNow, countdown, fmtCount, fmtDateTime } from '@/utils/format'
 import CrisisCard from '@/components/CrisisCard.vue'
+import CommentSection from '@/components/CommentSection.vue'
 import StageNotice from '@/components/StageNotice.vue'
 
 // U4 详情页。每打开一次就是后端一次真实计数（缓存累加 + 每 5 分钟回写），
@@ -109,6 +113,14 @@ const destroyLine = computed(() => {
   return line ? '树洞 ' + line : ''
 })
 const previewList = computed(() => (post.value?.images || []).map((x) => x.url))
+// 评论组件只认一个数字 id：路由参数是字符串，直接传进去会让 el-input 之外的地方出现「140」与 140 两种键。
+const postId = computed(() => Number(route.params.id) || 0)
+// 页脚的「评论 N」跟着回执走：口径与后端 post.comment_cnt 相同（只数已发布，含楼中楼回复），
+// 所以一条被机审转人工的评论不会让这个数变化——它确实还没进 comment_cnt。
+function onCommentPublished() {
+  if (!post.value) return
+  post.value.commentCnt = (Number(post.value.commentCnt) || 0) + 1
+}
 const goneTitle = computed(() => '这条内容你现在看不到')
 const goneDesc = computed(() => '它可能还没发布、只对自己可见、已经到期销毁，或者本来就不存在。')
 
@@ -152,7 +164,6 @@ watch(() => route.params.id, load, { immediate: true })
 .tip { margin-bottom: 10px; }
 .meta { display: flex; gap: 16px; align-items: center; margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--mi-border); font-size: 12px; color: var(--mi-text-dim); flex-wrap: wrap; }
 .meta .dim { color: var(--mi-text-dim); opacity: 0.8; }
-.footnote { margin: 12px 0 0; font-size: 12px; color: var(--mi-text-dim); }
 .acts { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
 .acts .act { font-size: 13px; }
 .acts .act.act-on { font-weight: 700; }
