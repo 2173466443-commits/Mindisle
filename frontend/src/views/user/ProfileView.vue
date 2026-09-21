@@ -7,6 +7,7 @@
       </div>
       <div class="ops">
         <el-button size="small" :loading="busy.page" @click="loadAll">刷新</el-button>
+        <el-button size="small" @click="goMyPosts">我的帖子</el-button>
         <el-button size="small" type="primary" @click="openEdit">编辑资料</el-button>
         <el-button size="small" text @click="doLogout">退出登录</el-button>
       </div>
@@ -270,6 +271,11 @@ async function onToggle(type, val) {
 
 const editOpen = ref(false)
 const form = reactive({ nickname: '', school: '', gender: 'U', bio: '' })
+
+// U12 入口：账户中心的「树洞」计数以前是个死数字，点不进去；现在它通向真正按 user_id 查的那张列表。
+function goMyPosts() {
+  router.push({ name: 'my-posts' })
+}
 
 function openEdit() {
   form.nickname = brief.value.nickname || ''

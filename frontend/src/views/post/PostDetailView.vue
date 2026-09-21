@@ -47,17 +47,31 @@
       <crisis-card v-if="post.hotline" :hotline="post.hotline" />
 
       <footer class="meta">
-        <span>浏览 {{ fmtCount(post.viewCnt) }}</span>
-        <span>赞 {{ fmtCount(post.likeCnt) }}</span>
-        <span>评论 {{ fmtCount(post.commentCnt) }}</span>
+        <span class="stat">浏览 {{ fmtCount(post.viewCnt) }}</span>
+        <span class="stat">评论 {{ fmtCount(post.commentCnt) }}</span>
         <span class="dim">发布于 {{ fmtDateTime(post.publishedAt) }}</span>
         <span v-if="post.createdAt && post.publishedAt !== post.createdAt" class="dim">
           创建于 {{ fmtDateTime(post.createdAt) }}
         </span>
       </footer>
 
-      <!-- 3.7 评论树、3.6 点赞、FR5.6 相似帖推荐都要等后端接口，这里放占位而不是假数据 -->
-      <p class="footnote">评论区、点赞与相似推荐分别排在任务 3.7 / 3.6 / 阶段 6，本期此处为空白是正常的。</p>
+      <!-- 点赞/收藏已经接上真接口（T3.6），这条互动条就是它的落点：
+           详情页是「一个人反复进出同一帖」的地方，所以按钮态一律用后端回执初始化，不做本地记忆。
+           评论树（T3.7）与相似帖推荐（FR5.6 / 阶段 6）确实还没有接口，这里留空而不是摆假数据。 -->
+      <div class="acts">
+        <el-button class="act" :class="{ 'act-on': post.liked }" :type="post.liked ? 'primary' : 'default'"
+                   size="small" round :plain="!post.liked" :disabled="isBusy(post, 'like')"
+                   @click="act(post, 'like')">
+          {{ post.liked ? '已赞' : '赞' }} {{ fmtCount(post.likeCnt) }}
+        </el-button>
+        <el-button class="act" :class="{ 'act-on': post.collected }" :type="post.collected ? 'primary' : 'default'"
+                   size="small" round :plain="!post.collected" :disabled="isBusy(post, 'collect')"
+                   @click="act(post, 'collect')">
+          {{ post.collected ? '已收藏' : '收藏' }} {{ fmtCount(post.collectCnt) }}
+        </el-button>
+        <span class="acts-note">计数由后端按真实互动记录重算，与广场卡片上看到的应是同一个数。</span>
+      </div>
+      <p class="footnote">评论区排在任务 3.7、相似推荐排在阶段 6，本期此处为空白是正常的。</p>
     </article>
   </div>
 </template>
@@ -66,6 +80,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { postDetail } from '@/api/post'
+import { usePostInteract } from '@/composables/usePostInteract'
 import { CODE } from '@/api/errorCode'
 import { fromNow, countdown, fmtCount, fmtDateTime } from '@/utils/format'
 import CrisisCard from '@/components/CrisisCard.vue'
@@ -74,6 +89,9 @@ import StageNotice from '@/components/StageNotice.vue'
 // U4 详情页。每打开一次就是后端一次真实计数（缓存累加 + 每 5 分钟回写），
 // 所以这里绝不做「本地 +1」的假乐观更新——两边各加一次，数字就会凭空翻倍。
 const route = useRoute()
+const { isBusy, toggle } = usePostInteract()
+// post 是本页自己持有的响应式对象（不是 props），改它的字段就是改界面
+const act = function (it, kind) { return toggle(it, kind) }
 const post = ref(null)
 const loading = ref(false)
 const notFound = ref(false)
@@ -135,6 +153,11 @@ watch(() => route.params.id, load, { immediate: true })
 .meta { display: flex; gap: 16px; align-items: center; margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--mi-border); font-size: 12px; color: var(--mi-text-dim); flex-wrap: wrap; }
 .meta .dim { color: var(--mi-text-dim); opacity: 0.8; }
 .footnote { margin: 12px 0 0; font-size: 12px; color: var(--mi-text-dim); }
+.acts { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+.acts .act { font-size: 13px; }
+.acts .act.act-on { font-weight: 700; }
+.acts-note { font-size: 12px; color: var(--mi-text-dim); }
+.meta .stat { white-space: nowrap; }
 .gone { max-width: 620px; }
 .gone-desc { font-size: 14px; color: var(--mi-text); }
 .gone-note { font-size: 12px; color: var(--mi-text-dim); line-height: 1.8; }

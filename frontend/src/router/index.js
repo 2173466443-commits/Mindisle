@@ -17,6 +17,10 @@ const routes = [
       { path: 'publish', name: 'publish', component: () => import('@/views/post/PublishView.vue'), meta: { requiresAuth: true } },
       { path: 'post/:id', name: 'post-detail', component: () => import('@/views/post/PostDetailView.vue'), meta: { requiresAuth: true } },
       { path: 'me', name: 'me', component: () => import('@/views/user/ProfileView.vue'), meta: { requiresAuth: true, requiresConsent: true } },
+      // U12 我的帖子 / U11 屿友主页（任务 T3.13 第二批）。主页用数字 id 而不是 username：
+      // 后端接口的入参就是数字 id，前端再造一层「用户名寻址」得先有一个按用户名查 id 的接口，而那正是还没有的那个。
+      { path: 'me/posts', name: 'my-posts', component: () => import('@/views/user/MyPostsView.vue'), meta: { requiresAuth: true } },
+      { path: 'user/:id', name: 'user-home', component: () => import('@/views/user/UserHomeView.vue'), meta: { requiresAuth: true } },
       { path: 'ai', name: 'ai-chat', component: () => import('@/views/ai/ChatView.vue'), meta: { requiresAuth: true, requiresConsent: true } },
       { path: 'emotion', name: 'emotion', component: () => import('@/views/emotion/EmotionView.vue'), meta: { requiresAuth: true, requiresConsent: true } }
     ]

@@ -574,3 +574,227 @@ cd frontend; npm run build
 - `HUMAN_REVIEW` 仍不进 `audit_task` 队列（T6.1）；工单仍无任何通知（T6.4）；`auto_destroy_at` 仍只写不扫（读侧已隐藏，扫表销毁属 T3.15）；`post.emotion_*` 仍为 NULL（阶段 4）。
 - U1 首页 / U6 话题圈 / U11 主页 / U12 我的、点赞收藏关注（T3.6）、评论（T3.7）、举报通知（T3.11）、埋点（T3.10）全部未开工；毕设材料（T1B.*）按用户指令继续顺延；**仍未打 tag**（Gate3 未过，最新 tag `stage-2-skeleton`）。
 
+## 2026-09-21 阶段 3（续 4）—— T3.13 第二批：帖子读接口「我的 / 他人主页」+ U11/U12 + 本项目第一次 DOM 级取证
+
+### 起点：上一轮写白的那个洞，本轮堵它
+
+- 手册 §6.1 有一条「3.5 与 3.13 的分工：广场是公共流」，末尾自己写了代价 —— 作者勾「仅自己可见」的已发布帖不进广场，而 UI 没有「我的帖子」入口，**那条帖只能靠记住的链接才能再见到**。这是全项目当时唯一一个「后端故意留白、前端又没有补上」的用户可见洞，所以本轮不挑新功能，先补它。
+- 三件事：① 后端两条按用户维度的读接口；② 前端 U12「我的帖子」+ U11「屿友主页」；③ **取证方式升级** —— 上一轮只做到「build 过了 + 代理能取到数」，本轮要把「页面真的渲染出这些数、点下去真的跳对页」变成机器断言。
+
+### 交付物：后端（每条行数都是 `Get-Content` 实数 + 1，与手册同口径）
+
+| 文件 | 行数 | 作用 |
+|---|---|---|
+| `web/UserPostController.java`（新） | 87 | `GET /api/users/me/posts`（作者视角）与 `GET /api/users/{id:\d+}/posts`（外人视角）。不塞进 `UserController` 的理由写在类注释里：两类依赖面完全不交叠（那边只有 `UserService`，这边只有 `PostQueryService`），合并等于让「改昵称」和「翻帖子」互相牵连。 |
+| `post/PostQueryService.java`（改） | 463 → 592 | 新增 `mine()` / `profile()`，并把翻页与组装抽成共用的 `pageResult()` —— **「翻页口径只允许有一份」**，否则广场/我的/主页迟早出现「A 页翻页丢条目、B 页不丢」这种只有真机才发现的偏差。 |
+| `post/dto/PostListItem.java`（改） | +5 | 出参补 `status` / `visibility`（前端 U12 的徽标要用；`auditTip` 上一轮已有）。 |
+| `web/UserController.java`（改） | ±4 | `@Tag` description 与 `UserPostController` **逐字对齐**。 |
+| `test/post/PostQueryServiceTest.java`（改） | +53 | 17 → **20 例**：`mine` 能拿回私密与待审、`profile` 拿不回匿名、`status` 白名单外抛 10001、不存在用户抛 20001。 |
+| `test/post/PostListSqlConditionTest.java`（新） | 156 / **6 例** | 三种列表各自的 WHERE 形状（见「取证一」）。 |
+| `docs/smoke.mjs`（改） | 560 → 653 | 新增**第 14 步**（我的 / 主页两组）。 |
+
+`mvn -o -B test`（离线 + E 盘本地仓库）本轮复跑实测 **`Tests run: 162, Failures: 0, Errors: 0, Skipped: 1` / BUILD SUCCESS**（上一轮 153，净增 9 = SQL 形状 6 + `PostQueryServiceTest` 3），日志 `backend/target/verify-t313b.log`。
+
+### 取证一：不连库也能钉住 SQL 形状（先证伪一句口头话）
+
+- 「脱离 Spring 上下文就测不了 MyBatis 的条件」——**这句话是错的**，所以先证伪再写用例：`TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), Post.class)` 之后，`new LambdaQueryWrapper<Post>().eq(Post::getUserId, 11L).getSqlSegment()` 就能拿到最终 SQL 串，走的是与真实执行同一份解析代码。少了 `initTableInfo` 那一步会直接抛 `can not find lambda cache for this entity`。
+- 断言的是**形状 + 参值表**两样：`user_id = #{ew.paramNameValuePairs.MPGENVAL1}` 这类占位符按出现顺序逐个钉，`getParamNameValuePairs().values()` 用 `containsExactlyInAnyOrder` 钉住实参 —— 只看 SQL 串会漏掉「条件对、值错」。断言前把 SQL `replaceAll("\\s+", " ")` 压平：**钉形状不钉排版**，格式化代码不该把安全用例弄红。
+- 最值的一条是**用反射钉签名**：`applyPublicProfile` 的参数类型列表必须恰好是 `(LambdaQueryWrapper, long, LocalDateTime)`，且 `long` 只出现一次。语义是「主页判据里不允许有 viewerId 这个位置」—— 哪天有人为了「自己也看看待审与匿名帖」往签名里补一个 viewerId，SQL 断言依旧全绿，而解匿已经发生。这条护栏只能靠签名形状钉。
+- 主页判据三重收窄：`status=PUBLISHED` + `visibility=public` + `(is_anonymous IS NULL OR is_anonymous = 0)` + `alias_id IS NULL`。「非匿名」写成 `IS NULL OR = 0` 而不是 `= 0`，因为该列可空，历史行会用 `= 0` 整片消失。
+- `STATUS_FILTERS` 用 `Set.of`（8 态，与 DDL 逐字一致而不是与 `PostService` 的 5 个写入常量一致 —— 读侧必须能筛出 `TAKEDOWN`）；报错文案里那个列表**必须 `sorted()` 后再拼**，`Set.of` 迭代顺序每次随机，会让同一次报错出现两种说法，前端也没法断言。
+
+### 取证二：代理级 10 项（`E:\codex workspace\_cache\mindisle-dbtmp\proxycheck.mjs`）
+
+跑法：`cd "E:\codex workspace\_cache\mindisle-dbtmp"; node proxycheck.mjs`（前置：后端 8080 + Vite dev 5173 都在跑）。本轮复跑 **共 10 项，失败 0 项**：
+
+```
+PASS [A] 经代理登录取 accessToken                 <- HTTP 200 code=0
+PASS [B] /api/users/me/posts 回 4 条               <- HTTP 200 ids=42,41,39,40 total=4
+PASS [B] status=HUMAN_REVIEW 只剩待审那条           <- ids=40
+PASS [B] 白名单外的 status → 400/10001             <- HTTP 400 code=10001
+PASS [C] /api/users/23/posts 只回公开非匿名 1 条    <- ids=41
+PASS [C] 主页列表里不含匿名帖 42（前端链路即解匿面）  <- ids=41
+PASS [C] 不存在的用户主页 → 404/20001               <- HTTP 404 code=20001
+PASS [D] 不带 token 经代理 → 401/10002             <- HTTP 401 code=10002
+PASS [D] Vite 能把 U12 源码编译成 ES 模块（dev 按需） <- HTTP 200
+```
+
+### 取证三：DOM 级 23 项（`frontend/probe/domprobe.mjs`，本轮最大的方法增量）
+
+思路：**不装 Playwright、不起浏览器**，也能把「组件到底渲染出什么」变成断言。
+
+1. `frontend/probe/entry.js`（701 B）复刻 `main.js` 的挂载顺序（pinia + router + ElementPlus + `App.vue`），并挂 `window.__probeRouter` / `window.__probeMounted` 给探针读路由与确认挂载。
+2. `domprobe.mjs` 用**同一套 Vite 配置**程序化 build（`configFile: false` + `@vitejs/plugin-vue` + `unplugin-vue-components` 的 `ElementPlusResolver` + 同样的 `@` alias），输出 `format: "iife"` / `inlineDynamicImports: true` / `minify: false` / `target: es2020` → `E:\codex workspace\_cache\mindisle-dbtmp\fe-probe\probe.js`，实测 **3,013,956 B / 编译约 1.1s**。生产构建与探针构建共用配置，探针才不会「测的是另一份代码」。
+3. 经 **5173 dev 代理真登录**（`smoke_seen_20260921020038`）拿真 token，`mount` 之前先 `localStorage.setItem("mindisle_token", token)`，再 `window.history.pushState` 深链到 `/me/posts`。
+4. jsdom（`E:\codex workspace\_cache\node_modules\jsdom`，用 `pathToFileURL` 绝对路径 import）+ `runScripts: "dangerously"` + `pretendToBeVisual`，`VirtualConsole` 收 `error` / `warn`；给 `IntersectionObserver` / `ResizeObserver` / `matchMedia` 打空壳（jsdom 没有这三个，不打就整片白屏）。
+5. 断言一律走 `until()` 轮询而不是 `setTimeout(0)`；DOM 文本用 `textContent`、按钮用 `dispatchEvent(new w.MouseEvent("click", {bubbles:true}))`。
+
+本轮复跑实测 **23 项 / 0 失败**，六组断言：
+
+| 组 | 钉住的事 |
+|---|---|
+| 1 | 探针包能挂载；`/me/posts` 深链被路由守卫放行（没被踢去登录页）；地址栏真的停在 `/me/posts`（history 模式深链可用，不是 redirect 后改了地址） |
+| 2 | U12 渲染 **4 张卡**，标题逐字来自库里 post 39–42；徽标「已发布×3 + 人工审核中×1 + 仅自己可见×1」；`作者名可点`的卡是 **3 张而不是 4 张**（匿名帖无 `authorId` → 天然不可点）；自己的帖上没有「不感兴趣」；读接口是 silent 的 —— `.el-message` 节点数恒为 0 |
+| 3 | 点「未通过」→ 0 张卡并给空态（**不是留着上一份列表**）；点「人工审核中」→ 只剩 `冒烟·转人工`；切回「全部」→ 重新 4 张；整个切 Tab 过程不冒全局错误条 |
+| 4 | 点作者名 → 路由到 `/user/23`（**不是**详情页，`.who` 上的 `click.stop` 生效）；U11 只 1 张 `冒烟·被看见`、不含 `冒烟·匿名树洞`；标题按路由参数渲染；写白段（「没有假头像」那段）在页上 |
+| 5 | `push("/user/99999999")` → 旧卡片清空 + 「看不到这个主页」专属告警（组件复用时不 `watch` 路由参数就会停在上一家） |
+| 6 | `/user/abc` → 「地址里的用户 id 不是数字」，而不是先发一个注定 404 的请求再摆空白 |
+
+- **假 FAIL 一条（值得单独记）**：第 1 组「深链后 `route.path` 应为 `/me/posts`」最初写成 `app.mount()` 之后立刻读 `router.currentRoute` —— 那一刻还停在 START 路由（path = `/`），于是探针报了 FAIL。**不是页面的 bug，是探针读早了**。修法：轮询到 `__probeMounted === true` 且 `currentRoute.path` 稳定后再断言，并额外断言 `window.location.pathname`，把「路由内部状态」和「地址栏」分开钉。
+- **jsdom 的边界（写白，别越）**：它证明的是组件逻辑、数据接线、点击与路由、错误态文案；**样式、布局、滚动、真实字体渲染、`el-image` 懒加载全部不在覆盖范围**。所以 §6.4 第 4 条「前端全部可交互、深色主题统一、无 console 红字」本轮**仍判 ☐**，Gate 3 的「U1/U3–U6/U11/U12 可用」也仍不能勾。把 jsdom 的 PASS 写成浏览器实测，是本轮最容易犯也最贵的一次造假。
+
+### 交付物：前端 T3.13 第二批
+
+| 文件 | 行数 | 作用 |
+|---|---|---|
+| `src/composables/usePagedPosts.js`（新） | 94 | `usePagedPosts(fetcher, opts)` → `{items, loading, hasMore, total, errorCode, reload, loadMore}`。**不做成 pinia store** 的理由写进文件头：U11/U12 是单页自用，全局态会出现「切到别人主页看到上一个人的缓存」；口径（`hasMore` / `nextCursor` / `total` 三件套）与 `stores/feed.js` 刻意一致，因为后端三张列表共用同一个 `pageResult`。带 `seq` 号**丢晚到的响应**（不丢请求）。 |
+| `src/views/user/MyPostsView.vue`（新） | 117 | U12：四档状态筛选 + 「我发过 N 条 / 该状态共 N 条」计数 + `DB_UNAVAILABLE` 专属文案 + 页尾「这一页还欠什么」。筛选用 `el-radio-group` + `:value` 而不是 `el-tabs`（空 name 的 tab 选中态有坑）。 |
+| `src/views/user/UserHomeView.vue`（新） | 110 | U11：非数字 id / 用户不存在 / 正常列表三态；页尾写白「这一页为什么只有一张列表」（缺 `GET /api/users/{id}`，不摆假头像）。 |
+| `src/api/user.js`（改） | 11 → 18 | 加 `myPosts` / `userPosts(id, params)`。**不做「一个函数加 flag」**：两个接口的可见性语义不同，混在一起调用方就要替服务端做判断。 |
+| `src/api/post.js`（改） | 16 → 42 | `POST_STATUSES` 八态中文（草稿/机审中/人工审核中/已发布/未通过/申诉中/已下架/已删除）+ `statusLabel()`：未知值**原样回显**，不静默变空白 —— 后端加态时前端要看得见，而不是显示一条没有状态的帖。 |
+| `src/components/PostCard.vue`（改） | 81 → 109 | 新 prop `showStatus`（默认 false）/ `dismissable`（默认 true）；作者名 `.who.link` 点击 `stop` 后跳 U11；状态与「仅自己可见」两个 `el-tag`。 |
+| `src/router/index.js`（改） | 43 → 47 | `me/posts`（name `my-posts`）、`user/:id`（name `user-home`），均 `requiresAuth`。 |
+| `src/views/user/ProfileView.vue`（改） | +6 | 「我的帖子」入口。 |
+| `frontend/probe/entry.js` + `probe/domprobe.mjs`（新） | 701 B / 274 | 上面那套 DOM 取证工装。 |
+
+`npm run build` 本轮复跑 **exit 0 / ✓ built in 905ms**（首跑 5.86s），`dist` 里能看到 `usePagedPosts-*`、`MyPostsView-*`、`UserHomeView-*` 三个新 chunk。
+
+### 环境事实（下一轮照着跑，不用重新摸）
+
+- 后端仍是上一轮的 **run16** 进程（8080 在监听，本轮**没有改后端代码**，只是重跑单测与冒烟）；Vite dev server 本轮后台起在 5173（`PID 14556`，日志 `E:\codex workspace\_cache\mindisle-dbtmp\vite-dev.out` / `.err`）。
+- 探针跑法：`cd "E:\codex workspace\009_心屿AI心理陪伴社区\frontend"; node probe\domprobe.mjs`，前置是 8080 + 5173 都在。日志：`_cache\mindisle-dbtmp\domprobe_r2.txt`、`proxycheck_r2.txt`、`smoke_r3.txt`。
+- 冒烟夹具账号 `smoke_seen_20260921020038`（user_id **23**）= post 39（private/PUBLISHED）/ 40（HUMAN_REVIEW）/ 41（public/PUBLISHED）/ 42（public/PUBLISHED + 匿名）的作者 —— **正好是 U11/U12 需要的三种可见性 + 一个待审**，所以本轮取证库里净增 0（探针与代理脚本只读不写）。
+- 但本轮为了复核数字**把 `docs/smoke.mjs` 跑了 2 次**，库里 post 从 42 → **62**、`smoke_%` 账号 **20** 个（全库 user **28**）。这不是失控，冒烟本来就要真发帖；清理 SQL 见上一轮记录（按外键顺序删 `smoke\_%` / `fecheck\_%`）。
+- **数字口径教训**：文档里「断言 N 条」曾经手数过 —— 本轮两次实测都是 **85 项 / 断言 78 / 失败 0**，而上一轮文档写的是 79。差的正是第 9 步那条 `info()`（`SMOKE_PENDING_TOPIC_ID` 未提供，分支没有 HTTP 证据，脚本按 INFO 报而不是按断言报）。**结论：断言数一律抄脚本自己打印的汇总行，不许手数。**
+
+### 本轮踩坑（7 条，前 4 条是后端/环境侧，后 3 条是本轮新学）
+
+1. **OpenAPI `@Tag` 的 description 必须逐字一致**：`UserPostController` 与 `UserController` 同属「3 用户」，但 tags 是按 `name` + `description` 去重的，只换个说法就会多出一条重名分组（实测 7 → 8），分组数口径当场失真。
+2. **`Set.of` 的迭代顺序按设计每次随机**：把白名单直接 `String.join` 进错误文案，同一次报错会出现两种说法，前端断言没法写。`sorted()` 之后再拼。
+3. **`Start-Process -ArgumentList` 不处理引号**：路径含空格时（`E:\codex workspace\...`）必须自己把参数包一层 `[char]34`，否则 node 只收到半个路径，报「Cannot find module E:\codex」。
+4. **写文件前不 `mkdirSync(dirname, {recursive:true})` 就是 ENOENT**：探针产物目录 `fe-probe\` 不存在时 `writeFileSync` 直接抛，报错信息还看不出是目录问题。
+5. **`put()` 辅助函数不是 no-op**：本轮误写了一次 `put("api/user.js.patch", "")`，它**真的创建了一个空文件**，还差点被 git 收进去。用 helper 批量落盘时，路径写错不会失败、只会多造文件 —— 落盘完必须回读文件清单。
+6. **深链断言不能在 `mount()` 之后立刻读路由**（上面「假 FAIL」那条的根因，单独占一条是因为它最容易在扩探针到 U3/U4/U5 时被再犯一次）。
+7. **Vite 打 iife 单包会报两条警告，都不是错误**：`import.meta may not be a valid syntax` 与 `inlineDynamicImports ignored because codeSplitting:false`。看到红字就判定「探针构建失败」会把工装误拆掉 —— 判据是产物存在 + jsdom 里 `__probeMounted === true`。
+
+### 文档回写
+
+- 手册升 **v1.1.8**：§6.1 追加 v1.1.8 实测回写 7 条 + 旧「未经浏览器实测」条补一句；§6.2 U3 行更新 `PostCard` 行数并新增 U11/U12 行；§6.4 第 1 条补「读侧已闭环」补记；§15 **T3.13 维持 ◐**（第二批落地，但真浏览器未测 + U1/U6 未开工），阶段 3 口径重算说明写清「为什么 DOM 取证了还不升 ☑」；§18 Gate3、§19 变更表与下一步同步。**任务总数、人日、追溯矩阵、Gate 行数未变：117 条 / 144.30 人日 / 101 行 / 10 行。** 文档由 1717 行 → 1728 行（CRLF、无 BOM、无 Tab）。
+- README：单测 153 → **162**、冒烟 68/63 → **85/78**、OpenAPI **24 paths / 27 operations / 7 分组**、新增「帖子读接口（我的 / 主页）」、后端类 78 → 79（Controller 8 → 9）、`frontend/src` 文件 34 → 37、views 10 → 12、勾掉「2026-09-21 阶段 3（续 4）」。
+- 全局《复利与踩坑日志》补 009 第 5 轮，重点三条：先证伪「脱离 Spring 测不了 SQL」再写断言；先跑探针拿真 SQL 串再写期望值；jsdom 探针是把「build 过了 ≠ 页面能用」变成机器断言的最低成本路径（不需要装 Playwright）。
+
+### 仍未做（截至本轮，别自我感觉良好）
+
+- **真浏览器仍未实测**：jsdom 不含样式与布局，`domprobe` 的 PASS 不等于「U11/U12 视觉与交互已验证」；且探针目前只覆盖 U11/U12 两页，**U3/U4/U5 还没进探针**。§6.4 第 4 条与 Gate 3 的界面项继续挂 ☐。
+- U1 首页、U6 话题圈未开工；点赞/收藏/关注（T3.6）、评论（T3.7）、举报与通知（T3.11）、埋点（T3.10）后端接口还没有，前端也就没有对应界面。
+- **`GET /api/users/{id}` 用户摘要未做** → U11 只有一张列表，没有头像、昵称、发帖数头卡（宁缺毋滥，页尾已写白）。
+- 「我的帖子」的收藏 Tab 是空的：收藏本身（T3.6）没做，没有数据可列。
+- `HUMAN_REVIEW` 仍不进 `audit_task` 队列（T6.1，作者侧本轮闭环、管理员依旧看不见）；危机工单仍无通知（T6.4）；`auto_destroy_at` 仍只写不扫（T3.15）；`post.emotion_*` 仍为 NULL（阶段 4）；「热门」排序 `sort` 未实现。
+- 毕设材料（T1B.*）按用户指令继续顺延；**仍未打 tag**（Gate3 未过，最新 tag `stage-2-skeleton`）。
+## 2026-09-21 阶段 3（续 5）—— T3.6 点赞/收藏/关注三件套 + 第一次「全表不变式」SQL 取证 + 前端接真互动接口
+
+### 本轮挑这三件事的理由
+
+- v1.1.8 写白的空白里有一条「**互动没有任何反馈**」：卡片上没有赞和收藏，主页没有关注按钮，U12 的「收藏」Tab 是空的。它同时卡住 §6.4 第 2 条（Gate 3 判定项）、T3.10 埋点和 T3.11 通知 —— 是阶段 3 剩余任务里唯一一处「一做就同时解开三个下游死结」的点，所以本轮不做评论、不做话题，先做互动三件套。
+- 另一个刻意选择：**这次要把取证做到「全表」而不是「这一条」**。前四轮的证据全是单点断言（某条帖 view_cnt=1、某个列表只回 ids=41），单点断言只能证「这次没出错」，证不了「没有任何一条破口」。计数类逻辑恰好是最容易在角落里烂掉的（并发、软删、下溢、复活），所以本轮加了一类新取证：**全表谓词归零**。
+
+### 交付物：后端（行数 = `Get-Content` 实数 + 1）
+
+| 文件 | 行数 | 作用 / 关键决定 |
+|---|---|---|
+| `entity/PostLike.java`（新） | 58 | `post_like` 的实体：`target_type` enum(post,comment) + `target_id` + `action_type` enum(LIKE,COLLECT) + `day_bucket` + `deleted`。`day_bucket` **是互动幂等键的一部分**（`uk_action` = `user_id` + `target_type` + `target_id` + `action_type` + `day_bucket`），字面语义是「这一赞首次成立的日期」而不是「最后一次点的日期」，值由 `now.toLocalDate()` 传入（服务内不读系统时钟）；同一列也是 T3.10 埋点「同一用户同一对象 1 小时内曝光只记一次」那类时间窗判据的落点。 |
+| `entity/UserFollow.java`（新） | 33 | `user_follow(user_id = 关注者, follow_user_id = 被关注者)`，**没有 `deleted` 列** —— 取关是硬删，所以这个表的语义与 `post_like` 相反，两套代码不能互相抄。 |
+| `mapper/PostLikeMapper.java`（新） | 71 | 除 MyBatis-Plus 自带方法外，手写 `countDistinctUsers(targetType, targetId, actionType)`（重算用）与 `revive(id)`（把 `deleted` 从 1 改回 0 并把 `updated_at` 前移）。**`@TableLogic` 只影响自带方法，自定义 SQL 一律自己带 `deleted` 条件** —— 少写一个就等于把软删行算进计数。 |
+| `mapper/UserFollowMapper.java`（新） | 56 | 五个方法：`insertFollow` = **`INSERT IGNORE`**（撞 **`uk_follow_pair`** 返回 0，重复关注不报错）、`deletePair` = **物理 DELETE**（本表没有 `deleted` 列，取关不软删）、`countFollowing`（走 `uk_follow_pair` 前缀）、`countFollowers`（走 `idx_follow_user` 前缀）、`upsertFollowCounts` = **`INSERT ... ON DUPLICATE KEY UPDATE` 而不是 UPDATE** —— `user_profile` 不保证每人有一行，走 UPDATE 时「0 行受影响」分不清是没行还是值没变，冗余列会静默停在旧值上。 |
+| `post/PostInteractionService.java`（新） | 176 | 点赞/取消/收藏/取消收藏的唯一入口。**零 Spring 依赖**（端口接口 + 构造注入），业务顺序 = 帖子存在性（不可见 → **404/30001**，与详情同口径，不给枚举通道）→ 动作白名单（白名单外 400/10001）→ **查活动态并判等**（「要成的状态」== 「现在的状态」就一个字节都不写）→ 正向时**先 `reviveCancelled` 复活软删行、复活不到才 `INSERT IGNORE` 兜并发**，负向时 `cancelActive` 一次置**全部**活动行（不带 `LIMIT`，跨日两行也能一次清掉）→ **重算并回写计数** → **写完再查一次库**才组装回执（`changed` 不用内存推测）。 |
+| `post/PostInteractionStoreAdapter.java`（新） | 95 | 端口到 Mapper 的适配器，把「重算」这件事收在一处，业务类看不到 SQL。 |
+| `user/RelationshipService.java`（新） | 176 | 关注/取关 + 主页摘要。两处不对称是刻意的：**重复点赞短路**（状态没变就直接回原计数，不再发第二条 UPDATE），**取关不短路**（`deleteById` 恒执行，删 0 行也是成功）—— 「取消一个动作」必须是幂等成功而不是报错。 |
+| `user/RelationshipStoreAdapter.java`（新） | 94 | 同上。 |
+| `post/dto/PostActionRequest.java` / `PostActionView.java`（新） | 15 / 31 | 回执带 `liked/likeCnt/collected/collectCnt/selfAction`；**`selfAction` 是给 T7.1 质量分用的**，不让前端自己判「这是不是我自己的帖」。 |
+| `user/dto/FollowRequest.java` / `FollowView.java` / `UserHomepage.java`（新） | 18 / 29 / 42 | `UserHomepage` 是**白名单摘要**（displayName / avatarUrl / bio / 四个计数 / self），**年级·院系·性别·`risk_flag` 一律不出参**，注销用户统一 **404/20001**。 |
+| `web/RelationshipController.java`（新） | 81 | `POST /api/posts/{id:\d+}/actions`、`POST /api/users/{id:\d+}/follow`、`GET /api/users/{id:\d+}/profile`。 |
+| `web/PostController.java` / `UserController.java`（改） | ±6 / ±4 | 出参补 `liked/collected`（列表与详情都要带，否则前端每次进广场得再打三次「我点过没」的请求）；`@Tag` description 继续逐字对齐（v1.1.8 那条口径）。 |
+| `post/dto/PostListItem.java` / `PostDetailView.java`（改） | +8 / +8 | 互动四字段 + `selfAction`。 |
+| `mapper/PostMapper.java`（改） | +12 | `updateInteractionCnt(postId, likeCnt, collectCnt)` —— **整体赋值而不是相减**，因为值已经是重算出来的真相，减法只会把一次算错永久固化。 |
+| `test/post/PostInteractionServiceTest.java`（新） | 467 / **11 例** | 逐条按 `@DisplayName` 抄：BR2 连点两次只计 1 人且第二次零写入 / 取消未赞过的帖子幂等零写入 / **取消再点赞复用同一行，`day_bucket` 仍是首次成立那天** / **并发跨日留两行活动行：计数仍 1 人，取消一次把两行全置掉（自愈）** / 点赞与收藏互不干扰 / 动作归一化（大小写空格不敏感、白名单外 10001 且文案按字典序）/ `selfAction` 被标记**但仍计入 `like_cnt`** / 不可见·不存在·已到期树洞一律 404/30001 且一行不写 / **BR6 禁言可点赞收藏、封禁·注销·脏状态 20003、发起人查无此人 20001** / 待审帖只有作者能点赞 / 一条链路来回点八次任何时刻冗余列都等于真相表。
+| `test/user/RelationshipServiceTest.java`（新） | 323 / **11 例** | 逐条按 `@DisplayName` 抄：关注成功两侧冗余列 = 真值 / 重复关注 `changed=false` 第二次零写入 / **取关是物理删（本表无 `deleted`）**、取关未关注者幂等 / 删掉再关注同一对只有一行且**与日期无关（`uk_follow_pair` 不含日期桶）** / 三人关注一人后每步冗余 = COUNT / **读侧回执永远来自真表**（冗余列落后也不影响返回值）/ 不能关注自己 → **10001 而非 403**、一行不写 / BR6 禁言可关注、封禁 20003 / 动作归一化 + 字典序 / 资料卡接线（展示名与帖子同一函数、`bio` 缺行回空串、`self`/`following` 判定）/ 主页主人不存在（含被 `@TableLogic` 过滤的注销账号）→ 20001/404。
+| `test/post/PostQueryServiceTest.java`（改） | **+59 行 / 例数不变（20）** | 出参带 `liked/collected`；**未登录时这两个字段恒 false 而不是 null**（前端要能直接绑定，不需要 `??`）。 |
+| `docs/smoke.mjs`（改） | 653 → **828** | 新增**第 15 步**互动三件套，另把第 12 步的存在性断言改成「翻到底再判」（见「假证据」一节）。 |
+
+`mvn -o -B test`（离线 + E 盘本地仓库）实测 **`Tests run: 185, Failures: 0, Errors: 0, Skipped: 1` / BUILD SUCCESS**（上一轮 162；**逐类抄 surefire 汇总行**：新增 `PostInteractionServiceTest` 11 例 + 新增 `RelationshipServiceTest` 11 例 + `PostingQuotaServiceTest` 12 → 13 例，`PostQueryServiceTest` 例数不变仍 20 例；**162 + 11 + 11 + 1 = 185**，测试类 16 → 18），日志 `backend/target/verify-t36.log`。
+
+### 取证一：root 直连「全表不变式」（本轮新增的取证层，可无限重跑）
+
+SQL 存 `E:\codex workspace\_cache\mindisle-dbtmp\ev_t36.sql`，跑在**干净冒烟之后**（探针与代理脚本只读，所以这一层结论不受后续复跑影响）。2026-09-21 12:2x 实测逐字：
+
+```
+A_全表不变式_like_cnt_不一致条数      |   0
+B_全表不变式_collect_cnt_不一致条数    |   0
+C_follow_冗余列不一致人数             |   0
+D_表行数  user 43 / post 111 / post_like 16 / user_follow 0
+```
+
+- **A**：`SELECT COUNT(*) FROM post p WHERE p.deleted=0 AND p.like_cnt <> (SELECT COUNT(DISTINCT user_id) FROM post_like l WHERE l.target_type='post' AND l.target_id=p.id AND l.action_type='LIKE' AND l.deleted=0)` → **0 条**。B 同形换 COLLECT → **0 条**。C：`user_profile.follower_cnt/following_cnt` 与 `user_follow` 两侧计数逐人比对 → **0 人**。这三条是**谓词级**的：任何一条帖、任何一个人的冗余列错了都会让它 ≠ 0，且不需要我知道是哪一条。
+- **E（`post_like` 逐行，16 行全抄）**：id 1/5/9/13 = user 8 对 post 71/81/100/110 的 LIKE，`deleted=0` 且 **`updated_at > created_at` = 1** —— 「取消点赞后再点」**复用了同一行**（复活），不是每次新插一行；id 2/6/10/14 = COLLECT 且 `deleted=1`（取收藏是软删）；id 3/4/7/8/11/12/15/16 是其他人的一次性点赞（`updated_at = created_at`）。`day_bucket` 全部 = `2026-09-21`。
+- **F**：post 100 `like_cnt=2 / collect_cnt=0`（`PUBLISHED`、`public`、非匿名）；post 101 `like_cnt=1` 且 **`is_anonymous=1`** —— **点赞不是解匿通道**：匿名帖可以被点赞，但接口从不下发它的 `authorId`，主页列表也不含它（v1.1.8 那条三重收窄在这里第二次生效）。
+- 为什么不用 `GREATEST(cnt-1, 0)` 这类「安全减法」：**减法的正确性依赖「缓存值曾经等于真值」这个假设**，而它一旦被破坏（并发、进程重启、手工改库）就永久错下去且不可察觉。重算没有这个假设，代价只是每次互动多一条聚合 SQL（走 `idx_target`，阶段 8 压测再判要不要加缓存层）。
+
+### 取证二：冒烟脚本第一次自己戳穿自己的假证据（本轮最贵的方法教训）
+
+- 现象：新增第 15 步后跑冒烟，出现 4 处 FAIL，其中三处是**脚本自己错**（见下），第四处最严重 —— **它意味着上一轮记为 PASS 的否定断言这一轮已经不再是证据**：
+  1. **错误信封字段是 `msg` 不是 `message`**：`Result{code,msg,data,traceId}`，脚本按 `message` 取文案 → 三条「错误码对不对」的用例集体红。实现无错。同步修 `isMsg()` 与三处诊断输出。
+  2. **匿名详情不下发 `authorId`**：Jackson `NON_NULL` 下该键整个消失，`=== null` 判的是 `undefined` → 改成 `== null` 同时接受「值为 null」和「键不存在」。**凡是「某字段不该出现」的断言，都要先想清楚「缺席」在序列化层长什么样。**
+  3. **首页截断让否定断言恒真**：库里 `PUBLISHED + visibility=public` 的行数在连续冒烟后达到 **51 > `PageQuery.MAX_SIZE`=50**，而第 12 步「第三人广场里看不到 A 的私密帖/待审帖」是**只看首页**判的 —— 从这一刻起这条断言**必然通过，与实现无关**。第二个叠加因素：待审帖 `published_at IS NULL`，在 `published_at DESC` 里沉到整条流尾部，首页永远判不到（读侧的 `applyCursor` 早就为它写了 `isNull` 分支，说明**实现是对的，错的是断言的观察窗口**）。
+- 修法：新增 `walkFeed(token, maxPages)`（沿 `nextCursor` + `beforeId` 翻到底、按 id 去重、记录 `pages` 与 `firstPage`），把三处「不出现」类断言改到**整条流**上判，并额外钉一条 `firstPage.length === 50 && others.length > firstPage.length` —— **先自证「首页确实被截断了」，那句「不出现」才算数**。作者侧「能看到自己待审帖并带 `auditTip`」同样改成 `walkFeed`。
+- 方法论落一条硬规矩：**判存在性一律翻到底；每个否定断言必须同时钉住观察窗口够大**。「测试变红」不等于「实现有错」，但「测试变绿」同样不等于「实现被证明了」—— 本轮这四条里有三条是绿的假证据。
+- 两个把 helper 放错位置的自伤（各浪费一次复跑）：① 第一版把 `walkFeed` 放到模块顶层 → `listGet is not defined`（`listGet/itemsOf/bodyOf` 是 `main()` 内的 `const`）；② 第二次 splice 误删了 `r = await listGet(...)` 那行 → 冒烟打印「首页=0」的假失败。**改脚本也要有 diff 级回读，别只靠「看起来对了」。**
+- 复跑结果（照抄脚本自己打印的汇总行，不许手数）：**`冒烟汇总：113 项，断言 105 条，失败 0 条`**（上一轮基线 85 项 / 78 断言 / 14 步）。日志 `E:\codex workspace\_cache\mindisle-dbtmp\smoke_t36.txt`。
+
+### 交付物：前端（接的是真接口，乐观值只用于手感）
+
+| 文件 | 行数 | 变更 |
+|---|---|---|
+| `src/composables/usePostInteract.js`（新） | 81 | `usePostInteract() → {busy, isBusy, toggle}`：先本地 ±1，**回执到达后用服务端算好的 `liked/likeCnt/collected/collectCnt` 整体覆盖**，失败回滚；未登录**不发请求**，`router.replace({name:'login', query:{redirect: fullPath}})`。直接改传入的列表条目/详情原始对象（`usePagedPosts` 用 `ref([])`，深层响应）。 |
+| `src/api/post.js`（改） | 44 → 54 | +`actOnPost(id, action)`（不 silent，让错误可见）+`POST_ACTION_PAIRS`（`like/unlike`、`collect/uncollect` 与对应标志位、计数列成对声明，避免四个 if 分支各写一半）。 |
+| `src/api/user.js`（改） | 17 → 25 | +`userHomepage(id)`（**silent**，主页摘要失败不该弹红条）、+`followUser(id, action)`（不 silent）。 |
+| `src/components/PostCard.vue`（改） | 109 → **130** | footer = 浏览/评论 + `.grow` + 两颗 `.act`（**`@click.stop` 必须加**，否则点个赞连带触发整卡跳详情；`:disabled="isBusy(...)"` 防连点）；文案 `赞/已赞/收藏/已收藏 + fmtCount`。三条注释写进模板旁：必须 stop / 计数以回执为准 / 评论恒 0 是因为 T3.7 未做。 |
+| `src/views/post/PostDetailView.vue`（改） | 142 → **165** | **删掉 v1.1.7 那句「点赞要等 3.6 再做」的过期脚注**（代码注释里的「将来」也是承诺，落地当轮必须回改），换成 `.acts` 互动条 + 一句「计数由后端按真实互动记录重算」。 |
+| `src/views/user/UserHomeView.vue`（改） | 110 → **202** | 新增资料卡（`el-avatar` + displayName + bio + 公开帖子/关注/粉丝/获赞）+ 关注按钮（`v-if="!card.self"`，乐观 +1 后以回执覆盖、失败回滚）+ `cardNote` 降级行；页尾写白段整段改写成「**这一页刻意有什么、刻意没有什么**」——讲清两个新接口 ≠ 改 `me/profile` 的入参、四类敏感字段不出参、以及仍欠私信与关注/粉丝列表页的理由。`watch(targetId)` 与 `onMounted` 同步 `loadCard()`。 |
+| `frontend/probe/domprobe.mjs`（改） | 274 → **324** | +`actButtons()` helper；第 4 组旧断言（「这一页为什么只有一张列表」）替换为 3 条新断言（资料卡渲染 / 自己不出现关注按钮 / 写白段新标题）；**新增第 7、8 组**。 |
+
+- `npm run build` **exit 0 / ✓ built in 1.05s**；`node frontend/probe/domprobe.mjs` **30 项 / 0 失败**（上一轮 23），`bundle: 3025109B`；`proxycheck.mjs` **10 项 / 0 失败**；OpenAPI **27 paths / 30 operations / 7 分组**（上一轮 24/27/7）。
+- **探针第 7 组踩的坑值得单记**：进他人主页后第一版**等的是页面标题**，但标题是 route 参数的 computed（同步就有），资料卡要等接口 —— 于是 `[7] btns=[]` 假失败。正确写法是**等「真正异步的那个东西」（按钮本身）**。同理第 8 组断言 `acts.length === cards().length * 2` 且逐个匹配 `/^赞 \d+$/`、`/^收藏 \d+$/`，再钉「浏览/评论没有被挤掉」。
+- **边界写白**：探针**全程只 GET**，没点过任何写接口 —— 「按钮在不在、文案对不对」是探针证的，「点下去真的写对」是冒烟证的。两件事别混着说。另外 `domprobe` 与 `proxycheck` **不能并发跑**（第一次误并发把 23 项绿跑成满屏 TIMEOUT，两个 Node 脚本同打一个后端 + 同一份编译产物），必须串行。
+
+### 本轮真实踩到的坑（都有证据）
+
+1. **`-p` 与密码之间有空格 = mysql 挂起等交互输入**。`-p<root口令>`（紧贴）能连，但先打一条 `mysql: [Warning] Using a password on the command line interface can be insecure.`，很多人把这条 warning 当成失败；`-p <root口令>`（带空格）会被 MySQL 解释成「`-p` 取密码为提示符、`<root口令>` 是**数据库名**」，于是**永久停在 `Enter password:` 等输入** —— 在 PowerShell 里表现为命令不返回。四种写法实测：`--defaults-extra-file=<cnf>`（**必须是第一个参数**）exit 0；`-h -P -u -p<root口令>` exit 0 + warning；`-p <空格> 密码` **挂起**；`-p` 接 stdin 管道同样**挂起**。控制台中文乱码另需 `[Console]::OutputEncoding=UTF8` + `--default-character-set=utf8mb4`；`\G` 在 `-e` 里不可用。
+2. **凭据只留一个仓库外的文件**。`E:\codex workspace\_cache\mindisle-dbtmp\rootpwd.cnf`（39 B，`[client]` + `user` + `password`），文档、日志、commit message、会话回复一律不出现明文；脚本里用变量并在输出上做 `.Replace($pw,'********')` 掩码。本轮新增的 `ev_t36.sql` 里只有 SQL，不含任何凭据。
+3. **`mvn package` 在离线仓库里缺 `maven-jar-plugin:3.5.1`** —— 只能 `spring-boot:run` 起服务；要跑 jar 得先补插件依赖，本轮没有为「顺手」去改离线仓库。
+4. **`Start-Process -ArgumentList` 不处理引号**（v1.1.8 已记过一次，本轮再咬一次）：`-Dmaven.repo.local=E:/codex workspace/_cache/m2/repository` 不包引号时报 `Unknown lifecycle phase "workspace/_cache/m2/repository"`。正解：`[char]34` 手工包一层。
+5. **给 record 加字段 = 改测试**。`UserHomepage`/`Relations` 这类出参 record 扩字段后，3 处 `new Relations(...)` 构造点当场 testCompile 失败。这不是坏事（编译器替你找到所有调用方），但要预期到：改出参的半径比想象大。
+6. **内存 fake 必须照 DDL 的 `NOT NULL DEFAULT 0` 初始化计数列**。fake 的默认值是 `null`、数据库的默认值是 `0`，「零写入」路径在 fake 上拿到 `null` 会当场假失败 —— 断言没错、实现没错，是替身不像本体。
+7. **`[IO.File]::ReadAllBytes('相对路径')` 按 .NET 进程 CWD 解析**，与 `cd` 不同步；一律写绝对路径。`Set-Content -Encoding utf8LF` 这个参数不存在（写文件改用 Node）。node_repl 里 `process` 不可用、最终表达式常被吞，输出走 `nodeRepl.write(...)` 且写完必回读字节数核验。
+8. **明文口令一旦进了 `docs/dev-log.md` 就等于进了 git**：本轮写「`-p` 空格挂起」这条坑时，把 root 口令的字面值抄进了日志 4 次 —— 提交前用 `split(pw).join('<root口令>')` 全部掩码，并全仓扫描（`Get-ChildItem -Recurse -File | Where { $_.FullName -notmatch '\\(node_modules|target|dist|\.git)\\' }` + `[IO.File]::ReadAllText().Contains($pw)`）确认仓库内归零，只剩仓库外的 `rootpwd.cnf` 与三个 `_cache` 辅助脚本。**教训：解释「某种写法能连上」时，示例里放占位符，不放真值。**
+8. **多行 PowerShell here-string 会把输出吞掉**，改文档的脚本一律用 Node + JSON ops（本轮 `mdpatch.mjs` 走行替换、新写 `strpatch.mjs` 走子串替换，每条 op 带 `done` 标记，锚点缺失即抛错且不写盘，可安全复跑）。
+
+### 环境事实（下一轮照着跑，不用重新摸）
+
+- MySQL 9.7.1 / root 本地连接走 `rootpwd.cnf`；后端 8080 = 本轮新代码（run18），前端 dev 5173 与探针共用；`.env` 只在项目根（`MINDISLE_CAPTCHA_ENABLED=false`）。
+- 冒烟账号口令 `Smoke#2026x`（在 `smoke.mjs` 内，非机密）；探针夹具账号 `smoke_seen_20260921020038` = **user 23**，其 post 39–42 是 U11/U12 与 `domprobe` 的稳定证据源 —— **本轮之后扩到 30 项，夹具未变**。
+- 本轮为取证把冒烟又跑了 1 次，库里 post 62 → **111**、user 28 → **43**、`post_like` **16** 行；`user_follow` = **0**（探针与冒烟都**没留下活跃关注行**：关注往返最终是取关，取关是硬删，所以计数为 0 与 C 条谓词归零是一致的）。
+
+### 文档回写
+
+- 手册升 **v1.1.9**（1728 → **1744 行**，CRLF、无 BOM、无 Tab）：§6.1 的 **3.6 行整行按实测重写**（幂等形状 / 计数重算 / 自赞口径）+ 追加 v1.1.9 实测回写 **13 条**（第 13 条是本轮**文档勘误**自身）；§6.2 U3/U4/U11 三行更新（`PostCard` 130、`PostDetailView` 165、`UserHomeView` 202）；§6.4 **第 2 条 ☐→☑** 并附冒烟第 15 步 + SQL E 证据（含「为什么证据取自互动表而不是 `user_action`」的偏差说明）；§15 **T3.6 ☐→☑**、阶段 3 收工口径 **☑ 5→6 / ☐ 10→9**；§18 Gate3 行同步为 185 / 113 / 30；§19 新增 v1.1.9 变更行 + 「下一步」整段替换。**任务总数、人日、追溯矩阵、Gate 行数未变：117 条 / 144.30 人日 / 101 行 / 10 行。**
+- README：进度块新增「阶段 3（续 5）」一整节；顶部摘要、目录结构（main 93 / test 18 / Controller 10、`src` 37 文件）、四·补标题、OpenAPI 口径、冒烟实测行、库内行数快照、进度勾选与「下一步」全部按实测更新。
+- 全局《复利与踩坑日志》补 **009 第 5 轮与第 6 轮**两节。**这里要显式记一次自纠**：上一轮 dev-log「文档回写」里已经写了「补 009 第 5 轮」，但当时磁盘上并没有这一节 —— 属**提前断言**（同一个毛病本项目第 3 轮就犯过一次）。本轮把第 5 轮真正补上，并顺带补第 6 轮（本轮），措辞改成「本轮与上一轮已各自落节」，避免再出现「文档说写了、文件里没有」。**口径仍然只有一条：每条结论都要能指到一次真实执行。**
+
+### 仍未做（截至本轮，别自我感觉良好）
+
+- **评论（T3.7）**、**举报 + 站内通知（T3.11）**、**`user_action` 埋点（T3.10）**：本轮之后，「点了没反馈」这件事只剩通知没做 —— 点赞和关注现在有了计数与状态，但没人会收到消息。
+- **收藏列表页与 U12「收藏」Tab**：数据已经有了（`post_like` 里 `action_type=COLLECT, deleted=0` 的行），缺一个读端点和一张列表；「我关注了谁 / 谁关注我」同理，`user_follow` 有写没读。
+- **关注流 `scene=follow`** 未实现；话题（T3.8）、搜索（T3.9）、「热门」排序（`sort`）未动；U1 首页、U6 话题圈未开工。
+- 探针**没有点过任何写接口**；**真浏览器仍未测**（`cua` 依旧返回 Codex auth token unavailable），§6.4 第 4 条与 Gate 3 的界面项继续挂 ☐。
+- `HUMAN_REVIEW` 不进 `audit_task`（T6.1）、危机工单无通知（T6.4）、`auto_destroy_at` 只写不扫（T3.15）、`post.emotion_*` 恒 NULL（阶段 4）不变。
+- 毕设材料（T1B.*）按用户指令继续顺延；**仍未打 tag**（Gate3 未过，最新 tag `stage-2-skeleton`）。
