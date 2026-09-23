@@ -34,6 +34,8 @@ public class MindisleProperties {
     private Quota quota = new Quota();
     /** 发帖字段上限与树洞存活期（任务 3.3 · 需求 FR4.1、FR4.2）。 */
     private Post post = new Post();
+    /** 举报阈值与举报入参上限（任务 T3.11 · 需求 FR4.7、FR4.4）。 */
+    private Report report = new Report();
     /** 图形验证码（任务 T2.16 · §5.11 第 1~2 条）。 */
     private Captcha captcha = new Captcha();
 
@@ -145,6 +147,26 @@ public class MindisleProperties {
         private List<Integer> holeDestroyOptions = new ArrayList<>(List.of(24, 72, 168));
         /** 勾选树洞但没指定时长时的默认值（FR4.2「默认 7 天后」= 168 小时）。 */
         private int holeDefaultDestroyHours = 168;
+    }
+
+    /**
+     * 举报约束（任务 T3.11 · 需求 FR4.7 与 FR4.4）。
+     *
+     * <p>{@code autoReviewThreshold} 是 FR4.4「report_cnt 达阈值自动转 HUMAN_REVIEW」里那个
+     * 一直没落地的阈值：阶段 2 建 post 表时先占了列，真相表（content_report）到 T3.11 才建，
+     * 所以这一列在此之前始终是 0。取 3 的理由写进手册 §14：一条内容被三个人独立举报，
+     * 在校园里已经足够说明「不是私人恩怨」，再高的阈值会让明显违规的内容多活好几天。</p>
+     */
+    @Data
+    public static class Report {
+        /** 转人审阈值，按<b>举报人数</b>算（同一人重复举报不叠加，uk_reporter_target）。 */
+        private int autoReviewThreshold = 3;
+        /** 举报描述字数上限（FR4.7「描述」；列宽 500 是余量，这里才是产品口径）。 */
+        private int maxDescriptionChars = 200;
+        /** 截图证据张数上限（FR4.7「截图证据」）。 */
+        private int maxEvidenceImages = 3;
+        /** 非危机举报的处理时限（小时）。危机类走 crisis 的 L2/L3 SLA，不读这一项。 */
+        private int slaHours = 24;
     }
 
     @Data

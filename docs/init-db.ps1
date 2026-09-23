@@ -4,8 +4,8 @@
 #
 # What it does, in order:
 #   1) sql/00_create_db_and_user.sql             as root      -> CREATE DATABASE + app user + grants
-#   2) sql/01..08 + 09_seed.sql + 10_index.sql   as mindisle  -> 31 tables, seed data, indexes
-#   3) verification                              as mindisle  -> base-table count must be 31
+#   2) sql/01..08 + 09_seed.sql + 10_index.sql + 12_report.sql  as mindisle -> 32 tables, seed data, indexes
+#   3) verification                              as mindisle  -> base-table count must be 32
 #
 # Security rules (do NOT weaken them when editing this file):
 #   * The MySQL root password is typed interactively, held in a SecureString, never stored in a file or in git.
@@ -103,7 +103,7 @@ function Invoke-MySqlFile {
 }
 
 $ddlFiles = @('01_account.sql','02_ai.sql','03_emotion.sql','04_community.sql','05_recommend.sql',
-              '06_pm.sql','07_audit.sql','08_config.sql','09_seed.sql','10_index.sql')
+              '06_pm.sql','07_audit.sql','08_config.sql','09_seed.sql','10_index.sql','12_report.sql')
 $madeFiles = @()
 try {
   foreach ($name in (,'00_create_db_and_user.sql') + $ddlFiles) {
@@ -149,13 +149,14 @@ try {
   $vText = @(,$vRaw)[-1]
   # `$arr -notmatch 'x'` returns the NON-matching elements (a non-empty array is truthy); it does NOT mean
   # "nothing matched". With the display lines in the array that check threw even though the database really
-  # had 31 tables - it made a SUCCESSFUL run look like a failure. Match the count cell itself instead.
-  if ($vText -notmatch '\|\s*31\s*\|') {
-    throw ('expected 31 base tables in mindisle, got: ' + ($vText -replace '\s+', ' '))
+  # had 31 tables (12_report.sql added the 32nd in T3.11) - it made a SUCCESSFUL run look like a failure.
+  # Match the count cell itself instead.
+  if ($vText -notmatch '\|\s*32\s*\|') {
+    throw ('expected 32 base tables in mindisle, got: ' + ($vText -replace '\s+', ' '))
   }
 
   ''
-  'DATABASE READY: mindisle has 31 tables.'
+  'DATABASE READY: mindisle has 32 tables.'
   'LAST MANUAL STEP -- put the app password you just typed into .env as DB_PASSWORD, then restart the backend:'
   '  notepad "' + (Join-Path $projRoot '.env') + '"'
   '    DB_PASSWORD=<the password you typed above>      (this file is git-ignored, never commit it)'

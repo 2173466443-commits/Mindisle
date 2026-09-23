@@ -13,8 +13,14 @@ import org.springframework.context.annotation.Configuration;
 /**
  * OpenAPI 分组（springdoc-openapi 3.1.1，见手册 §5.3）。
  *
- * <p>分组口径与 Gate 2 验收一致：在 /doc.html 的下拉里能看到分组列表（阶段 2 为 5 个，阶段 3 起增加「06-audit 内容安全」与「07-file 文件与上传」共 7 个）、接口总数不少于 20，
+ * <p>分组口径与 Gate 2 验收一致：在 /doc.html 的下拉里能看到分组列表——阶段 2 为 5 个，阶段 3 先加「06-audit 内容安全」
+ * 与「07-file 文件与上传」到 7 个，任务 T3.11-b 再加「08-notify 站内通知」到 8 个；接口总数不少于 20，
  * 论文第 6 章接口清单按同一口径统计，避免答辩时数字对不上。</p>
+ *
+ * <p><b>分组数没有被任何脚本写死</b>：手册 v1.2.0 之前有一句「Swagger 的 @Tag 分组数被 docs/openapi-check
+ * 断言写死」，实测 docs/ 下不存在该脚本、smoke.mjs 也不校验 /v3/api-docs，已按 bug 订正（手册 §19 v1.2.1）。
+ * 真正的约束是反过来的：一批新路径如果忘了出现在这里的某个 pathsToMatch 里，它在 /doc.html 上会一条都看不见，
+ * 所以<b>新增一批对外路径就必须同时在这里加一个分组</b>，这件事由冒烟后的手工核对负责。</p>
  */
 @Configuration
 public class OpenApiConfig {
@@ -66,5 +72,11 @@ public class OpenApiConfig {
     @Bean
     public GroupedOpenApi fileApi() {
         return GroupedOpenApi.builder().group("07-file 文件与上传").pathsToMatch("/api/files/**").build();
+    }
+
+    @Bean
+    public GroupedOpenApi notifyApi() {
+        return GroupedOpenApi.builder().group("08-notify 站内通知")
+                .pathsToMatch("/api/notifications/**").build();
     }
 }

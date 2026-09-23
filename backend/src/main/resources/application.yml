@@ -147,6 +147,11 @@ mindisle:
     default-visibility: public   # public | private，FR4.1 两档；friends 属 FR4.6 未开放
     hole-destroy-options: 24,72,168   # 树洞可选存活小时数（手册 §6.1 行 836）
     hole-default-destroy-hours: 168   # FR4.2「默认 7 天后」；发帖时算成绝对时间落 auto_destroy_at
+  report:                        # 任务 T3.11 举报（需求 FR4.7、FR4.4 · NFR10 不写死）
+    auto-review-threshold: 3      # FR4.4：同一帖被 3 个不同人举报即自动转 HUMAN_REVIEW；人不是次数（uk_reporter_target）
+    max-description-chars: 200    # FR4.7 描述字数上限，列宽 500 留的是余量
+    max-evidence-images: 3        # FR4.7 截图证据张数
+    sla-hours: 24                 # 非危机举报的处理时限；危机类走上面 crisis 的 L2/L3 SLA
   captcha:                       # 任务 T2.16 图形验证码总开关
     # 默认 true 是 fail-closed：不配这个键就必须验码。答案只进缓存、不返回也不打日志，
     # 所以自动化冒烟拿不到它 —— 只有本地开发/CI 才显式设 MINDISLE_CAPTCHA_ENABLED=false，

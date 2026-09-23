@@ -38,6 +38,33 @@ export function commentLength(value) {
   return Array.from(value || '').length
 }
 
+// 举报（任务 T3.11 · FR4.7、FR4.4、BR6）。
+// 刻意不 silent：举报的失败原因（没登录 10002 / 这条你看不到 30001 / 理由不在六类里 10001）
+// 恰好就是界面上该说的那句话，页面再翻译一遍只会分叉。而「你已经举报过了」和
+// 「已达阈值、这条转人工了」后端是当「成功」返回的（恒 200，区别写在
+// data.duplicated / data.escalated / data.reportCnt 里），所以这里不需要为一个正常结果 catch。
+export const reportPost = (id, payload) => http.post('/posts/' + id + '/report', payload)
+
+/**
+ * 六类举报理由：与后端 ReportService.REASONS 的键与顺序逐字同源（手册 §6.5 第 6 条）。
+ * desc 只是给单选框当副标题的人话，不参与提交；提交只认 value。
+ * 两边任何一侧单独加一类，另一侧就会收到 10001 —— 加理由必须同时改后端白名单。
+ */
+export const POST_REPORT_REASONS = [
+  { value: 'spam', label: '广告', desc: '营销、刷屏、引流' },
+  { value: 'abuse', label: '攻击辱骂', desc: '人身攻击、嘲讽、霸凌' },
+  { value: 'sexual', label: '色情低俗', desc: '色情、血腥、令人不适的图片' },
+  { value: 'privacy', label: '泄露隐私', desc: '真实姓名、照片、账号、联系方式' },
+  { value: 'self-harm', label: '自伤风险', desc: 'TA 可能正在伤害自己' },
+  { value: 'other', label: '违法或其他', desc: '以上都不是，请在描述里写清楚' }
+]
+
+/** 举报描述字数上限：与后端 mindisle.report.max-description-chars（默认 200）同源，按码点计。 */
+export const REPORT_DESC_MAX = 200
+
+/** 截图证据张数上限：与后端 mindisle.report.max-evidence-images（默认 3）同源。 */
+export const REPORT_EVIDENCE_MAX = 3
+
 // 开关到动作名的映射只留这一份：PostCard、详情页、composable 里各自写一遍 ternary，
 // 就是给未来「某一处忘了取反」留位置。
 export const POST_ACTION_PAIRS = {
