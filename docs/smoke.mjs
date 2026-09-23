@@ -285,17 +285,18 @@ async function main() {
     check("9", "配图 URL 在服务端读不到真文件 → 400/10001（发帖这一刻的张数与字节数校验不是装饰）",
       r.status === 400 && code(r) === "10001", brief(r));
 
-    // 未过审话题走 409/30004：本环境 20 条种子话题全部 APPROVED，而话题提交接口属任务 T3.4 还没做，
-    // 脚本没有任何合法途径造出一条待审话题，所以这条要真跑得靠外部预置 + 环境变量把 id 传进来。
+    // 未过审话题走 409/30004：自 T3.8 起脚本有了合法造待审话题的途径（POST /api/topics + FR8.6
+    // 的预审开关缺省即 true），所以那条分支由第 21 步自建话题自证。这里保留外部预置入口，是为了在
+    // require-pre-review=false 的环境里（新建即过审、脚本自己造不出待审）仍然拿得到这条证据。
     const pendingId = Number(process.env.SMOKE_PENDING_TOPIC_ID || "0");
     if (pendingId > 0) {
       r = await post({ title: "冒烟·负面", content: "挂一个待审话题", topicIds: [pendingId] });
       check("9", "话题未过审 → 409/30004（用户能做的是等，不是改，所以不给 400）",
         r.status === 409 && code(r) === "30004", brief(r));
     } else {
-      info("9", "未提供 SMOKE_PENDING_TOPIC_ID，30004 分支本轮拿不到 HTTP 证据",
-        "该分支需要有「一条真实存在但未过审」的话题才打得动：本环境 20 条种子话题全部 APPROVED，"+
-        "话题提交接口又属 T3.4 尚未实现，脚本无法自己造出这条数据 —— 已记进 dev-log 的已知缺口");
+      info("9", "未提供 SMOKE_PENDING_TOPIC_ID，本步不单独取证 30004 分支",
+        "这条分支已由第 21 步自建待审话题自证（T3.8 之后 POST /api/topics 可用）：留这个环境变量"+
+        "是给 require-pre-review=false 的环境兜底，本条只多一行 INFO、不改断言计数");
     }
 
     r = await send("POST", "/api/posts", jsonBody({ title: "游客发帖", content: "应当被挡在门外" }));
@@ -1667,6 +1668,289 @@ async function main() {
       + " AND (p.is_anonymous = 1 OR p.alias_id IS NOT NULL); SELECT COUNT(*) AS realname_rows_of_followee"
       + " FROM post p WHERE p.deleted=0 AND p.user_id=" + srchBId + " AND p.status='PUBLISHED'"
       + " AND p.visibility='public' AND p.is_anonymous = 0 AND p.alias_id IS NULL;");
+
+    // ---------- 21 话题域四条端点（任务 3.8 · 需求 FR1.7、FR4.5、FR8.6 · 手册 §6.1 行 3.8、§6.2 U6）----------
+    // 这一步要证的三件事，单测一份都替代不了：
+    // ① 鉴权白名单的真实形状。本域四条端点曾经「带着合法 token 也恒 401」，根因是 JwtAuthFilter 的
+    //    匿名清单里写了 startsWith("/api/topics") —— 前缀把 /api/topics/1 整条吞进去，解析令牌那一步
+    //    根本不执行，current 永远是 null。修掉第一层才露出第二层：GET /api/topics（游客墙）与
+    //    POST /api/topics（创建）共用同一个 URI，只按 URI 判就必然二选一。两层都只有真跑一次 HTTP
+    //    才看得见，所以这一步留在最后，也必须起真后端来跑（§5.10）。
+    // ② requireReadable 是全站唯一一处「这个话题现在能不能被读」，四个入口必须给同一个码。
+    // ③ post_cnt / follow_cnt 是每次互动后按真相表重算回写的列：私密帖、待审帖不许把它抬上去。
+    const tpcA = await regAccount("smoke_tpc_a" + stamp, "冒烟话题甲");
+    const tpcB = await regAccount("smoke_tpc_b" + stamp, "冒烟话题乙");
+    check("21", "注册两名话题域一次性账号：本段要真实建话题、真实挂帖，前 20 步夹具的发帖额度与关注关系都已经被动过",
+      !!tpcA && !!tpcB, "a=" + !!tpcA + " b=" + !!tpcB);
+    if (tpcA && tpcB) {
+      // 本段的两个取数器：token 传 null 就是游客，而第 ① 条断言要的正是游客态。
+      const tpGet = function (token, p, qs) {
+        return rlSafe(function () {
+          return send("GET", p + (qs ? "?" + qs : ""),
+            token ? { headers: { Authorization: "Bearer " + token } } : {});
+        });
+      };
+      const tpPost = function (token, p, reqBody) {
+        return rlSafe(function () {
+          return send("POST", p, token ? asToken(token, jsonBody(reqBody)) : jsonBody(reqBody));
+        });
+      };
+      const hasStr = function (v, needle) {
+        return String(v === undefined || v === null ? "" : v).indexOf(needle) >= 0;
+      };
+      const tpKeys = function (v) { return Object.keys(v || {}); };
+      const msgOf = function (rr) { return (rr.json && rr.json.msg) || ""; };
+
+      // 拿一条「真的有帖」的已过审话题当靶子：库里只有 1 号话题挂着种子帖，但运行期不许写死 id。
+      r = await tpGet(null, "/api/topics", "limit=50");
+      const tpWallRows = arrOf(r);
+      const tpWallWithPosts = tpWallRows.filter(function (x) { return Number(x.postCnt) > 0; });
+      const wallT = tpWallWithPosts.length ? tpWallWithPosts[0] : null;
+      const tId = wallT ? wallT.id : 0;
+      const basePostCnt = wallT ? Number(wallT.postCnt) : 0;
+      const baseFollowCnt = wallT ? Number(wallT.followCnt) : 0;
+
+      const gDetail = await tpGet(null, "/api/topics/" + tId, "");
+      const gPosts = await tpGet(null, "/api/topics/" + tId + "/posts", "size=1");
+      const gCreate = await tpPost(null, "/api/topics", { name: "游客建的话题" });
+      const gFollow = await tpPost(null, "/api/topics/" + tId + "/follow", { action: "follow" });
+      const gate401 = function (rr) { return rr.status === 401 && code(rr) === "10002"; };
+      check("21", "话题域四条端点未登录全部 401/10002，而同一个 URI 上的话题墙游客照常读回 20 条："
+        + "读与写按 HTTP 方法分流、白名单里没有前缀。这条同时钉住本轮修掉的两个 bug：匿名清单用前缀"
+        + "会连带把 /api/topics/1 变成匿名路径（于是永远解析不出令牌、永远 401），而只按 URI 分流又会"
+        + "在游客建话题与登录建话题之间二选一 —— JwtAuthFilter 与 SecurityConfig 两份清单必须一起改",
+        gate401(gDetail) && gate401(gPosts) && gate401(gCreate) && gate401(gFollow)
+        && r.status === 200 && tpWallRows.length === 20 && !!wallT,
+        "detail=" + gDetail.status + " posts=" + gPosts.status + " create=" + gCreate.status
+        + " follow=" + gFollow.status + " wall=" + r.status + " n=" + tpWallRows.length);
+
+      r = await tpGet(tpcA, "/api/topics/" + tId, "");
+      const det = bodyOf(r);
+      check("21", "登录读已过审话题 → 200，出参恰好 8 个键、比话题墙那一行只多一个 following；cover 为 null"
+        + " 被 non_null 序列化整个省掉（U6 头图今天没有上传通道，前端判「有没有头图」只能判键在不在）",
+        r.status === 200 && code(r) === "0" && tpKeys(det).length === 8 && det.following === false
+        && det.id === tId && det.name === wallT.name && Number(det.postCnt) === basePostCnt
+        && det.cover == null && tpKeys(det).indexOf("cover") < 0,
+        r.status + " keys=" + tpKeys(det).join(",") + " postCnt=" + det.postCnt
+        + " followCnt=" + det.followCnt);
+
+      r = await tpGet(tpcA, "/api/topics/abc", "");
+      check("21", "非数字 id → 404/90006 而不是 500/400：路径变量上的数字约束先把 long 转换挡在 MVC 那一层；"
+        + "文案带请求行，这一支出自全局兜底（NoResourceFoundException），与下一条 requireReadable 给的"
+        + "文案形状不同，分开钉才看得出码到底是谁给的",
+        r.status === 404 && code(r) === "90006" && hasStr(msgOf(r), "/api/topics/abc"),
+        r.status + " code=" + code(r) + " msg=" + msgOf(r));
+      r = await tpGet(tpcA, "/api/topics/99999999", "");
+      check("21", "不存在的话题 → 404/90006 且文案不含那个 id：「没有这个话题」与「被驳回」是同一句话，"
+        + "不给存在性留枚举通道（帖子那边对别人的私密帖是同一教义：30001/404 不区分二者）",
+        r.status === 404 && code(r) === "90006" && !hasStr(msgOf(r), "99999999"),
+        r.status + " msg=" + msgOf(r));
+
+      r = await tpPost(tpcA, "/api/topics", { name: "   " });
+      check("21", "只有空白的名字折叠成空串之后按「没填」拒 → 400/10001「话题名不能为空」："
+        + "库里 name NOT NULL，放一条空名进去就是话题墙上一个点不动的空白入口",
+        r.status === 400 && code(r) === "10001" && hasStr(msgOf(r), "话题名不能为空"),
+        r.status + " msg=" + msgOf(r));
+      const name33 = "🌱".repeat(18) + "甲" + stamp;
+      r = await tpPost(tpcA, "/api/topics", { name: name33 });
+      check("21", "33 个码点的名字被拒，且文案同时报上限 32 与实际 33：长度按码点算 —— 18 个 emoji 在 Java 里"
+        + "占 36 个 char，按 char 判就会报出「当前 37 字」这种没人看得懂的数字，也让带表情的话题名莫名超长",
+        r.status === 400 && code(r) === "10001" && hasStr(msgOf(r), "32") && hasStr(msgOf(r), "当前 33"),
+        "chars=" + name33.length + " codepoints=" + Array.from(name33).length + " msg=" + msgOf(r));
+      const name32 = "🌱".repeat(17) + "甲" + stamp;
+      r = await tpPost(tpcA, "/api/topics", { name: name32 });
+      const created = bodyOf(r);
+      check("21", "与上一条只差一个码点（32）就 200 创建成功：两条一起构成码点 vs char 的分水岭。"
+        + "判据本身由 TopicServiceTest 逐格钉，这里要的是接口层的证据",
+        r.status === 200 && code(r) === "0" && !!created.id && created.name === name32,
+        r.status + " chars=" + name32.length + " codepoints=" + Array.from(name32).length
+        + " id=" + created.id + " 回执=" + nj(created));
+      const createdKeys = tpKeys(created);
+      const auditPending = created.auditStatus === "PENDING";
+      check("21", "创建回执恰好 8 个键，且 usable / tip 恒等于 auditStatus 的那一面：FR8.6 那个开关（缺省 true）"
+        + "只改这一处，前端只读 usable 就知道该不该置灰，不必去读环境变量；而状态码恒 200 —— "
+        + "「创建成功但进了待审」是一次业务上完全成功的请求，不该长得像 4xx",
+        createdKeys.length === 8 && created.usable === !auditPending
+        && Number(created.postCnt) === 0 && Number(created.followCnt) === 0
+        && hasStr(created.tip, auditPending ? "审核" : "现在就能进去发帖"),
+        "keys=" + createdKeys.join(",") + " auditStatus=" + created.auditStatus
+        + " usable=" + created.usable + " tip=" + created.tip);
+
+      if (auditPending) {
+        const p1 = await tpGet(tpcA, "/api/topics/" + created.id, "");
+        const p2 = await tpGet(tpcA, "/api/topics/" + created.id + "/posts", "size=1");
+        const p3 = await tpPost(tpcA, "/api/topics/" + created.id + "/follow", { action: "follow" });
+        const p4 = await putPost(tpcA, { title: "话题冒烟·挂待审" + stamp,
+          content: "挂一个还没过审的话题 " + stamp, topicIds: [created.id] });
+        check("21", "同一条待审话题在四个入口给的都是 409/30004（进页、话题流、关注、发帖挂载）：前三个文案"
+          + "带全名与「还在审核中」，挂帖那条是「还没通过审核」。requireReadable 是全站唯一一处判据，"
+          + "四处共用才有这条断言 —— 不是 404（会让人以为创建失败），不是 400（用户此刻能做的是等不是改）",
+          p1.status === 409 && code(p1) === "30004" && hasStr(msgOf(p1), name32)
+          && hasStr(msgOf(p1), "还在审核中")
+          && p2.status === 409 && code(p2) === "30004"
+          && p3.status === 409 && code(p3) === "30004"
+          && p4.status === 409 && code(p4) === "30004" && hasStr(msgOf(p4), "还没通过审核"),
+          "detail=" + p1.status + " posts=" + p2.status + " follow=" + p3.status
+          + " link=" + p4.status + " msg=" + msgOf(p4));
+      } else {
+        info("21", "本环境把 mindisle.topic.require-pre-review 显式设成了 false，新建话题直接过审，"
+          + "这一轮的 409/30004 四入口分支拿不到 HTTP 证据（判据仍被上一条回执与 TopicServiceTest 钉住）",
+          "要跑这条分支：不设该环境变量（缺省即 true）重跑 node docs/smoke.mjs");
+      }
+
+      r = await putPost(tpcA, { title: "话题冒烟·公开" + stamp,
+        content: "挂在已过审话题下的一条公开帖 " + stamp, topicIds: [tId] });
+      const tpPublicRow = bodyOf(r);
+      const tpPublicId = tpPublicRow.id;
+      check("21", "干净公开帖挂已过审话题 → 200 + PUBLISHED + topics 原样回显话题名（FR4.5 只挂过审的）",
+        r.status === 200 && code(r) === "0" && tpPublicRow.status === "PUBLISHED"
+        && Array.isArray(tpPublicRow.topics) && tpPublicRow.topics.length === 1
+        && tpPublicRow.topics[0] === wallT.name,
+        r.status + " status=" + tpPublicRow.status + " topics=" + nj(tpPublicRow.topics));
+      r = await tpGet(tpcB, "/api/topics/" + tId, "");
+      check("21", "post_cnt 恰好 +1，而且是由第二个人读到的：这一列每次挂帖后按真相表重算回写，"
+        + "不是 INCR + 定时回写 —— 它是 INT UNSIGNED，缓存值偏大时相减会下溢成 42 亿，"
+        + "而 Redis 缺席时降级 Caffeine 的失败语义还不一样，不该给计数造第二个真相",
+        Number(bodyOf(r).postCnt) === basePostCnt + 1,
+        "base=" + basePostCnt + " now=" + bodyOf(r).postCnt);
+      r = await tpGet(tpcB, "/api/topics/" + tId + "/posts", "size=50");
+      const tpFeedIds = hitIds(r);
+      check("21", "刚发的帖出现在话题页帖流里（FR4.5 聚合页的最小闭环），且这一页 hasMore=false —— "
+        + "下面几条判的都是「不在列」，被翻页截断会让否定断言恒真",
+        tpFeedIds.indexOf(tpPublicId) >= 0 && bodyOf(r).hasMore === false,
+        "n=" + tpFeedIds.length + " 新帖在列=" + (tpFeedIds.indexOf(tpPublicId) >= 0)
+        + " hasMore=" + bodyOf(r).hasMore);
+
+      r = await putPost(tpcA, { title: "话题冒烟·私密" + stamp,
+        content: "仅自己可见但挂了话题 " + stamp, visibility: "private", topicIds: [tId] });
+      const tpPrivateId = bodyOf(r).id;
+      r = await tpGet(tpcA, "/api/topics/" + tId + "/posts", "size=50");
+      const tpOwnFeed = hitIds(r);
+      const tpOwnMore = bodyOf(r).hasMore;
+      r = await tpGet(tpcB, "/api/topics/" + tId + "/posts", "size=50");
+      const tpPeerFeed = hitIds(r);
+      check("21", "作者自己的私密帖挂进话题也不进话题流，甲、乙两个身份都读不到它：applyVisible 只把"
+        + "「自己的待审帖」回给作者，private 不在那一支里。话题页照抄广场那一条判据而不是另开一版 —— "
+        + "多一个入口就多一份要各改一遍的 WHERE（手册 §14 第 27 条禁的正是这个）",
+        tpOwnMore === false && tpOwnFeed.indexOf(tpPrivateId) < 0
+        && tpPeerFeed.indexOf(tpPrivateId) < 0,
+        "作者视角 n=" + tpOwnFeed.length + " 含私密=" + (tpOwnFeed.indexOf(tpPrivateId) >= 0)
+        + " 他人视角 n=" + tpPeerFeed.length);
+      r = await tpGet(tpcA, "/api/users/me/posts", "size=50");
+      check("21", "同一条私密帖在「我的帖子」里读得回来：上面那个「读不到」来自可见性判据，不是写入失败"
+        + "（applyOwned 与 applyVisible 是两条不同的收窄，前者才给作者回看自己的私密）",
+        hitIds(r).indexOf(tpPrivateId) >= 0, "n=" + hitIds(r).length);
+      r = await tpGet(tpcB, "/api/topics/" + tId, "");
+      check("21", "私密帖被挡在门外，post_cnt 也就纹丝不动：linkTopics 对每个关联话题都无条件触发重算，"
+        + "而重算 SQL 只计 public + PUBLISHED + 未到期 —— 计数对不对，看的正是这条「不该涨的有没有涨」",
+        Number(bodyOf(r).postCnt) === basePostCnt + 1,
+        "base=" + basePostCnt + " now=" + bodyOf(r).postCnt);
+
+      r = await putPost(tpcA, { title: "话题冒烟·树洞" + stamp,
+        content: "匿名挂话题 " + stamp, type: "hole", topicIds: [tId] });
+      const tpHoleId = bodyOf(r).id;
+      r = await tpGet(tpcB, "/api/topics/" + tId + "/posts", "size=50");
+      const tpHoleRow = rowById(r, tpHoleId);
+      check("21", "树洞帖进话题流时 authorId 整个键缺席、展示名是马甲名、整行序列化后不含甲的昵称："
+        + "「换个入口就被认出来」和「在广场被认出来」是同一件事，解匿的口子不能因为多了一条路径就重开（FR1.4）",
+        !!tpHoleRow && !("authorId" in tpHoleRow) && tpHoleRow.anonymous === true
+        && String(tpHoleRow.displayName).indexOf("匿名屿民·") === 0
+        && JSON.stringify(tpHoleRow).indexOf("冒烟话题甲") < 0,
+        nj(tpHoleRow && { id: tpHoleRow.id, dn: tpHoleRow.displayName, anon: tpHoleRow.anonymous }));
+      r = await tpGet(tpcB, "/api/topics/" + tId, "");
+      check("21", "树洞（匿名但公开）计入 post_cnt：base+2 = 公开 + 树洞，中间那条私密始终没算进去。"
+        + "匿名是「对读者摘掉作者」，不是「对所有人摘掉内容」，两件事各自的判据不许互相越界",
+        Number(bodyOf(r).postCnt) === basePostCnt + 2,
+        "base=" + basePostCnt + " now=" + bodyOf(r).postCnt);
+
+      r = await tpPost(tpcA, "/api/topics/" + tId + "/follow", { action: "Follow " });
+      const tf1 = bodyOf(r);
+      check("21", "关注话题 → 200，出参恰好 5 个键、changed=true、following=true、follow_cnt 从基线 +1；"
+        + "action 传 Follow 带尾空格也收（trim + Locale.ROOT 转小写，与关注人、点赞三处共用同一份归一化）",
+        r.status === 200 && code(r) === "0" && tpKeys(tf1).length === 5 && tf1.changed === true
+        && tf1.following === true && tf1.topicId === tId && tf1.action === "follow"
+        && Number(tf1.followCnt) === baseFollowCnt + 1,
+        r.status + " keys=" + tpKeys(tf1).join(",") + " " + nj(tf1));
+      r = await tpGet(tpcA, "/api/topics/" + tId, "");
+      const detailFollowing1 = bodyOf(r).following;
+      r = await tpPost(tpcA, "/api/topics/" + tId + "/follow", { action: "follow" });
+      const tf2 = bodyOf(r);
+      check("21", "detail 把 following=true 回给按钮，而重复关注第二次 changed=false、数字不动："
+        + "唯一键 uk_topic_follow 挡住第二次 INSERT，changed 的语义是「这次真的改了这个人的状态」"
+        + "而不是「SQL 执行成功了」—— 前端按钮的提示文案读的是前者",
+        detailFollowing1 === true && tf2.changed === false && tf2.following === true
+        && Number(tf2.followCnt) === baseFollowCnt + 1,
+        "following=" + detailFollowing1 + " " + nj(tf2));
+      r = await tpPost(tpcB, "/api/topics/" + tId + "/follow", { action: "follow" });
+      const tf3 = bodyOf(r);
+      check("21", "换乙关注同一条话题 → follow_cnt 再 +1：这一数列的是「多少人在跟」，不是「被点了多少次」"
+        + "（幂等键是 (user_id, topic_id)，两个人各算一票，同一个人刷一百次也算一票）",
+        tf3.changed === true && Number(tf3.followCnt) === baseFollowCnt + 2,
+        "changed=" + tf3.changed + " followCnt=" + tf3.followCnt);
+      r = await tpPost(tpcB, "/api/topics/" + tId + "/follow", { action: "unfollow" });
+      const tf4 = bodyOf(r);
+      r = await tpPost(tpcA, "/api/topics/" + tId + "/follow", { action: "unfollow" });
+      const tf5 = bodyOf(r);
+      r = await tpPost(tpcA, "/api/topics/" + tId + "/follow", { action: "unfollow" });
+      const tf6 = bodyOf(r);
+      r = await tpGet(tpcA, "/api/topics/" + tId, "");
+      check("21", "取关一路回到基线：乙取消、甲取消各 changed=true 且数字归位，甲再取消一次 changed=false"
+        + "（取消一个没关注过的东西不是错误，前端双击与网络重发都不该弹报错），detail.following 也回到 false。"
+        + "本表没有删除位，取关就是物理 DELETE，收尾不留脏关系",
+        tf4.changed === true && tf5.changed === true && Number(tf5.followCnt) === baseFollowCnt
+        && tf6.changed === false && Number(tf6.followCnt) === baseFollowCnt
+        && tf6.following === false && bodyOf(r).following === false,
+        "乙取消=" + nj(tf4) + " 甲取消=" + nj(tf5) + " 再取消=" + nj(tf6));
+      r = await tpPost(tpcA, "/api/topics/" + tId + "/follow", { action: "bogus" });
+      check("21", "白名单外的 action → 400/10001 且文案把两个合法值念出来：不猜用户想点哪个按钮",
+        r.status === 400 && code(r) === "10001" && hasStr(msgOf(r), "follow")
+        && hasStr(msgOf(r), "unfollow"), r.status + " msg=" + msgOf(r));
+
+      r = await tpGet(tpcA, "/api/topics/" + tId + "/posts", "sort=hot");
+      const sortBad = r.status === 400 && code(r) === "10001";
+      const sortMsg = msgOf(r);
+      // r 在后面还要被两次翻页请求复用它自己的值，所以「那次 400 的码」必须当场抄下来：
+      // 首跑这里直接打 r.status，结果断言全绿而明细写着 hot=200，读日志的人会以为白名单又坏了。
+      const sortBadStatus = r.status;
+      r = await tpGet(tpcA, "/api/topics/" + tId + "/posts", "size=50");
+      const latestOrder = hitIds(r).join(",");
+      r = await tpGet(tpcA, "/api/topics/" + tId + "/posts", "sort=top&size=50");
+      check("21", "sort=hot 当场 400/10001 且文案列出两个合法值（不「猜一个」静默变时间序，否则用户看到的是"
+        + "「排序坏了」而系统里没一处说它坏了）；sort=top 今天与缺省 latest 完全同序 —— top 只是"
+        + "「is_top 在前」，而 is_top 只有管理员能写、管理端属 T6.1，库里恒 0。接口形状先按最终形态定，"
+        + "但手册 §6.1 不许把这一档写成「热帖排序」（FR4.5 只做到这里）",
+        sortBad && hasStr(sortMsg, "latest") && hasStr(sortMsg, "top")
+        && r.status === 200 && hitIds(r).join(",") === latestOrder,
+        "hot=" + sortBadStatus + " msg=" + sortMsg + " top 与 latest 同序="
+        + (hitIds(r).join(",") === latestOrder) + " n=" + hitIds(r).length);
+
+      r = await tpGet(tpcA, "/api/topics/" + tId + "/posts", "size=1");
+      const tpPage1 = hitIds(r);
+      const tpCursor = bodyOf(r).nextCursor;
+      const tpPageKeys = tpKeys(bodyOf(r)).length;
+      r = await tpGet(tpcA, "/api/topics/" + tId + "/posts", "size=1&beforeId=" + tpCursor);
+      check("21", "游标翻页不重不漏：第一页一条、nextCursor 就是它的 id，第二页那条 id 严格更小；"
+        + "PageResult 的键形状与广场、关注流同一份（六个键，前端复用同一个翻页器）",
+        tpPage1.length === 1 && tpCursor === tpPage1[0] && hitIds(r).length === 1
+        && hitIds(r)[0] < tpPage1[0] && tpPageKeys === 6 && bodyOf(r).hasMore === true,
+        "p1=" + tpPage1.join(",") + " cursor=" + tpCursor + " p2=" + hitIds(r).join(",")
+        + " keys=" + tpPageKeys);
+
+      info("21", "SQL 取证（root 直连复核，脚本自证不算）：① 话题 " + tId + " 的 post_cnt 必须等于"
+        + "「post_topic 关联里可见的那几条」（多出来的就是私密挂帖，重算 SQL 不该看见它）；② follow_cnt"
+        + " 必须等于 topic_follow 的行数，本段收尾时甲乙都已取关，两个数都该回到基线 " + baseFollowCnt
+        + "；③ 全站 is_top=1 的帖仍为 0 —— 这是上面那条「top 与 latest 同序」的前提，哪天有人开始写这一列，"
+        + "那条断言就得跟着改；④ 本段留下的一次性账号与一条待审话题（清理 SQL 见 dev-log）。",
+        "SELECT (SELECT post_cnt FROM topic WHERE id=" + tId + ") AS topic_post_cnt,"
+        + " (SELECT COUNT(*) FROM post_topic pt JOIN post p ON p.id = pt.post_id"
+        + " WHERE pt.topic_id=" + tId + " AND p.deleted=0 AND p.status='PUBLISHED'"
+        + " AND p.visibility='public' AND (p.auto_destroy_at IS NULL OR p.auto_destroy_at > NOW(3)))"
+        + " AS visible_links,(SELECT follow_cnt FROM topic WHERE id=" + tId + ") AS topic_follow_cnt,"
+        + " (SELECT COUNT(*) FROM topic_follow WHERE topic_id=" + tId + ") AS follow_rows,"
+        + " (SELECT COUNT(*) FROM post WHERE is_top = 1) AS top_posts;"
+        + " SELECT id,name,audit_status FROM topic WHERE audit_status <> 'APPROVED';"
+        + " SELECT username,nickname FROM user WHERE username LIKE 'smoke_tpc_%';");
+    }
   } else {
     info("19", "三名检索账号没注册成功，第 19、20 步整体跳过（根因在第 18 步同一段注册逻辑上）", "");
   }

@@ -69,6 +69,10 @@ export const CODE = {
   PRIVACY_CONSENT_REQUIRED: 20004,
   SENSITIVE_CONSENT_REQUIRED: 20005,
   POST_NOT_FOUND: 30001,
+  // 30004 是本表里唯一「不是失败」的码：话题还在审核中，用户能做的是等。
+  // 前端必须单独认出它，因为话题详情页要为此换一整套措辞（见 TopicDetailView 的 cardExtra），
+  // 而 textOf 那句「话题正在审核中」在 StageNotice 之上还要补一句「阶段 3 没有放行通道」。
+  TOPIC_PENDING: 30004,
   AI_UNAVAILABLE: 40001,
   AI_BUDGET_EXCEEDED: 40002,
   CONTENT_REJECTED: 50001,

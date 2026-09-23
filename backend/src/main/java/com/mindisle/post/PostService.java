@@ -267,7 +267,7 @@ public class PostService {
                     ticket.getSlaAt(), ticket.getEvidenceText() == null ? 0 : ticket.getEvidenceText().length());
         }
         insertImages(post.getId(), images);
-        linkTopics(post.getId(), topics, decision.status());
+        linkTopics(post.getId(), topics);
 
         // 9 配额：REJECTED 也消耗——否则可以拿发帖接口无限试探拦截边界，那正是词库最怕的事
         quotaService.recordPostCreated(author, now);
@@ -347,18 +347,16 @@ public class PostService {
      *
      * <p>{@code CheckResult.action} 是主因的处置，而主因按严重度排序取第一个——
      * 于是「既写自伤又留手机号」会返回 grey/REVIEW，黑词与危机词都可能被压在后面看不见。
-     * 2026-09-20 打真实预检接口时踩到的就是这个坑（dev-log 有记录），所以这里只认 hits。</p>
+     * 2026-09-20 打真实预检接口时踩到的就是这个坑（dev-log 有记录），所以判据只认 hits。</p>
+     *
+     * <p><b>2026-09-23 任务 3.8 起这个方法只剩转发</b>：扫描逻辑搬进了
+     * {@link CheckResult#hasAction}，因为建话题（{@code topic.TopicService}）要判同一件事，
+     * 而「同一条判据两处实现」是 §14 第 27 条点名的事故源。保留这一层是为了
+     * ① {@code decide} 与它的单测都在这个包内、不必跟着引擎走；
+     * ② null result 的兜底留在调用侧，{@code decide(null, ...)} 在测试矩阵里出现过。</p>
      */
     static boolean hasAction(CheckResult result, String action) {
-        if (result == null || result.hits() == null) {
-            return false;
-        }
-        for (Hit hit : result.hits()) {
-            if (action.equals(hit.action())) {
-                return true;
-            }
-        }
-        return false;
+        return result != null && result.hasAction(action);
     }
 
     // ================================================================ 遮罩与建单
@@ -605,17 +603,25 @@ public class PostService {
         }
     }
 
-    private void linkTopics(long postId, List<Topic> topics, String finalStatus) {
+    /**
+     * 写帖-话题关联并重算话题计数。
+     *
+     * <p><b>参数里没有终态</b>：终态原先决定「要不要给 post_cnt +1」，
+     * 现在计数改由 {@link TopicMapper#refreshPostCnt} 按真相表重算，
+     * 「还没露面的帖不计」这件事是由子查询里的 {@code status='PUBLISHED'} 保证的，
+     * 不再由这里少调一次保证 —— 于是这个参数失去了唯一的用处，删掉。
+     * 留一个没人读的形参比留一句「为什么传进来不用」的注释更坏。</p>
+     */
+    private void linkTopics(long postId, List<Topic> topics) {
         for (Topic topic : topics) {
             PostTopic link = new PostTopic();
             link.setPostId(postId);
             link.setTopicId(topic.getId());
             postTopicMapper.insert(link);
-            // 关联照常写（人审通过后不用回头补），但 post_cnt 只在真发布成功时自增：
-            // 进人审队列的帖子还没露面，先把话题计数加上去会让「热度很高、点进去没内容」。
-            if (STATUS_PUBLISHED.equals(finalStatus)) {
-                topicMapper.increasePostCnt(topic.getId());
-            }
+            // 关联无条件写（人审通过后不用回头补）；计数每次重算 —— 自增版本
+            // ① 漏掉「进人审、后来被管理员放行」的那批帖（放行发生在管理端 T6.1，它今天不回来刷计数），
+            // ② 也从不把被下架 / 到期销毁的帖减掉。两个洞一起由 refreshPostCnt 堵上。
+            topicMapper.refreshPostCnt(topic.getId());
         }
     }
 

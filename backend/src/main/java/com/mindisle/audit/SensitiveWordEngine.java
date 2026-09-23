@@ -113,6 +113,31 @@ public class SensitiveWordEngine implements InitializingBean {
             }
             return false;
         }
+
+        /**
+         * 本次检测的命中里是否出现过某种处置档位（BLOCK / REVIEW / TAG）。
+         *
+         * <p><b>同样不能只看 {@link #action()}</b>：主因是按处置强度排序取的第一条，
+         * 「既写自伤又留手机号」会返回 grey/REVIEW，黑词与危机词都可能被压在后面看不见 ——
+         * 判据与上面 {@link #riskTouched()} 是一句话：<b>看「有没有」，不看「排第几」</b>。</p>
+         *
+         * <p><b>为什么这个方法长在引擎里而不是各调用方自己扫 hits</b>：它原先只在
+         * {@code PostService#hasAction} 有一份（2026-09-20 踩坑后写的）。任务 3.8 建话题
+         * 要判同一件事（命中 BLOCK 直接拒、命中 REVIEW 转待审），第二处再抄一遍 hits 循环，
+         * 就成了「同一条判据两处实现」——手册 §14 第 27 条记的正是它的后果。
+         * {@code PostService#hasAction} 现在只是转发，那两条既有单测仍然打在原入口上。</p>
+         */
+        public boolean hasAction(String wanted) {
+            if (hits == null) {
+                return false;
+            }
+            for (Hit h : hits) {
+                if (wanted != null && wanted.equals(h.action())) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     /** 去重键：同一匹配型 + 同一作用侧 + 同一词面只保留第一次出现。 */

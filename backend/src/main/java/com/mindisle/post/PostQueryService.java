@@ -35,6 +35,7 @@ import com.mindisle.mapper.UserMapper;
 import com.mindisle.post.dto.PostDetailView;
 import com.mindisle.post.dto.PostListItem;
 import com.mindisle.post.dto.PostView;
+import com.mindisle.topic.TopicService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -216,9 +217,32 @@ public class PostQueryService {
      */
     private PageResult<PostListItem> pageResult(LambdaQueryWrapper<Post> wrapper, long viewerId,
                                                  PageQuery page, LocalDateTime now) {
+        return pageResult(wrapper, viewerId, page, now, false);
+    }
+
+    /**
+     * 翻页与组装的唯一实现，{@code pinnedFirst} 决定排序键里要不要多一档 {@code is_top}。
+     *
+     * <p><b>为什么是加一个参数而不是再写一个方法</b>：多出来的只有 ORDER BY 的一档和游标的一个
+     * 比较维度，其余（游标 vs 页码两套都支持、多取一条判 hasMore、nextCursor 回法、
+     * toListItems 的批量组装）逐字相同。复制一份的后果是「广场那边修了翻页丢条目，
+     * 话题页那份没修」——手册 §14 第 27 条的原文场景。</p>
+     *
+     * <p><b>{@code pinnedFirst=false} 时拼出的 SQL 与改动前逐字一致</b>：这一档
+     * {@code PostListSqlConditionTest} 里有 ORDER BY 片段级的断言钉住，
+     * 四个既有列表接口（广场 / 我的 / 主页 / 搜索）都靠它。</p>
+     *
+     * @param pinnedFirst true = 排序键为 {@code (is_top DESC, published_at DESC, id DESC)}，
+     *                    话题页 {@code sort=top} 用；false = 只按发布时间
+     */
+    private PageResult<PostListItem> pageResult(LambdaQueryWrapper<Post> wrapper, long viewerId,
+                                                 PageQuery page, LocalDateTime now, boolean pinnedFirst) {
         if (page.useCursor()) {
-            // 锚点行只取排序键（published_at + id），不回任何内容，所以客户端拿别人的帖子 id 当游标也不泄露东西
-            applyCursor(wrapper, postMapper.selectById(page.getBeforeId()), page.getBeforeId());
+            // 锚点行只取排序键（is_top + published_at + id），不回任何内容，所以客户端拿别人的帖子 id 当游标也不泄露东西
+            applyCursor(wrapper, postMapper.selectById(page.getBeforeId()), page.getBeforeId(), pinnedFirst);
+            if (pinnedFirst) {
+                wrapper.orderByDesc(Post::getIsTop);
+            }
             wrapper.orderByDesc(Post::getPublishedAt).orderByDesc(Post::getId)
                     // size 已经被 normalize 夹在 1..50，拼进 limit 没有注入面；多取一条判 hasMore
                     .last("limit " + (page.getSize() + 1));
@@ -226,6 +250,9 @@ public class PostQueryService {
             return PageResult.ofCursor(toListItems(viewerId, rows, now), page.getSize(), PostListItem::id);
         }
 
+        if (pinnedFirst) {
+            wrapper.orderByDesc(Post::getIsTop);
+        }
         wrapper.orderByDesc(Post::getPublishedAt).orderByDesc(Post::getId);
         Page<Post> result = postMapper.selectPage(new Page<>(page.getPage(), page.getSize()), wrapper);
         List<PostListItem> items = toListItems(viewerId, result.getRecords(), now);
@@ -471,6 +498,41 @@ public class PostQueryService {
         return value == null ? 0 : value;
     }
 
+    /**
+     * 话题页帖流的两种排序（任务 3.8 · 需求 FR4.5「聚合页展示话题下热帖」·手册 §6.1 行 3.8）。
+     *
+     * <p>只有这两个值，<b>没有 "hot"</b>：热度序要读 {@code post.hot_score}，而它的定时重算属阶段 4
+     * （需求 §6.2「热度定时计算」），现在那一列全是建表默认值。给出一个能接受 "hot" 的参数
+     * 再悄悄按时间排，就是接口在说谎。</p>
+     *
+     * <p>🔴 <b>{@code top} 今天的真实含义也只是「置顶在前」，而库里没有任何一条帖是置顶的</b>：
+     * {@code post.is_top} 只有管理员能写，管理端属任务 6.1，所以开发库现量
+     * {@code COUNT(*) WHERE is_top=1} 为 0 —— 于是 {@code top} 与 {@code latest} 返回的序列
+     * 完全相同。这条边界由 {@code docs/smoke.mjs} 第 21 步当场取证，不靠注释自证。
+     * 仍要把这一档做出来，是因为「置顶在前」的游标键（is_top, published_at, id）比单纯时间序
+     * 复杂得多，现在把它写对并钉进单测，比等到管理端上线再改翻页逻辑安全。</p>
+     */
+    static final String SORT_LATEST = "latest";
+    static final String SORT_TOP = "top";
+
+    /**
+     * 排序参数归一化：null 与空串表示缺省的 {@code latest}，白名单外报 10001。
+     *
+     * <p>与 {@link #normalizeTypeFilter}、{@link #normalizeStatusFilter} 同一口径 ——
+     * 不做「猜一个」的兜底：{@code sort=hot} 静默变成时间序，用户看到的是「排序坏了」，
+     * 而系统里没有任何一处说过它坏了。</p>
+     */
+    static String normalizeSortFilter(String sort) {
+        if (sort == null || sort.isBlank()) {
+            return SORT_LATEST;
+        }
+        String value = sort.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!SORT_LATEST.equals(value) && !SORT_TOP.equals(value)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "sort 只能是 latest（最新）或 top（置顶在前）");
+        }
+        return value;
+    }
+
     /** 列表的 type 过滤：null 与空串表示「全部」，白名单外报参数错。 */
     static String normalizeTypeFilter(String type) {
         if (type == null || type.isBlank()) {
@@ -576,16 +638,61 @@ public class PostQueryService {
      * 否则作者自己那一页永远刷不到审核中的占位帖。</p>
      */
     static void applyCursor(LambdaQueryWrapper<Post> wrapper, Post anchor, Long beforeId) {
-        if (anchor == null || anchor.getPublishedAt() == null) {
-            // 锚点已被删/已销毁/是待审帖：退化成纯 id 游标，宁可不重叠也别漏
+        applyCursor(wrapper, anchor, beforeId, false);
+    }
+
+    /**
+     * 游标条件，带 {@code pinnedFirst} 的那一档（话题页 sort=top）。
+     *
+     * <p><b>排序键多一维，游标条件就必须同步多一维</b>，否则字典序比较不完整。非置顶模式下
+     * 本方法的行为与改动前逐字相同（走 {@code else} 分支）；置顶模式下比较的是
+     * {@code (is_top, published_at, id)} 三段严格字典序：先「is_top 比锚点小」，
+     * 再「is_top 相同且 (published_at, id) 比锚点靠后」。</p>
+     *
+     * <p>🔴 <b>置顶模式下锚点的 published_at 为 NULL 时，不能退化成裸 {@code id < beforeId}</b>
+     * ——这是本方法唯一一处反直觉的地方，值得写清楚。非置顶分支之所以敢退化，
+     * 是因为那一支的排序键只剩 id 一维；而这里排序键还剩 {@code (is_top, id)} 两维，
+     * 裸 id 比较会跨 is_top 分组匹配：锚点是「is_top=1 且发布时间为空」的那条时，
+     * 一条 {@code id 比它小、is_top=0} 的帖会被判为「已看过」而永久丢失。
+     * 所以这里的退化条件是 {@code anchor.getIsTop() == null}（锚点行取不到），
+     * 而不是 {@code publishedAt == null}，两支分别处理。</p>
+     */
+    static void applyCursor(LambdaQueryWrapper<Post> wrapper, Post anchor, Long beforeId,
+                            boolean pinnedFirst) {
+        if (!pinnedFirst) {
+            if (anchor == null || anchor.getPublishedAt() == null) {
+                // 锚点已被删/已销毁/是待审帖：退化成纯 id 游标，宁可不重叠也别漏
+                wrapper.lt(Post::getId, beforeId);
+                return;
+            }
+            LocalDateTime key = anchor.getPublishedAt();
+            wrapper.and(scope -> scope
+                    .and(older -> older.lt(Post::getPublishedAt, key))
+                    .or().isNull(Post::getPublishedAt)
+                    .or(tie -> tie.eq(Post::getPublishedAt, key).lt(Post::getId, beforeId)));
+            return;
+        }
+
+        if (anchor == null || anchor.getIsTop() == null) {
+            // 锚点行取不到（已删、已销毁、或不属于这个话题）：同上，退化成纯 id 游标。
             wrapper.lt(Post::getId, beforeId);
             return;
         }
+        int top = anchor.getIsTop();
         LocalDateTime key = anchor.getPublishedAt();
         wrapper.and(scope -> scope
-                .and(older -> older.lt(Post::getPublishedAt, key))
-                .or().isNull(Post::getPublishedAt)
-                .or(tie -> tie.eq(Post::getPublishedAt, key).lt(Post::getId, beforeId)));
+                .and(earlier -> earlier.lt(Post::getIsTop, top))
+                .or(same -> same.eq(Post::getIsTop, top).and(inner -> {
+                    if (key == null) {
+                        // 锚点在本组内已是「发布时间最后」的那一档（NULL 在 DESC 里排末尾），
+                        // 组内比它靠后的只剩「同样为 NULL 且 id 更小」。
+                        inner.isNull(Post::getPublishedAt).lt(Post::getId, beforeId);
+                    } else {
+                        inner.and(older -> older.lt(Post::getPublishedAt, key))
+                                .or().isNull(Post::getPublishedAt)
+                                .or(tie -> tie.eq(Post::getPublishedAt, key).lt(Post::getId, beforeId));
+                    }
+                })));
     }
 
     // ================================================================ 批量取周边（防 N+1）
@@ -759,6 +866,37 @@ public class PostQueryService {
         return pageResult(wrapper, viewerId, page, now);
     }
 
+    /**
+     * 话题下的帖子列表（任务 3.8 · 需求 FR4.5「聚合页展示话题下热帖与参与人数」·手册 §6.2 U6）。
+     *
+     * <p><b>先判话题可读，再取帖</b>：走 {@code TopicService#requireReadable} 那一份全站唯一判据，
+     * 于是待审话题的帖流是 409/30004、不存在与被驳回是 404/90006，与话题详情页完全同口径 ——
+     * 两个接口对同一个话题给出不同的可読性，是用户眼里「系统时好时坏」的标准来源。
+     * 这里是 {@code post} 包调 {@code topic} 包的<b>静态</b>方法，不产生 Bean 依赖，
+     * 不会造出 Spring 的循环依赖（Java 的包循环本来就合法）。</p>
+     *
+     * <p><b>可见性判据必须就是广场那一条</b>：{@link #applyVisible} 之上叠
+     * {@link #applyTopic}，而不是自己写一遍 status / visibility。否则就会出现
+     * 「广场里已经看不到的帖，话题页还挂着」，同 {@link #search} 那段理由。</p>
+     *
+     * <p>🔴 诚实边界同 {@code sort=top} 那一段：需求要的是「热帖」，本方法今天给的是
+     * 「最新 + 置顶在前」。热度序（{@code hot_score} 定时重算）与相关度序都属阶段 4，
+     * 手册 §15 的 3.8 因此标 ◐ 而不是 ☑。</p>
+     *
+     * @param topicId 话题 id
+     * @param sort    latest（缺省）/ top，白名单外 10001
+     */
+    public PageResult<PostListItem> topicPosts(long topicId, long viewerId, String sort,
+                                               PageQuery query, LocalDateTime now) {
+        String sortFilter = normalizeSortFilter(sort);
+        TopicService.requireReadable(topicMapper.selectById(topicId));
+        PageQuery page = (query == null ? new PageQuery() : query).normalize();
+        LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
+        applyVisible(wrapper, viewerId, null, now);
+        applyTopic(wrapper, topicId);
+        return pageResult(wrapper, viewerId, page, now, SORT_TOP.equals(sortFilter));
+    }
+
     /** 「广场判据 + 作者未注销 + 关键词命中」三段拼在一起，全文与 LIKE 两条通道只差最后一段。 */
     private LambdaQueryWrapper<Post> keywordWrapper(long viewerId, String typeFilter, LocalDateTime now,
                                                     String keyword, boolean fullText) {
@@ -773,6 +911,35 @@ public class PostQueryService {
             applyLikeMatch(wrapper, pattern);
         }
         return wrapper;
+    }
+
+    /**
+     * 「这条帖挂在这个话题上」的 EXISTS（任务 3.8 话题页帖流的成员条件）。
+     *
+     * <p>形状照抄下面那条 {@link #TOPIC_NAME_MATCH_SQL}，两条理由也完全继承：
+     * ① <b>用 EXISTS 而不是 JOIN</b> —— 一条帖最多挂 3 个话题，JOIN 会把同一条帖复制成多行，
+     *    而 {@code pageResult} 的游标分支靠「多取一条」判 hasMore，重复行会直接把那个判断算歪；
+     * ② <b>{@code t.deleted = 0} 必须手写</b> —— 这是裸 SQL，{@code Topic} 实体上的
+     *    {@code @TableLogic} 管不到它，而 {@code post_topic} 本身没有删除列，
+     *    「关联行存在」并不等于「话题未删」。</p>
+     *
+     * <p>多带的一个 {@code t.audit_status = 'APPROVED'} 不是冗余：调用方
+     * （{@code topicPosts}）已经先判过话题状态了，这里再判一次是为了让
+     * 「未过审话题的内容不该被任何查询读出来」这条判据在 SQL 层也成立一次 ——
+     * 话题状态是可以在两次读之间被管理员改掉的，而本方法是全站唯一按话题取帖的地方。</p>
+     *
+     * <p>占位符用 {@code {0}} 而不是拼字符串：topicId 是 long，注入面上本来无风险，
+     * 但拼数字进 SQL 文本会让「这条 SQL 的参数是什么」在日志里读不出来，
+     * 与旁边几条保持一致也更省事。</p>
+     */
+    private static final String TOPIC_MEMBER_SQL = "EXISTS (SELECT 1 FROM post_topic pt"
+            + " JOIN topic t ON t.id = pt.topic_id"
+            + " WHERE pt.post_id = post.id AND t.id = {0}"
+            + " AND t.deleted = 0 AND t.audit_status = 'APPROVED')";
+
+    /** 包级可见：让「成员条件的 SQL 形状」能被单测钉住而不必起数据库。 */
+    static void applyTopic(LambdaQueryWrapper<Post> wrapper, long topicId) {
+        wrapper.apply(TOPIC_MEMBER_SQL, topicId);
     }
 
     /** 话题名命中的那段 EXISTS，LIKE 与全文两条通道共用一份（同一条判据不抄两遍）。 */

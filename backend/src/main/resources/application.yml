@@ -156,6 +156,14 @@ mindisle:
     max-keyword-chars: 64        # 超长直接 10001，不做「截断兜底」：截断会悄悄改变用户要查的东西
     max-profiles: 20             # 搜话题 / 搜人一次返回的条数上限，也是缺省值被夹住的上界
     fulltext: false              # MATCH 需先执行 sql/10_index.sql（任务 2.2 ◐）；没索引就开 = 每次先抛 1191 再回落
+  topic:                         # 任务 T3.8 话题创建与关注（手册 §6.1 行 3.8 · NFR10 不写死）
+    max-name-chars: 32           # 与 topic.name 的 VARCHAR(32) 同宽：两处必须同时改，理由见 MindisleProperties.Topic 注释
+    max-desc-chars: 200          # 与 topic.desc_txt 的 VARCHAR(200) 同宽
+    max-create-per-day: 5        # 手册「防刷」那条的唯一落地：阶段 3 没有审核台（T6.1），配额是第一道闸
+    # 话题预审开关 = 需求 FR8.6 的那一项配置。默认 true 照抄 FR4.5「创建需管理员审核」；
+    # 设 false 才走机审直通（BLOCK 拒 / REVIEW 转待审 / 干净即过审）。注意：审核台在 T6.1，
+    # 今天没有能把 PENDING 话题放行成 APPROVED 的入口，所以默认值下新建话题会停在待审。
+    require-pre-review: ${MINDISLE_TOPIC_PRE_REVIEW:true}
   captcha:                       # 任务 T2.16 图形验证码总开关
     # 默认 true 是 fail-closed：不配这个键就必须验码。答案只进缓存、不返回也不打日志，
     # 所以自动化冒烟拿不到它 —— 只有本地开发/CI 才显式设 MINDISLE_CAPTCHA_ENABLED=false，

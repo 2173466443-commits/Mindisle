@@ -26,6 +26,11 @@ const routes = [
       // 站内搜索（任务 T3.9 · 需求 FR4.8）。只要登录，不要敏感信息授权：
       // 搜索读的是「已经对全体登录用户公开」的内容，输入关键词这件事本身不涉及处理敏感个人信息，
       // 给这条加 requiresConsent 会把「没勾敏感授权的人」完全挡在站外，而他本来就该能搜帖。
+      // U6 话题详情页（任务 T3.8 · 需求 FR4.5）。只要登录，不要敏感信息授权：这一页读的是已过审话题的公开帖流，
+      // 判据与广场/搜索完全相同，多一道闸只会把「没勾敏感授权的人」挡在话题门外，而他本来就该能看。
+      // 路径参数用数字 id 而不是话题名：后端 TopicController 限的是 \d+，而名字要参与重名判定与折叠空白，
+      // 拿它当路由参数就得再引一层「按名寻址」的接口，那条接口正是还没有的那条。
+      { path: 'topic/:id', name: 'topic-detail', component: () => import('@/views/topic/TopicDetailView.vue'), meta: { requiresAuth: true } },
       { path: 'search', name: 'search', component: () => import('@/views/search/SearchView.vue'), meta: { requiresAuth: true } }
     ]
   },

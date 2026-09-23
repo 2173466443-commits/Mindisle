@@ -1032,3 +1032,74 @@ D_表行数  user 43 / post 111 / post_like 16 / user_follow 0
 - `notify_preference` 与 **U13 通知中心整页**（T3.16 ◐）；`HUMAN_REVIEW` 仍不进管理端处置队列（T6.1）；`alert_ticket.source_type` 仍缺 `comment` / `report` 两档；`auto_destroy_at` 仍只写不扫（T3.15）；`PushHook` 只有日志实现。
 - **真浏览器仍未测**（jsdom 不含样式与布局，`@keyup.enter` 也没在真键盘下走过），§6.4 第 4 条继续 ☐、T3.13 维持 ◐；U1 首页与 U6 话题圈未开工；`PUT /api/users/me/profile` 仍 90001；阶段 1B 论文与开题材料按用户指令继续顺延。
 - **仍未打 tag**（Gate3 未过，最新 tag `stage-2-skeleton`）。
+
+## 2026-09-23 阶段 3（续 10）—— T3.8 话题与话题圈（四条端点 + `topic_follow` + U6）；第一次跑 DOM 探针就抓到 2 个产品级 bug
+
+### 本轮挑这件事的理由
+
+- 上一轮收尾时「下一步 ⑤」写得很具体：`/search` 话题栏那张卡**点不动**，等的就是话题详情页。它是阶段 3 最后一块用户一上手就摸得到的入口，也是 Gate3 那条「话题页帖子数 = 关联表 count」判据唯一还没证的项。
+- 用户诉求仍是「先把程序做出来」：论文与开题材料（阶段 1B）继续顺延，本轮一行不写。
+
+### 交付物：后端
+
+- 新建 `topic/TopicService.java`(**350**) + `topic/dto/`：`TopicCard`(45)·`TopicCreateRequest`(15)·`TopicCreateView`(29)·`TopicFollowRequest`(13)·`TopicFollowView`(25)；`web/TopicController.java`(**146**) 四条端点 `GET /api/topics/{id:\d+}`、`GET /api/topics/{id:\d+}/posts`、`POST /api/topics`、`POST /api/topics/{id:\d+}/follow`。
+- 新建 `sql/13_topic_follow.sql`（**第 33 张表**）+ `entity/TopicFollow.java`(32) + `mapper/TopicFollowMapper.java`(68)：`uk` 建在 (`topic_id`,`user_id`) 上，**关注数数的是人不是请求条数**，重复关注回执 `changed=false` 且不涨计数。
+- 改动 `mapper/TopicMapper.java` 36 → **74**、`post/PostQueryService.java` 869 → **1036**（话题帖流复用**同一个** `applyVisible`，不复制第二份可见性判据）、`post/PostService.java` 638 → **644**、`post/PostingQuotaService.java` 205 → **243**（新增「当日创建话题」限额计数）、`audit/SensitiveWordEngine.java` 472 → **497**（话题名也过词库）、`config/MindisleProperties.java` 239 → **285**、`application.yml` 168 → **176**。
+- 测试新增 `topic/TopicServiceTest.java`(**845**) + `post/TopicPostsSqlConditionTest.java`(**226**) + `security/JwtAuthFilterAnonymousPathTest.java`(**70 / 2 例**)；**结转上一轮那两层安全链 bug 一并回归钉死**：白名单用 `startsWith("/api/topics")` 会让四条端点带着合法 token 也恒 401，修完第一层才暴露第二层 = **读写同一个 URI 必须按方法分流**。
+- **登录口径定版**（本轮已核源码，别再写「话题详情游客可逛」）：`ANONYMOUS_READ_EXACT = {"/api/topics"}` 只在 `GET`/`HEAD` 时匿名，`SecurityConfig.PUBLIC_READ_ONLY_MATCHERS` 同按 `HttpMethod` permitAll —— **唯一游客可逛的是话题墙 `GET /api/topics`（它在 `FeedController` 里）**，其余四条全要求登录（`detail` 带 `following`，那是每用户态）。
+
+### 交付物：前端
+
+- 新建 `views/topic/TopicDetailView.vue`(**260**) + `api/topic.js`(**56**) + 路由 `/topic/:id`(name `topic-detail`, `requiresAuth`，**不加 `requiresConsent`**，与 `/search` 同口径：读不该被实名承诺挡住)。头图 / 参与数 / 关注按钮 / 「在此话题发帖」四件齐；`/topic/abc` 由**前端自判**给专属文案（后端 `\d+` 压根匹配不上 → 404/90006 且 msg 带请求行）。
+- `?topic=` 预填闭环：`FeedView` 366 → **491**、`PublishView` 59 → **118**、`PostComposer` 401 → **441**、`SearchView` 337 → **346**、`UserHomeView` → **207**、`usePagedPosts` 92 → **111**、`utils/format` 63 → **76**、`router/index.js` 50 → **55**、`api/errorCode.js` 93 → **97**。
+
+### 🔴 本轮最贵的四条（DOM 探针首跑 13 条 FAIL，全部落在第 13 组）
+
+1. **`npm run build` exit 0 + 冒烟 246 项全绿 + 页面白屏，三件事同一天同时成立**。`TopicDetailView.vue` 模板写 `fmtHot(card.hotScore)`，但该组件没有这个函数 —— 广场与搜索页各有一份**一模一样的私有** `fmtHot`，抄模板时把调用抄来、把本体落下。Vue 在**渲染阶段**抛 `TypeError: _ctx.fmtHot is not a function`，**整个话题页头图 + 帖流一件都不画**。构建不检查模板绑定存在性，接口冒烟不看 DOM，**只有探针看得见**。修法：提到 `utils/format.js` 三处共用，删掉两份私有实现 —— **同一个格式化函数被复制到第三份的那一刻就是下一次白屏的起点**。
+2. **`watch` 只处理「参数有效」那一支 = 地址栏说一套、屏幕画另一套**。`watch(topicId, to => { if (to) {...} })`：`/topic/1` → `/topic/abc` 时组件实例**复用**，`to` 变假 → 回调整段跳过 → 上一个话题的头图与帖流**原样留在屏上**，那颗关注按钮用的还是空编号。`UserHomeView.vue` **同一形状**（上一张资料卡连关注按钮一起残留）。修法：`usePagedPosts.js` 新增 `clear()`（**不请求后端**就清列表 + `seq += 1` 丢弃在路上的响应 + `loading=false`；**不能用 `reload()`** —— 那会带空编号打接口换 404，把错误态污染成网络错），两个 view 的 watch 补「无效」那一支并 `return`。
+3. **改了代码但断言没变 = 本轮修的东西没被钉住**。domprobe 第 6 组原来走 `99999999 → abc`，而 `99999999` 本来就没画出卡片，症状**无从观察**。改成「先 `push('/user/23')` 等 `section.card` 真画出来，再切 `abc`」→ 新增 1 条断言（g6 1 → 2 项，全量 119 → **120 项**）。「路由参数从有效变无效」是一条真实转移边，冒烟与构建都覆盖不到。
+4. **两条探针自身的坑会被误判成产品 bug**：① `setInput` 之后**同步读 DOM** 判码点计数器 —— Vue computed 排在**微任务**里，同步读必然读到「已输入 0」，改为 `until13(..., "topic-name-counter")`；② 请求针写成 `"topicIds:" + JSON.stringify([tid])`，**少了键名闭合引号**（真 body 是 `"topicIds":[1]`）→ 界面、请求、后端三头全对，唯独这条永远判不过。**判 FAIL 之前先证伪探针。**
+
+### 取证（每条都指到一次真实执行的输出）
+
+- **单测**：`mvn -o -B "-Dmaven.repo.local=E:/codex workspace/_cache/m2/repository" test` = **Tests run: 368, Failures: 0, Errors: 0, Skipped: 1 / BUILD SUCCESS**（`_cache/mindisle-dbtmp/mvn-t38-fix2.log`）。**只能 `test` 不能 `package`**（离线缺 `maven-jar-plugin:3.5.1`）。
+- **冒烟**：`node docs/smoke.mjs` = **246 项 / 断言 231 条 / 失败 0 条（21 步）** exit 0（`smoke-final.log`），脚本 1683 → **1967 行**。**第 21 步 = 25 条断言**，清单与逐条理由见 `制作步骤文档.md` §6.1 末 v1.2.3 回写。
+- **DOM**：`node probe/domprobe.mjs`（在 `frontend/` 下跑，前置 8080 与 5173 都在）= **120 项 / 失败 0 项（13 组）**，首跑为 **119 项 / 13 失败**（`domprobe-t38.log` → `domprobe-t38c.log`），脚本 902 → **1330 行**。
+- **构建**：`npm run build` = **exit 0 / ✓ 1783 modules transformed / ✓ built in 970ms**（基线 1780，+3）。
+- **root SQL 不变式三条**：话题 1 `post_cnt=34 = visible_links=34`（Gate3 那条判据的 SQL 侧证据）、`follow_cnt=0 = topic_follow 行数=0`（收尾归零）、`COUNT(post WHERE is_top=1)=0`（**这就是「置顶档今天看不出效果」的实证**）。另有 `topic` 表 id 1–20 全 `APPROVED`、id 21–27 为本轮夹具造的 7 条 `PENDING`，`total_users=188`（`t38_inv.sql` / `t38_inv.out`）。
+- **配额事实**：`assertCanPost` 排在 `resolveTopics` **之前** → 「挂待审话题被 409」那一次**也消耗一个发帖额度**（先扣额后判可用）；新手期日限 5 帖本段用掉 4；话题创建只在**落库成功之后**才 `recordTopicCreated`；黑词 BLOCK 分支只在单测覆盖。
+
+### 环境事实（下一轮照着跑，不用重新摸）
+
+- **🔴 `mysql -u root -p <口令>`「执行不成功」的真因仍是 `-p` 后那个空格**（第三次遇到，取证见第 7 / 10 轮，本轮不重复凭据）：带空格时口令被当成**库名**，mysql 转而**向 TTY 要口令** → 非交互环境下**永久挂起**，症状是「没反应」而**不是认证失败**。本项目唯一姿势：`& 'E:\codex workspace\_cache\mindisle-dbtmp\run-sql.cmd' '<sql 绝对路径>' '<输出绝对路径>'`（内部 `--defaults-extra-file=` **第一个参数** + `-D mindisle -t --default-character-set=utf8mb4`，真值只在仓库外 `rootpwd.cnf`）。
+- **⚠ 同一天连跑两遍冒烟会在第 14 / 15 步撞全局 429**：那两步是裸 `send`，没包 `rlSafe` → **脚本已知限制，不是功能回归**。要么隔 ≥ 2 分钟再复跑，要么把那两步补进 `rlSafe`（下一轮顺手做掉）。
+- **⚠ `Date.now()` 是 13 位数字，正好撞隐私正则 `1[3-9][0-9]{9}`**，会把一条干净帖打成 `HUMAN_REVIEW` → 夹具的唯一性标记一律用 **14 位 ISO `stamp`**。
+- **⚠ 明细节里复用 `r` 会打印出上一条响应的值**：本轮一条 INFO 明明断言全绿却打印 `hot=200`，因为 `r` 被后面的请求改写过 → **凡要复现「那一次响应」的量，当场 `const` 抄下来**。
+- **本轮探针与冒烟在库里留下的东西（未清理，别写「已清理」）**：一次性账号 `smoke_tpc_*` **6 个** + `probe*` **48 个**（`total_users` → 188+）、**7 条 PENDING 测试话题（id 21–27）**、夹具帖 id 已到 **331**、`topic_follow` 收尾为 0。取证与清理 SQL（**先看再删，全库无 FOREIGN KEY**）：
+
+  ```sql
+  SELECT id, name, audit_status FROM topic WHERE audit_status <> 'APPROVED';
+  SELECT id, username FROM `user` WHERE username LIKE 'smoke_tpc_%' OR username LIKE 'probe%' ORDER BY id;
+  SELECT COUNT(*) FROM post WHERE id >= 249;
+  DELETE FROM topic_follow WHERE topic_id IN (SELECT id FROM topic WHERE audit_status <> 'APPROVED');
+  DELETE FROM post_topic WHERE topic_id IN (SELECT id FROM topic WHERE audit_status <> 'APPROVED');
+  DELETE FROM post_topic WHERE post_id IN (SELECT id FROM post WHERE author_id IN
+    (SELECT id FROM `user` WHERE username LIKE 'smoke_%' OR username LIKE 'probe%'));
+  DELETE FROM post WHERE author_id IN (SELECT id FROM `user`
+    WHERE username LIKE 'smoke_%' OR username LIKE 'probe%');
+  DELETE FROM `user` WHERE username LIKE 'smoke_%' OR username LIKE 'probe%';
+  ```
+
+### 文档回写
+
+- 手册升 **v1.2.3**：`制作步骤文档.md` 1802 → **1834 行**（CRLF、无 BOM）—— L1/L3 版本号、§5.1 表数 **31 → 33**（**v1.1.3 起连漏两轮**：v1.2.1 建 `content_report`、本轮建 `topic_follow` 都没同批回写 → 教训：**绝对数量必须同批重跑计数命令**）、§6.1 行 3.8 转正为「已落地 + 四处出入」并**新增 v1.2.3 实测回写 13 条**、§6.2 U6 行改写、§6.4 第 4 条补记、§15 T3.8 ☐ → **◐** 与收工口径 ☑8/◐5/☐4 → **☑8/◐6/☐3**、§17 FR4.5 行补双证、§18 Gate3 行更新、§19 追加 v1.2.3 行、下一步重写。
+- README：表数 → **33**、四线数字刷新（接口分组仍 **9 组**，`TopicController` 刻意复用「4 内容」组的 `@Tag` description）。
+- 全局《复利与踩坑日志》补 009 **第 11 轮**（用户点名要求）。
+
+### 仍未做（截至本轮，别自我感觉良好）
+
+- **话题域四件没做，所以 T3.8 是 ◐ 不是 ☑**：`hot_score` 定时重算属阶段 4；`is_top` 无数据源（置顶档今天永远看不出效果）；U6 头图无上传通道（`cover` 恒 null → 序列化后键缺席）；**新建话题恒 `PENDING` 且没有放行通道**（`audit_task.target_type` 无 `topic` 档 → T6.1）。
+- **刻意不做的三条**（不是漏做）：`create` 不自动关注创建者；`follow` 不发通知（`notify_message` 无话题档 → T3.16）；话题域不建危机工单（`alert_ticket.source_type` 无 topic 档 → T3.15）。
+- **真浏览器仍未测**：§6.4 第 4 条继续 ☐、T3.13 维持 ◐；U1 首页未开工；`docs/gate/阶段3/` 目录仍未创建。
+- T3.10 埋点、T3.14 Gate 自检、T3.15 编辑与到期销毁、T3.16 通知中心整页与 `notify_preference`、T3.17 种子评论 ≥ 200 条、搜索相关度与全文通道（`sql/10_index.sql` 仍未执行）本轮无一进展；`PUT /api/users/me/profile` 仍 90001。
+- **仍未打 tag**（Gate3 未过，最新 tag `stage-2-skeleton`）。

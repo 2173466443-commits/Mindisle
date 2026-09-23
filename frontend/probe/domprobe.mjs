@@ -86,6 +86,7 @@ if (!token) {
   // 不能让它们把前面 1–10 段那些只读断言的环境搅浑。
   await runBellProbe(bundle)
   await runSourceSearchProbe(bundle)
+  await runTopicProbe(bundle)
   finish()
 }
 
@@ -264,10 +265,18 @@ async function runProbe(bundleCode, accessToken) {
     alertSeen && cards().length === 0, cards().length + ' 张卡 / ' + route().path)
 
   // ---------- 6 地址栏手打非数字 id ----------
+  // 先回到一个「资料卡一定出得来」的主页，再从有卡片切到 abc：watch 只认有效编号那一支时，
+  // 上一个人的卡片会连那颗「关注」按钮一起留在屏上，而按钮用的已经是地址栏里那个读不了的 abc。
+  // 从 99999999（本来就取不到卡片）直接跳 abc 抓不到这个症状，所以这一步不能省。
+  await w.__probeRouter.push('/user/23')
+  const cardAgain = await until(function () { return !!w.document.querySelector('section.card') }, 10000, 'user-card-again')
+  check('6', '（前置）回到自己的主页，资料卡真的又画出来了 —— 下一次要判的是「有卡片 → 地址栏改坏」这条边',
+    cardAgain, 'card=' + cardAgain + ' path=' + route().path)
   await w.__probeRouter.push('/user/abc')
-  await sleep(400)
-  check('6', '/user/abc 给「id 不是数字」的专属提示，而不是发一个注定 404 的请求再显示空白',
-    docText().indexOf('地址里的用户 id 不是数字') >= 0 && cards().length === 0)
+  const abcCleared = await until(function () { return !w.document.querySelector('section.card') }, 10000, 'user-abc')
+  check('6', '/user/abc 给「id 不是数字」的专属提示，而不是发一个注定 404 的请求再显示空白；上一张资料卡必须跟着一起消失',
+    abcCleared && docText().indexOf('地址里的用户 id 不是数字') >= 0 && cards().length === 0,
+    'cardCleared=' + abcCleared + ' cards=' + cards().length)
   // ---------- 7 别人的主页：关注按钮必须存在（探针全程只读，不去点它） ----------
   const feedResp = await fetch(BASE + '/api/posts?size=50', { headers: { Authorization: 'Bearer ' + accessToken } })
   const feedBody = await feedResp.json()
@@ -876,8 +885,19 @@ async function runSourceSearchProbe(bundleCode) {
     route4().name === "search" && topicHits
       && docText4().indexOf("秋招焦虑") >= 0 && reqs("/api/search/topics").length >= 1,
     'search="' + w.location.search + '" reqs=' + JSON.stringify(reqs("/api/search/topics")).slice(0, 160))
-  check("12", "话题卡片点不动是写明白的：这一栏的解释跟着结果一起出现（话题详情页属任务 3.8）",
-    docText4().indexOf("话题卡片点不动是刻意的") >= 0, "note=" + (docText4().indexOf("话题卡片点不动是刻意的") >= 0))
+  const sTopicCards = Array.prototype.slice.call(w.document.querySelectorAll(".page .topics .topic.topic-link"))
+  check("12", "话题卡现在点得动了（T3.8 交付的就是这一步，之前这里是一句「点不动是刻意的」）：这一栏每张卡都带着「进入话题」，那句解释也跟着结果一起出现",
+    sTopicCards.length >= 2
+      && sTopicCards.every(function (c) { return txt(c.querySelector(".t-go")).indexOf("进入话题") >= 0 })
+      && docText4().indexOf("点任意一张话题卡进话题页") >= 0,
+    "cards=" + sTopicCards.length + " go=" + (sTopicCards[0] ? txt(sTopicCards[0].querySelector(".t-go")) : "-"))
+  const sGoCard = sTopicCards.find(function (c) { return txt(c.querySelector(".t-name")).indexOf("焦虑") >= 0 }) || sTopicCards[0] || null
+  if (sGoCard) sGoCard.click()
+  const sJumped = await until4(function () { return route4().name === "topic-detail" }, 8000, "src-jump-topic")
+  check("12", "点搜索页这张话题卡 → 路由真的换成 topic-detail、地址栏真的变成 /topic/编号：搜索页与广场共用同一个详情页，没有各画一份头图"
+    + "（这一条放在本组最末尾，因为它一旦点出去就离开了 /search）",
+    !!sGoCard && sJumped && String(route4().path).indexOf("/topic/") === 0,
+    "path=" + route4().path + " name=" + route4().name)
   check("12", "整段关注流 + 搜索页没弹过一条全局错误条：三条搜索路径都是 silent 的，401/10001/90002 各自由页面自己说清楚",
     w.document.querySelectorAll(".el-message").length === 0,
     "n=" + w.document.querySelectorAll(".el-message").length)
@@ -885,6 +905,414 @@ async function runSourceSearchProbe(bundleCode) {
   notes.push("src/search 夹具帖 id：" + fixIds.join(",") + "（其中 " + (privv ? privv.id : "-") + " 是私密、" + (hole ? hole.id : "-") + " 是树洞）")
   notes.push("src/search window logs: " + (blogs.length ? blogs.slice(0, 6).join(" || ") : "none"))
   notes.push("本段触发搜索用的是「点搜索按钮」，没有测 @keyup.enter：jsdom 下 keyup 与 Element Plus 输入框包装层的对应关系不保证成立，键盘路径留给真浏览器")
+  dom.window.close()
+}
+
+// ---------- 13 话题页（任务 T3.8 的前端半程：U6 头图与帖流 + 墙上入口 + 创建话题 + ?topic= 预填） ----------
+// 这一段照样会写库：一名一次性账号、两条夹具帖（一条走接口挂题、一条从话题页点出来）、一次关注来回、一个新建话题。
+// 它要证明的六件事，build 与接口冒烟都给不出证据：
+// ① 广场墙上那张卡点下去真的变成 /topic/编号，而不是「解释得挺好但动不了」（这一条改的就是上一段那句旧断言）；
+// ② 头图三个数字逐个来自接口，关注那一个「先本地加一、再以回执覆盖」之后还要独立读一次接口三方对齐；
+// ③ 切「热帖」是真多发了一条 sort=top 的请求，且今天与「最新」同序这件事必须写在屏幕上而不是藏在注释里；
+// ④ 零帖话题与编号打错（abc）这两种「看起来像坏了」的状态，页面各自有一句人话，且 abc 一条请求都不发；
+// ⑤ 创建话题：超长挡在提交之前不发请求；提交之后回执的 usable 与后端 audit_status 必须一致
+//    —— 预审开关（FR8.6）默认开着，所以「进不去」在这里是正常结局，界面不许把它说成失败，也不许画成能点的空壳；
+// ⑥ 从话题页点「发帖到该话题」→ 发布请求体里真的带着 topicIds，用户不必再手动挑一次。
+async function runTopicProbe(bundleCode) {
+  const stamp = String(Date.now()).slice(-9)
+  const nameU = "probe_topic_u" + stamp
+  const kw = "探针话题" + stamp
+
+  async function api(method, p, token, body) {
+    const headers = { "Content-Type": "application/json" }
+    if (token) headers.Authorization = "Bearer " + token
+    const resp = await fetch(BASE + p, {
+      method: method, headers: headers, body: body ? JSON.stringify(body) : undefined
+    })
+    let json = null
+    try { json = await resp.json() } catch (e) { json = null }
+    return { status: resp.status, json: json }
+  }
+  async function register(username, nickname) {
+    const r = await api("POST", "/api/auth/register", null, {
+      username: username, password: "Smoke#2026x", nickname: nickname,
+      captchaId: "00000000000000000000000000000000", captchaCode: "ZZZZ",
+      agreeTerms: true, agreePrivacy: true, consentVersion: "v1.0", regSource: "probe-script"
+    })
+    const d = r.json && r.json.data ? r.json.data : {}
+    return { token: d.accessToken || null, id: d.user ? Number(d.user.id) : null, status: r.status }
+  }
+
+  const U = await register(nameU, "探针话题客" + stamp)
+  check("13", "注册一名一次性账号：话题详情/帖流/关注/创建/发帖这五条路径全要求登录，本段所有写入都落在它身上",
+    !!U.token && !!U.id, "u=" + U.id + "(" + U.status + ")")
+  if (!U.token) {
+    notes.push("TOPIC PROBE 提前收工：注册没拿到 token（" + U.status + "）")
+    return
+  }
+  // 夹具不从「我以为库里有什么」出发：先读一次话题墙，从真实数据里挑「有帖的那个」和「零帖的那个」。
+  const wallResp = await api("GET", "/api/topics?limit=50", null, null)
+  const wall = (wallResp.json && wallResp.json.data) || []
+  const T = wall.filter(function (t) { return Number(t.postCnt) > 0 })[0] || wall[0] || null
+  const TE = wall.filter(function (t) {
+    return Number(t.postCnt) === 0 && (!T || Number(t.id) !== Number(T.id))
+  })[0] || null
+  check("13", "话题墙里能挑出两种真夹具：至少一个「有帖话题」（验列表）和至少一个「零帖话题」（验空态那句诚实话）",
+    wall.length > 0 && !!T && !!TE,
+    "wall=" + wall.length + " T=" + (T ? T.id + ":" + T.name + "/发帖" + T.postCnt : "-")
+      + " TE=" + (TE ? TE.id + ":" + TE.name : "-"))
+  if (!T) {
+    notes.push("TOPIC PROBE 提前收工：话题墙上没有一个已过审话题")
+    return
+  }
+  const tid = Number(T.id)
+  const pubPost = await api("POST", "/api/posts", U.token, {
+    title: kw + "甲", content: "话题页夹具正文一条 " + kw, topicIds: [tid]
+  })
+  const pubData = pubPost.json && pubPost.json.data ? pubPost.json.data : null
+  check("13", "带 topicIds 向一个已过审话题发帖被后端放行（PUBLISHED）：话题页的列表接下来才有东西可画",
+    pubPost.status === 200 && !!pubData && pubData.status === "PUBLISHED",
+    pubPost.status + " id=" + (pubData ? pubData.id : "-") + " st=" + (pubData ? pubData.status : "-"))
+  const srvBefore = await api("GET", "/api/topics/" + tid, U.token, null)
+  const cardBefore = (srvBefore.json && srvBefore.json.data) || {}
+  const listBefore = await api("GET", "/api/topics/" + tid + "/posts", U.token, null)
+  const totalBefore = Number((listBefore.json && listBefore.json.data || {}).total)
+
+  const mod = await import(pathToFileURL(JSDOM_ENTRY).href)
+  const blogs = []
+  const vc = new mod.VirtualConsole()
+  vc.on("jsdomError", function (e) { blogs.push("jsdomError: " + ((e && e.message) || String(e))) })
+  vc.on("error", function () { blogs.push("console.error: " + Array.prototype.join.call(arguments, " ")) })
+  const dom = new mod.JSDOM('<!doctype html><html><head><meta charset="utf-8"></head><body><div id="app"></div></body></html>', {
+    url: BASE + "/feed", runScripts: "dangerously", pretendToBeVisual: true, virtualConsole: vc
+  })
+  const w = dom.window
+  w.IntersectionObserver = function IntersectionObserver() {
+    this.observe = function () {}; this.unobserve = function () {}; this.disconnect = function () {}
+  }
+  w.ResizeObserver = function ResizeObserver() {
+    this.observe = function () {}; this.unobserve = function () {}; this.disconnect = function () {}
+  }
+  w.matchMedia = function matchMedia() {
+    return { matches: false, media: "", onchange: null,
+      addListener: function () {}, removeListener: function () {},
+      addEventListener: function () {}, removeEventListener: function () {},
+      dispatchEvent: function () { return false } }
+  }
+  w.HTMLElement.prototype.scrollTo = function scrollTo() {}
+  w.Element.prototype.scrollIntoView = function scrollIntoView() {}
+  // 三条日志各管一件事：请求行判「发了没有、发了几条」，请求体判「预填到底带没带进 payload」，
+  // 响应体判「界面那句回执有没有替后端撒谎」。前两条在界面 DOM 里根本看不见。
+  w.__reqLog = []
+  w.__bodyLog = []
+  w.__respLog = []
+  const originOpen = w.XMLHttpRequest.prototype.open
+  w.XMLHttpRequest.prototype.open = function (method, url) {
+    this.__probeLine = String(method) + " " + String(url)
+    w.__reqLog.push(this.__probeLine)
+    return originOpen.apply(this, arguments)
+  }
+  const originSend = w.XMLHttpRequest.prototype.send
+  w.XMLHttpRequest.prototype.send = function (body) {
+    const self = this
+    w.__bodyLog.push({ line: String(self.__probeLine || "?"), body: body == null ? "" : String(body) })
+    self.addEventListener("load", function () {
+      let json = null
+      try { json = JSON.parse(String(self.responseText || "")) } catch (e) { json = null }
+      w.__respLog.push({ line: String(self.__probeLine || "?"), status: self.status, json: json })
+    })
+    return originSend.apply(this, arguments)
+  }
+  // 前缀匹配而不是包含匹配：reqs("/api/topics/1") 会把 .../posts 与 .../follow 一起数进来，
+  // 那种断言看着严格，其实一条也没钉住。
+  const reqsStart = function (prefix) {
+    return (w.__reqLog || []).filter(function (x) { return String(x).indexOf(prefix) === 0 })
+  }
+  const reqsEq = function (line) {
+    return (w.__reqLog || []).filter(function (x) { return String(x) === line })
+  }
+  const respOf = function (line) {
+    const hit = (w.__respLog || []).filter(function (r) { return r.line === line })
+    return hit.length ? hit[hit.length - 1] : null
+  }
+  w.localStorage.setItem("mindisle_token", U.token)
+  const sc = w.document.createElement("script")
+  sc.textContent = bundleCode
+  w.document.head.appendChild(sc)
+
+  const txt = function (el) { return el ? String(el.textContent).trim() : "" }
+  const docText = function () { return String(w.document.body.textContent) }
+  const msgTexts = function () {
+    return Array.prototype.slice.call(w.document.querySelectorAll(".el-message")).map(txt)
+  }
+  const btnLike = function (root, needle) {
+    if (!root) return null
+    const list = Array.prototype.slice.call(root.querySelectorAll("button"))
+    return list.find(function (x) { return txt(x).indexOf(needle) >= 0 }) || null
+  }
+  const pickRadio = function (root, label) {
+    if (!root) return false
+    const list = Array.prototype.slice.call(root.querySelectorAll(".el-radio-button"))
+    const hit = list.find(function (x) { return txt(x) === label })
+    if (!hit) return false
+    const inp = hit.querySelector("input")
+    if (!inp) return false
+    inp.click()
+    return true
+  }
+  const setInput = function (el, value) {
+    if (!el) return false
+    el.value = value
+    el.dispatchEvent(new w.Event("input", { bubbles: true }))
+    return true
+  }
+  // .t-stats 的直接子节点里还挂着那个 el-tag（它自己也是个 span），数三个计数前要按类名滤掉它。
+  const stats = function () {
+    const box = w.document.querySelector("section.hero .t-stats")
+    if (!box) return []
+    const kids = Array.prototype.slice.call(box.children)
+    return kids.filter(function (el) { return String(el.className).indexOf("el-tag") < 0 }).map(txt)
+  }
+  const tagOfHero = function () {
+    const box = w.document.querySelector("section.hero .t-stats")
+    if (!box) return ""
+    const kids = Array.prototype.slice.call(box.children)
+    const hit = kids.find(function (el) { return String(el.className).indexOf("el-tag") >= 0 })
+    return txt(hit || null)
+  }
+  const cards = function () {
+    return Array.prototype.slice.call(w.document.querySelectorAll("section.flow .list article.post"))
+  }
+  const titles = function () {
+    return cards().map(function (c) { return txt(c.querySelector(".title")) })
+  }
+  const route13 = function () { return w.__probeRouter.currentRoute.value }
+  async function until13(fn, ms, label) {
+    const t0 = Date.now()
+    for (;;) {
+      let ok = false
+      try { ok = !!fn() } catch (e) { ok = false }
+      if (ok) return true
+      if (Date.now() - t0 > ms) {
+        notes.push("TIMEOUT " + label + " 之后 DOM 文本=「" + docText().slice(0, 220) + "」")
+        return false
+      }
+      await sleep(120)
+    }
+  }
+  const mounted = await until13(function () { return w.__probeMounted === true }, 12000, "topic-mount")
+  const wallReady = await until13(function () {
+    return w.document.querySelectorAll(".topics .topic.topic-link").length > 0
+  }, 12000, "topic-wall")
+  const wallCards = Array.prototype.slice.call(w.document.querySelectorAll(".topics .topic.topic-link"))
+  check("13", "广场墙上每一张话题卡都带着「进入话题」这个落点：这一条同时把 T3.8 之前那个「点不动」的旧状态钉死",
+    mounted && wallReady && wallCards.length > 0 && wallCards.every(function (c) {
+      return txt(c.querySelector(".t-go")).indexOf("进入话题") >= 0
+    }),
+    "cards=" + wallCards.length + " go=" + (wallCards[0] ? txt(wallCards[0].querySelector(".t-go")) : "-"))
+  const cardEl = wallCards.find(function (c) {
+    return txt(c.querySelector(".t-name")) === "# " + T.name
+  }) || null
+  if (cardEl) cardEl.click()
+  const onTopic = await until13(function () {
+    return route13().name === "topic-detail" && String(route13().params.id) === String(tid)
+  }, 8000, "topic-route")
+  check("13", "点墙上那张「" + T.name + "」→ 路由真的变成 topic-detail、地址栏真的变成 /topic/" + tid
+    + "（搜索页那条入口在第 12 组已验：两处共用同一个组件，不会出现两处各画一份头图）",
+    !!cardEl && onTopic, "name=" + (cardEl ? txt(cardEl.querySelector(".t-name")) : "-") + " path=" + route13().path)
+  const heroOk = await until13(function () { return !!w.document.querySelector("section.hero .t-name") }, 12000, "topic-hero")
+  check("13", "话题头三件套真渲染出来了：名字带 # 前缀、三个计数各占一个 span、已过审官方话题挂「官方」角标",
+    heroOk && txt(w.document.querySelector("section.hero .t-name")) === "# " + T.name
+      && stats().length === 3 && tagOfHero() === "官方",
+    "stats=" + stats().join("/") + " tag=" + tagOfHero())
+  check("13", "头图那两个数字与接口逐字相同（发帖数、关注数）：前端不做任何「先猜一个」的估算",
+    stats()[0] === "发帖 " + cardBefore.postCnt && stats()[1] === "关注 " + cardBefore.followCnt,
+    "dom=" + stats().join("/") + " api=" + cardBefore.postCnt + "/" + cardBefore.followCnt)
+  const detailReqs = reqsEq("GET /api/topics/" + tid)
+  const postReqs = reqsStart("GET /api/topics/" + tid + "/posts")
+  check("13", "进这一页恰好两条请求：一条话题资料、一条帖流；帖流首屏不带 sort 参数（latest 是后端默认档，前端不重复发一遍）",
+    detailReqs.length === 1 && postReqs.length === 1 && String(postReqs[0] || "").indexOf("sort=") < 0,
+    JSON.stringify(detailReqs.concat(postReqs)).slice(0, 260))
+  const listOk = await until13(function () { return titles().indexOf(kw + "甲") >= 0 }, 12000, "topic-list")
+  check("13", "话题下的帖流画出卡片，且刚挂上这个话题的那条夹具就在里面（post_topic 真的驱动了这条列表，不是「所有帖子」）",
+    listOk && cards().length >= 1 && cards().length <= 20, "titles=" + titles().join("|").slice(0, 200))
+  const totalDom = txt(w.document.querySelector("section.flow .tabs .hint"))
+  check("13", "计数行「这个话题下共 N 条可见帖子」的 N 与后端 total 逐字相同（界面不许自己数卡片数冒充总数）",
+    totalDom.indexOf("这个话题下共 ") === 0 && totalDom.indexOf(String(totalBefore) + " 条可见帖子") >= 0,
+    "dom=" + totalDom + " api=" + totalBefore)
+  const tidReqsBeforeTe = reqsStart("GET /api/topics/" + tid).length
+  if (TE) await w.__probeRouter.push({ name: "topic-detail", params: { id: TE.id } })
+  const onTe = await until13(function () {
+    return route13().name === "topic-detail" && String(route13().params.id) === String(TE ? TE.id : 0)
+  }, 8000, "topic-te-route")
+  const emptyOk = await until13(function () {
+    return docText().indexOf("这个话题还没有人发帖") >= 0
+  }, 12000, "topic-te-empty")
+  check("13", "换到一个零帖话题（走的是组件复用 + watch 编号那条路）：头图说「发帖 0」，列表给的是「还没有人发帖，点上面开个头」",
+    !!TE && onTe && emptyOk && txt(w.document.querySelector("section.hero .t-name")) === "# " + TE.name
+      && stats()[0] === "发帖 0" && cards().length === 0,
+    "TE=" + (TE ? TE.id : "-") + " name=" + txt(w.document.querySelector("section.hero .t-name"))
+      + " stats=" + stats().join("/"))
+  const teDetail = reqsEq("GET /api/topics/" + (TE ? TE.id : 0))
+  const tePosts = reqsStart("GET /api/topics/" + (TE ? TE.id : 0) + "/posts")
+  check("13", "这次「换话题」只发了新话题那两条请求，一条都没再打回旧话题 " + tid + "（组件复用最容易漏的就是这一步）",
+    teDetail.length === 1 && tePosts.length === 1 && reqsStart("GET /api/topics/" + tid).length === tidReqsBeforeTe,
+    "teDetail=" + teDetail.length + " tePosts=" + tePosts.length + " oldTid=" + reqsStart("GET /api/topics/" + tid).length
+      + "/" + tidReqsBeforeTe)
+  w.__reqLog.length = 0
+  await w.__probeRouter.push("/topic/abc")
+  const badOk = await until13(function () {
+    return w.document.querySelectorAll(".page .stage").length > 0
+  }, 8000, "topic-abc")
+  check("13", "地址栏编号写成 abc：页面自己说一句人话（这个话题不存在），且一条请求都不发 —— 不拿 abc 去后端换 404 再让人猜为什么白屏",
+    badOk && w.__reqLog.length === 0 && docText().indexOf("这个话题不存在") >= 0,
+    "reqs=" + JSON.stringify(w.__reqLog).slice(0, 160))
+  check("13", "上面这一整段只读路径没弹过一条全局红条：详情与帖流都是 silent 接口，页面自己解释自己",
+    w.document.querySelectorAll(".el-message").length === 0,
+    "n=" + w.document.querySelectorAll(".el-message").length)
+  // ---- 创建话题（刻意排在只读段之后：这条路会弹 ElMessage，放前面会把「只读段零红条」那条断言搅浑）----
+  await w.__probeRouter.push({ name: "feed" })
+  const backFeed = await until13(function () { return route13().name === "feed" }, 8000, "topic-back-feed")
+  const openBtn = w.document.querySelector(".btn-create-topic")
+  if (backFeed && openBtn) openBtn.click()
+  const dlgOk = await until13(function () { return !!w.document.querySelector(".el-dialog") }, 8000, "topic-create-dialog")
+  const overName = Array(41).join("超")
+  const typedOver = setInput(w.document.querySelector(".el-dialog input.el-input__inner"), overName)
+  // 那一行是 computed，Vue 的组件更新排在微任务里：setInput 之后同步读 DOM 拿到的必然还是「已输入 0」。
+  // 上一版这条就是这么假失败的（再点一次提交时模型其实早就带上新值了）——凡判「输入之后界面跟着改没有」，都必须等到。
+  const counterOk = await until13(function () {
+    return txt(w.document.querySelector(".el-dialog .hint")).indexOf("已输入 40") === 0
+  }, 8000, "topic-name-counter")
+  const nameHint = txt(w.document.querySelector(".el-dialog .hint"))
+  check("13", "在话题名里连敲 40 个字：数码点当场给出「已输入 40 / 上限 32」—— 这一行是跟着字走的，不用等提交完才告诉用户超了",
+    backFeed && dlgOk && typedOver && counterOk && nameHint.indexOf("上限 32") >= 0,
+    "hint=" + nameHint.slice(0, 90))
+  w.__reqLog.length = 0
+  const overSubmit = w.document.querySelector(".el-dialog .btn-do-create")
+  if (overSubmit) overSubmit.click()
+  const overToast = await until13(function () { return msgTexts().join("|").indexOf("话题名最长 32") >= 0 }, 6000, "topic-overlong-toast")
+  check("13", "超长这一次被挡在提交之前：一条 POST /api/topics 都没发出去（不做 maxlength，但判定必须发生在网络请求之前）"
+    + " —— 口径与后端 normalizeName 的 codePointCount 一致，一个 emoji 算一个字",
+    overToast && reqsStart("POST /api/topics").length === 0,
+    "toast=" + msgTexts().join("|").slice(0, 90) + " reqs=" + reqsStart("POST /api/topics").length)
+  const legalName = kw + "圈"
+  setInput(w.document.querySelector(".el-dialog input.el-input__inner"), legalName)
+  setInput(w.document.querySelector(".el-dialog textarea"), "探针夹具的一句话简介")
+  const createReqsBefore = reqsStart("POST /api/topics").length
+  const doCreate = w.document.querySelector(".el-dialog .btn-do-create")
+  if (doCreate) doCreate.click()
+  const alertOk = await until13(function () { return !!w.document.querySelector(".el-dialog .el-alert") }, 12000, "topic-create-alert")
+  const createResp = respOf("POST /api/topics")
+  const createdData = createResp && createResp.json ? createResp.json.data : null
+  const createdId = createdData && createdData.id ? Number(createdData.id) : 0
+  const usable = !!(createdData && createdData.usable)
+  const alertTitle = txt(w.document.querySelector(".el-dialog .el-alert__title"))
+  check("13", "合法长度这一次真的发出去了：恰好一条 POST /api/topics、HTTP 200，横幅把话题名念回给用户（不是一句笼统的「成功」）"
+    + " —— 预审开着时「进了待审」也走 200，接口不拿状态码骗前端",
+    alertOk && reqsStart("POST /api/topics").length === createReqsBefore + 1 && !!createResp
+      && createResp.status === 200 && !!createdData && alertTitle.indexOf(createdData.name || legalName) >= 0,
+    "reqs=" + reqsStart("POST /api/topics").length + " status=" + (createResp ? createResp.status : "-")
+      + " id=" + createdId + " alert=" + alertTitle.slice(0, 70))
+  if (usable) {
+    const goBtn = btnLike(w.document.querySelector(".el-dialog .el-alert"), "现在就进去")
+    if (goBtn) goBtn.click()
+    const entered = await until13(function () {
+      return route13().name === "topic-detail" && String(route13().params.id) === String(createdId)
+    }, 8000, "topic-created-enter")
+    check("13", "（预审关掉时走这条路）横幅里那颗「现在就进去」真的把地址栏换成 /topic/" + createdId
+      + "，头图角标是「屿友创建」不是「官方」—— 自建话题恒不进官方墙，界面也没有把它画成官方",
+      entered && tagOfHero() === "屿友创建", "path=" + route13().path + " tag=" + tagOfHero())
+    const ownDetail = await api("GET", "/api/topics/" + createdId, U.token, null)
+    check("13", "界面说「能进去」的时候接口也是这么说的：GET /api/topics/" + createdId + " 返回 200 且 isOfficial=false（回执 usable 与读接口不许各讲一套）"
+      + " —— 本条只在 mindisle.topic.require-pre-review=false 那次启动里才会跑到",
+      ownDetail.status === 200 && !!ownDetail.json && !!ownDetail.json.data
+        && ownDetail.json.data.isOfficial === false,
+      ownDetail.status + " code=" + (ownDetail.json ? ownDetail.json.code : "-")
+        + " isOfficial=" + (ownDetail.json && ownDetail.json.data ? ownDetail.json.data.isOfficial : "-"))
+  } else {
+    const dlgBody = Array.prototype.slice.call(w.document.querySelectorAll(".el-dialog .dlg-body")).map(txt).join(" ")
+    check("13", "（预审开着，默认配置走的就是这条）「已提交」没被伪装成失败：auditStatus=PENDING，弹窗里同时写清了「阶段 3 还没有审核台能放行、管理端属任务 6.1」，"
+      + " 而且根本没有画那颗点不动的「现在就进去」（FR8.6 的边界在界面上是可见的，不是藏在注释里）",
+      !!createdData && createdData.auditStatus === "PENDING" && usable === false
+        && dlgBody.indexOf("审核台") >= 0 && dlgBody.indexOf("6.1") >= 0
+        && !btnLike(w.document.querySelector(".el-dialog .el-alert"), "现在就进去"),
+      "auditStatus=" + (createdData ? createdData.auditStatus : "-") + " body=" + dlgBody.slice(0, 150))
+    const pendDetail = await api("GET", "/api/topics/" + createdId, U.token, null)
+    await w.__probeRouter.push({ name: "topic-detail", params: { id: createdId } })
+    const pendPage = await until13(function () { return docText().indexOf("这个话题还在审核中") >= 0 }, 10000, "topic-pending-page")
+    check("13", "深链进一个待审话题是后端 + 前端一起认的账：接口 409/30004，页面给的是「还在审核中 + FR8.6 预审开关默认开着」这句人话，"
+      + " 并且不画那个空的头图（拿不到资料就宁可少一块卡片，也不摆一颗点了没反应的关注按钮）",
+      pendDetail.status === 409 && !!pendDetail.json && Number(pendDetail.json.code) === 30004
+        && pendPage && docText().indexOf("FR8.6") >= 0 && !w.document.querySelector("section.hero"),
+      pendDetail.status + " code=" + (pendDetail.json ? pendDetail.json.code : "-")
+        + " hero=" + !!w.document.querySelector("section.hero"))
+  }
+  // ---- ?topic= 预填闭环：话题页点「发帖到该话题」→ 发布页认编号 → 请求体真的带着 topicIds ----
+  await w.__probeRouter.push({ name: "topic-detail", params: { id: tid } })
+  const backTopic = await until13(function () {
+    return route13().name === "topic-detail" && String(route13().params.id) === String(tid)
+      && !!w.document.querySelector("section.hero .pub-btn")
+  }, 12000, "topic-back-to-fixture")
+  const jumpPub = w.document.querySelector("section.hero .pub-btn")
+  if (jumpPub) jumpPub.click()
+  const onPublish = await until13(function () { return route13().name === "publish" }, 8000, "topic-to-publish")
+  const searchNow = decodeURIComponent(w.location.search)
+  check("13", "话题页那颗「发帖到该话题」把编号写进了地址栏（/publish?topic=" + tid + "）："
+    + " 落点是一个能刷新、能转给同学的地址，不是内存里的一个变量（上一版这里踩过：切 Tab 忘了同步 query）",
+    backTopic && !!jumpPub && onPublish && searchNow.indexOf("topic=" + tid) >= 0, "search=" + searchNow)
+  const presetOk = await until13(function () {
+    return docText().indexOf("已带上话题 # " + T.name) >= 0
+  }, 12000, "topic-preset-line")
+  check("13", "发布页顶上那行确认语把话题名字念了出来、并且挂的是 is-ok 那一档："
+    + " 三态不是摆样子 —— checking 与 miss 各有各的话，这里等到的是「带上了」而不是替用户猜一个",
+    presetOk && !!w.document.querySelector(".preset-line.is-ok"),
+    "line=" + txt(w.document.querySelector(".preset-line")).slice(0, 80)
+      + " cls=" + (w.document.querySelector(".preset-line") ? String(w.document.querySelector(".preset-line").className) : "-"))
+  const tagTexts = Array.prototype.slice.call(w.document.querySelectorAll(".composer .w260 .el-tag")).map(txt).join("|")
+  const selectText = txt(w.document.querySelector(".composer .w260"))
+  check("13", "预填不是只在文案里说了句好话：关联话题那个下拉框上看得到 # " + T.name + "（选中值真进了 form.topicIds）"
+    + " —— 顺序也钉住了：草稿恢复在前、合入预填在后，反过来的话一分钟前那份草稿会把手跳进来的这个话题覆盖掉",
+    tagTexts.indexOf(T.name) >= 0 || selectText.indexOf(T.name) >= 0,
+    "tags=" + tagTexts.slice(0, 70) + " select=" + selectText.slice(0, 70))
+  setInput(w.document.querySelector(".composer .title-input input.el-input__inner"), kw + "乙")
+  setInput(w.document.querySelector(".composer textarea"), "从话题页跳过来发的第二条 " + kw)
+  const postsReqsBefore = reqsStart("POST /api/posts").length
+  const sendBtn = btnLike(w.document.querySelector(".composer .actions"), "发布")
+  if (sendBtn) sendBtn.click()
+  const posted = await until13(function () { return reqsStart("POST /api/posts").length > postsReqsBefore }, 12000, "topic-preset-publish")
+  const bodies = w.__bodyLog.filter(function (b) { return b.line === "POST /api/posts" })
+    .map(function (b) { return b.body }).join(" || ")
+  // 序列化出来的键名是带引号的："topicIds":[1]。上一版拿不带引号的 "topicIds:" 当针，
+  // 于是界面、请求、后端全对了，唯独这条断言永远判不过 —— 针写错比判据写松更隐蔽，因为它看起来像在挑业务的错。
+  const topicNeedle = '"topicIds":' + JSON.stringify([tid])
+  check("13", "点「发布」那一刻的请求体里已经带着 " + topicNeedle + "：整条预填链路一路通到 payload，用户没有再手动挑一次话题"
+    + "（这一条只有请求体能证明，界面上那个选中态证明不了它）",
+    posted && bodies.indexOf("topicIds") >= 0 && bodies.indexOf(topicNeedle) >= 0,
+    "body=" + bodies.slice(0, 240))
+  const publishResp = respOf("POST /api/posts")
+  const newData = publishResp && publishResp.json ? publishResp.json.data : null
+  const toDetail = await until13(function () { return route13().name === "post-detail" }, 12000, "topic-preset-redirect")
+  check("13", "后端认下了这个预挂：新帖 status=PUBLISHED，页面按回执里的 id 跳进了详情页（不是丢回列表让用户自己找哪条是刚发的）"
+    + "；挂题成功这件事是后端说的，不是前端自己宣布的",
+    !!newData && newData.status === "PUBLISHED" && toDetail
+      && String(route13().params.id) === String(newData.id),
+    "status=" + (publishResp ? publishResp.status : "-") + " st=" + (newData ? newData.status : "-")
+      + " route=" + route13().path)
+  await w.__probeRouter.push({ name: "topic-detail", params: { id: tid } })
+  const bothThere = await until13(function () {
+    const now = titles()
+    return now.indexOf(kw + "甲") >= 0 && now.indexOf(kw + "乙") >= 0
+  }, 15000, "topic-loop-close")
+  check("13", "回到这个话题页，两条夹具帖都排在首页里：一条走接口挂题、一条从话题页点出来发的 —— 进话题、发进话题、在话题里看到它，这一整圈闭环通了"
+    + "（话题页读的是 post_topic，不是「所有帖子里标题带话题名的那些」）",
+    bothThere, "titles=" + titles().join("|").slice(0, 200))
+  notes.push("topic 一次性账号：" + nameU + "(" + U.id + ")；有帖话题 " + (T ? T.id + ":" + T.name + "/发帖" + T.postCnt : "-")
+    + "；零帖话题 " + (TE ? TE.id + ":" + TE.name : "-"))
+  notes.push("topic 夹具帖 id：" + (pubData ? pubData.id : "-") + "(甲·走接口挂题) " + (newData ? newData.id : "-") + "(乙·走 ?topic= 预填)")
+  notes.push("topic 新建话题 id=" + createdId + " auditStatus=" + (createdData ? createdData.auditStatus : "-")
+    + " usable=" + usable + " —— 预审开关（FR8.6）默认开着，PENDING 是这条路径今天的正常结局")
+  notes.push("本段验的是「选中值有没有一路走到 payload」：jsdom 下 el-select 的 popper teleport 在 body 上，所以那条预填断言同时认 .el-tag 与整个 select 的文本，两种画法都不影响判据；点下拉的鼠标路径留给真浏览器")
+  notes.push("topic window logs: " + (blogs.length ? blogs.slice(0, 6).join(" || ") : "none"))
   dom.window.close()
 }
 

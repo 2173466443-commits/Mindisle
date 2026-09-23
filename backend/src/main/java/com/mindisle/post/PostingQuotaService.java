@@ -51,6 +51,14 @@ public class PostingQuotaService {
     private static final DateTimeFormatter DAY = DateTimeFormatter.BASIC_ISO_DATE;
     private static final String SCENE_POST = "post";
     private static final String SCENE_COMMENT = "comment";
+    /**
+     * 场景 3：创建话题（任务 3.8 · 手册 §6.1 行 3.8「创建需 audit_status=待审（防刷）」）。
+     *
+     * <p>它和前两个场景共用同一个键形状与同一个自然日窗口，所以「防刷」这一条
+     * 在跨日重置、进程重启归零这两件事上的行为与发帖完全一致 —— 不额外解释一遍，
+     * 也不额外多一个坑。</p>
+     */
+    private static final String SCENE_TOPIC = "topic";
     /** 跨日瞬间 ttl 可能算出 0，兜一个最小窗口，免得写出永不过期的键。 */
     private static final Duration MIN_TTL = Duration.ofMinutes(1);
 
@@ -97,6 +105,31 @@ public class PostingQuotaService {
     /** 评论成功后计数 +1。 */
     public void recordCommentCreated(User user, long postId, LocalDateTime now) {
         cacheService.incr(commentKey(user.getId(), postId, now), windowTtl(now));
+    }
+
+    /**
+     * 创建话题前置检查（手册 §6.1 行 3.8「防刷」+ BR6）。
+     *
+     * <p>走 {@link #assertStatusAllowsWrite} 而不是 allowsInteract：话题名和简介是<b>会公开出现在
+     * 广场帖子上方的标签</b>的内容，本质是「说」，不是「点」。所以 MUTED 账号可以关注话题、
+     * 不能建话题（需求 BR6 的分工在这里一次都不用重新解释）。</p>
+     *
+     * <p>限额读 {@code mindisle.topic.max-create-per-day}，不读发帖那个 20：
+     * 一天 20 帖正常，一天 20 个新话题就是灌水。</p>
+     */
+    public void assertCanCreateTopic(User user, LocalDateTime now) {
+        assertStatusAllowsWrite(user);
+        int limit = properties.getTopic().getMaxCreatePerDay();
+        int used = usedCount(topicKey(user.getId(), now));
+        if (used >= limit) {
+            throw new BizException(ErrorCode.RATE_LIMITED,
+                    String.format("今天已经创建了 %d 个话题，达到上限 %d 个，先逛逛已有的话题吧", used, limit));
+        }
+    }
+
+    /** 话题创建成功后计数 +1。落库失败（重名撞唯一键）时不会走到这里。 */
+    public void recordTopicCreated(User user, LocalDateTime now) {
+        cacheService.incr(topicKey(user.getId(), now), windowTtl(now));
     }
 
     /**
@@ -175,6 +208,11 @@ public class PostingQuotaService {
 
     private String commentKey(Long userId, long postId, LocalDateTime now) {
         return key(SCENE_COMMENT, userId, postId, now);
+    }
+
+    /** 话题配额按「人 + 自然日」算，没有目标维度（话题还不存在，没有 id 可拼）。 */
+    private String topicKey(Long userId, LocalDateTime now) {
+        return key(SCENE_TOPIC, userId, 0L, now);
     }
 
     private static String key(String scene, Long userId, long postId, LocalDateTime now) {

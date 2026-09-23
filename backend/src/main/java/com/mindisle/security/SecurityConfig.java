@@ -14,6 +14,7 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -42,12 +43,19 @@ import org.springframework.web.cors.CorsConfigurationSource;
 @EnableMethodSecurity
 public class SecurityConfig {
 
-    /** 匿名可访问的路径（§5.6 原文 + 上面说明的两处增补）。 */
+    /**
+     * 匿名可访问的路径（§5.6 原文 + 上面说明的两处增补）。
+     *
+     * <p><b>{@code /api/topics} 刻意不在这一份里</b>：它是全站唯一一条「读匿名、写要登录」
+     * 共用同一个 URI 的路径——{@code GET} 是游客可逛的话题墙，{@code POST} 是 T3.8 的创建话题。
+     * 整条按 URI permitAll 等于连创建一起匿名，所以它单独走下一份清单。
+     * 两份清单的判据必须与 {@code JwtAuthFilter} 的 {@code ANONYMOUS_READ_EXACT} 逐字对齐，
+     * 由 {@code JwtAuthFilterAnonymousPathTest} 钉住。</p>
+     */
     private static final String[] PUBLIC_MATCHERS = {
             "/api/auth/**",
             "/api/admin/auth/login",
             "/api/system/**",
-            "/api/topics",
             "/doc.html",
             "/v3/api-docs/**",
             "/swagger-ui/**",
@@ -59,6 +67,9 @@ public class SecurityConfig {
             "/actuator/info",
             "/error"
     };
+
+    /** 只认 GET/HEAD 的匿名精确路径：话题墙。它同 URI 上的 POST（创建话题）要求登录。 */
+    private static final String[] PUBLIC_READ_ONLY_MATCHERS = { "/api/topics" };
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
@@ -72,6 +83,8 @@ public class SecurityConfig {
                 .logout(logout -> logout.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.GET, PUBLIC_READ_ONLY_MATCHERS).permitAll()
+                        .requestMatchers(HttpMethod.HEAD, PUBLIC_READ_ONLY_MATCHERS).permitAll()
                         .requestMatchers(PUBLIC_MATCHERS).permitAll()
                         .requestMatchers("/api/admin/**").hasAnyRole("ADMIN", "SUPER")
                         .anyRequest().authenticated())

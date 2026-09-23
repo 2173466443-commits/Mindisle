@@ -110,7 +110,7 @@ const targetId = computed(() => {
 
 const title = computed(() => (targetId.value ? '屿友 ' + targetId.value + ' 的主页' : '屿友主页'))
 
-const { items, loading, hasMore, errorCode, reload, loadMore } = usePagedPosts(
+const { items, loading, hasMore, errorCode, reload, loadMore, clear } = usePagedPosts(
   (params) => userPosts(targetId.value, params),
   {}
 )
@@ -162,10 +162,16 @@ async function actFollow() {
 // 不 watch 路由参数，页面就会停在上一个人的列表上 —— 这是「切主页看到上一个人的缓存」的另一半成因。
 // 资料卡必须跟着一起换：漏了它，A 的主页上那颗「关注」点的会是 B。
 watch(targetId, (to) => {
-  if (to) {
-    reload()
-    loadCard()
+  if (!to) {
+    // 与话题详情页同一形状：编号改成读不了的形状时，上一张资料卡会连那颗「关注」按钮一起留在屏上，
+    // 而按钮用的已经是地址栏里那个 abc。清卡片 + clear()，别把「地址栏说一套、屏幕画另一套」留给用户去发现。
+    card.value = null
+    cardNote.value = ''
+    clear()
+    return
   }
+  reload()
+  loadCard()
 })
 
 onMounted(() => {

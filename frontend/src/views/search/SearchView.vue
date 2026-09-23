@@ -78,7 +78,9 @@
       <el-empty v-else-if="!started" description="输入关键词后按回车开搜" :image-size="60" />
       <el-empty v-else-if="!topics.length && !busy" description="没有匹配的已过审话题" :image-size="60" />
       <div v-else class="topics">
-        <div v-for="t in topics" :key="t.id" class="topic">
+        <!-- 话题卡可点进详情页（任务 T3.8 · 需求 FR4.5）。整张卡都是热区而不是名字那一个小链接：
+             用户在搜索结果里点的从来不是某个字段，是「这个话题」。 -->
+        <div v-for="t in topics" :key="t.id" class="topic topic-link" @click="goTopic(t)">
           <div class="t-name"># {{ t.name }}</div>
           <div class="t-desc">{{ t.desc || '这个话题没有简介' }}</div>
           <div class="t-meta">
@@ -86,12 +88,13 @@
             <span>关注 {{ t.followCnt || 0 }}</span>
             <span>热度 {{ fmtHot(t.hotScore) }}</span>
             <el-tag v-if="t.isOfficial" size="small" effect="plain">官方</el-tag>
+            <span class="t-go">进入话题 →</span>
           </div>
         </div>
       </div>
       <p v-if="started && topics.length" class="dim note">
-        话题卡片点不动是刻意的：话题详情页（话题下的帖子流、关注话题）属任务 3.8，后端还没有「按话题取帖」的接口。
-        想看这个话题下的人在说什么，现在唯一的路径是把话题名当关键词搜帖子。
+        点任意一张话题卡进话题页（/topic/编号）：那里有这个话题下的帖子流、关注按钮和「发帖到该话题」。
+        这一栏只列已过审的话题，按热度倒序、一次最多 {{ SEARCH_PROFILE_MAX }} 条；匹配的是话题名，不是简介里的字。
       </p>
     </template>
 
@@ -126,6 +129,7 @@ import { searchPosts, searchTopics, searchUsers, SEARCH_KEYWORD_MAX, SEARCH_PROF
 import { POST_TYPES } from '@/api/post'
 import { useUserStore } from '@/stores/user'
 import { CODE } from '@/api/errorCode'
+import { fmtHot } from '@/utils/format'
 import { usePagedPosts } from '@/composables/usePagedPosts'
 import PostCard from '@/components/PostCard.vue'
 import StageNotice from '@/components/StageNotice.vue'
@@ -208,11 +212,6 @@ function initialOf(name) {
   return name ? String(name).slice(0, 1) : '屿'
 }
 
-function fmtHot(v) {
-  const n = Number(v)
-  return Number.isFinite(n) ? n.toFixed(1) : '-'
-}
-
 /** 话题 / 屿友两条定长结果。返回 false 表示这一路失败了，错误码已经存进 profileError。 */
 async function loadProfiles() {
   busy.value = true
@@ -289,6 +288,13 @@ function goUser(u) {
   router.push({ name: 'user-home', params: { id: u.id } })
 }
 
+// 话题结果的落点（任务 T3.8）。与点屿友结果是同一个形状：搜索页自己不做「话题资料卡」的复制品，
+// 一律交给 /topic/:id 那一页 —— 两处各画一份头图，迟早一处显示官方角标一处不显示。
+function goTopic(t) {
+  if (!t || t.id === undefined || t.id === null) return
+  router.push({ name: 'topic-detail', params: { id: t.id } })
+}
+
 function goFeed() {
   router.push({ name: 'feed' })
 }
@@ -324,6 +330,9 @@ onMounted(() => {
 .more { display: flex; justify-content: center; align-items: center; min-height: 44px; }
 .topics { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
 .topic { border: 1px solid var(--mi-border); border-radius: 10px; padding: 12px 14px; background: var(--mi-card); }
+.topic-link { cursor: pointer; }
+.topic-link:hover { border-color: var(--mi-primary); }
+.t-go { margin-left: auto; font-size: 12px; color: var(--mi-mist); }
 .t-name { font-weight: 700; color: var(--mi-primary); }
 .t-desc { font-size: 12px; color: var(--mi-text-dim); margin: 6px 0; min-height: 32px; }
 .t-meta { display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--mi-mist); flex-wrap: wrap; }

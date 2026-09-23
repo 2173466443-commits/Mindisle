@@ -50,6 +50,8 @@
       </el-tooltip>
     </div>
 
+    <p v-if="presetDropped" class="preset-note">话题最多带 3 个：刚点进来的这个话题给你留着了，草稿里的 {{ presetDropped }} 个话题被挤掉，需要的话在上面的下拉里重选。</p>
+
     <div class="row">
       <el-upload :show-file-list="false" :http-request="doUpload" accept="image/png,image/jpeg,image/gif" multiple>
         <el-button size="small" :loading="busy.upload">添加配图</el-button>
@@ -103,7 +105,10 @@ import StageNotice from '@/components/StageNotice.vue'
 const props = defineProps({
   topicList: { type: Array, default: () => [] },
   compact: { type: Boolean, default: false },
-  presetType: { type: String, default: '' }
+  presetType: { type: String, default: '' },
+  // 话题页「在这个话题下发一条」带过来的 ?topic=编号（任务 T3.8 · 手册 §6.2 U6）。
+  // 刻意是「合并」语义而不是「覆盖」，原因写在 mergePresetTopics 与文件末尾 onMounted 的注释里。
+  presetTopicIds: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['published'])
 
@@ -299,6 +304,33 @@ function restoreDraft() {
   }
 }
 
+// ---------------- 话题预填（任务 T3.8）----------------
+// 三件事必须一起做，单独写任何一件都会变成 bug：
+// 1) 顺序：调用方解析 ?topic= 要发一次请求，所以合并既要在 restoreDraft 之后跑（否则预填会被草稿覆盖），
+//    又要 watch props（否则预填到得比子组件挂载晚，永远合不进来）。两条都得留着。
+// 2) 去重：草稿里可能已经挂着同一个话题，重复 id 发给后端会被 resolveTopics 判 10001。
+// 3) 上限 3：el-select 的 :multiple-limit 只管手点，程序赋值不受它约束，只能自己截；
+//    被挤掉的条数要写在界面上（preset-note），不能悄悄少带一个话题。
+const presetDropped = ref(0)
+function mergePresetTopics() {
+  const preset = []
+  for (const raw of props.presetTopicIds || []) {
+    const v = Number(raw)
+    if (Number.isInteger(v) && v > 0 && preset.indexOf(v) < 0 && preset.length < 3) preset.push(v)
+  }
+  if (!preset.length) return
+  const merged = preset.slice()
+  let dropped = 0
+  for (const raw of form.topicIds || []) {
+    const v = Number(raw)
+    if (!Number.isInteger(v) || v <= 0 || merged.indexOf(v) >= 0) continue
+    if (merged.length < 3) merged.push(v)
+    else dropped += 1
+  }
+  presetDropped.value = dropped
+  form.topicIds = merged
+}
+
 function clearDraft() {
   localStorage.removeItem(DRAFT_KEY)
   savedAt.value = 0
@@ -367,7 +399,14 @@ function describe(data) {
   }
 }
 
-onMounted(restoreDraft)
+// 先恢复草稿、再合入预填：顺序反过来的话，一分钟前那份草稿里的三个话题会把
+// ?topic= 那一个覆盖掉，用户从话题页跳过来却发现发帖框里没带这个话题。
+onMounted(() => {
+  restoreDraft()
+  mergePresetTopics()
+})
+// PublishView 解析 ?topic= 要等一次接口，通常比子组件挂载晚到，所以这一条 watch 不是可选的。
+watch(() => props.presetTopicIds, mergePresetTopics, { deep: true })
 onUnmounted(() => {
   if (preTimer) clearTimeout(preTimer)
   if (saveTimer) clearTimeout(saveTimer)
@@ -379,6 +418,7 @@ onUnmounted(() => {
 .sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 h2 { margin: 0; font-size: 16px; color: var(--mi-mist); letter-spacing: 1px; }
 .type-note { margin: 0; font-size: 12px; color: var(--mi-text-dim); }
+.preset-note { margin: 0; font-size: 12px; line-height: 1.7; color: var(--mi-warn, #e0a33e); }
 .title-input { max-width: 620px; }
 .pre-line { margin: 0; }
 .pre-body { margin: 4px 0 0; font-size: 13px; line-height: 1.7; }

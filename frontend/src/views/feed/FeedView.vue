@@ -96,27 +96,65 @@
       </ul>
     </section>
 
-    <!-- 4 官方话题墙 -->
+    <!-- 4 官方话题墙（GET /api/topics，游客可逛）。点任意一张卡进话题详情页（任务 T3.8 · 需求 FR4.5）。
+         标题里「官方」两个字是有判据的：这条查询过滤 is_official=1，用户自建的话题恒不进来。 -->
     <section class="mi-card">
       <div class="sec-head">
         <h2>官方话题墙</h2>
-        <el-button size="small" text :loading="busy.topics" @click="loadTopics">重新加载</el-button>
+        <div class="sec-ops">
+          <el-button class="btn-create-topic" size="small" text @click="openCreate">创建话题</el-button>
+          <el-button size="small" text :loading="busy.topics" @click="loadTopics">重新加载</el-button>
+        </div>
       </div>
       <stage-notice v-if="codes.topics" :code="codes.topics" stage="2" api-name="GET /api/topics" />
       <el-empty v-else-if="!topicList.length && !busy.topics" description="暂无已过审话题" />
       <div v-else class="topics">
-        <div v-for="t in topicList" :key="t.id" class="topic">
+        <div v-for="t in topicList" :key="t.id" class="topic topic-link" @click="goTopic(t)">
           <div class="t-name"># {{ t.name }}</div>
           <div class="t-desc">{{ t.desc || '官方话题' }}</div>
           <div class="t-meta">
             <span>发帖 {{ t.postCnt || 0 }}</span>
             <span>关注 {{ t.followCnt || 0 }}</span>
             <span>热度 {{ fmtHot(t.hotScore) }}</span>
+            <span class="t-go">进入话题 →</span>
           </div>
         </div>
       </div>
-      <p class="hint">数据来自 topic 表（audit_status=APPROVED，按 hot_score 倒序）。看不到内容多半是数据库还没建。</p>
+      <p class="hint">数据来自 topic 表（audit_status=APPROVED 且 is_official=1，按 hot_score 倒序）。看不到内容多半是数据库还没建。</p>
+      <p class="hint">你自己建的话题不会出现在这面墙上 —— 这里只挂官方角标的那些。建好之后从话题详情页进，或者去搜索页按名字找它。</p>
     </section>
+
+    <!-- 创建话题（需求 FR1.7「用户可创建话题」+ FR4.5「创建需审核」）。入口挨着话题墙：
+         想开一个新圈子的人，此刻正好在挑圈子。刻意不做 maxlength 而是自己数码点 ——
+         后端 normalizeName 按 codePointCount 判超长，一个 emoji 算 1 个字，用 maxlength 会截错。 -->
+    <el-dialog v-model="create.open" title="创建新话题" width="440px" :close-on-click-modal="false">
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item label="话题名">
+          <el-input v-model="create.name" placeholder="例：#期末破防瞬间#" @input="onCreateInput" />
+          <p class="hint">{{ nameLine }}</p>
+        </el-form-item>
+        <el-form-item label="一句话简介（可以不填）">
+          <el-input v-model="create.desc" type="textarea" :rows="2" @input="onCreateInput" />
+          <p class="hint">{{ descLine }}</p>
+        </el-form-item>
+      </el-form>
+      <el-alert v-if="create.done" :type="create.done.tone" show-icon :closable="false" class="dlg-line"
+                :title="create.done.title">
+        <p class="dlg-body">{{ create.done.tip }}</p>
+        <p v-if="create.done.note" class="dlg-body">{{ create.done.note }}</p>
+        <el-button v-if="create.done.usable" size="small" type="primary" text @click="goCreated">现在就进去 →</el-button>
+      </el-alert>
+      <p v-else-if="create.error" class="hint dlg-line">{{ createErrorLine }}</p>
+      <template #footer>
+        <div class="dlg-foot">
+          <span class="hint">每人每天最多创建 {{ TOPIC_CREATE_PER_DAY }} 个（后端配额）</span>
+          <span class="dlg-btns">
+            <el-button size="small" @click="create.open = false">关闭</el-button>
+            <el-button class="btn-do-create" size="small" type="primary" :loading="create.busy" @click="doCreateTopic">提交</el-button>
+          </span>
+        </div>
+      </template>
+    </el-dialog>
 
     <section class="mi-card todo">
       <h2>后端尚未实现的接口（按排期）</h2>
@@ -129,12 +167,15 @@
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { topics, recommend, followingFeed } from '@/api/feed'
+import { createTopic, TOPIC_NAME_MAX, TOPIC_DESC_MAX, TOPIC_CREATE_PER_DAY, topicLength } from '@/api/topic'
 import { NOT_IMPLEMENTED_YET } from '@/api/auth'
 import { useFeedStore } from '@/stores/feed'
 import { useUserStore } from '@/stores/user'
 import { CODE } from '@/api/errorCode'
+import { fmtHot } from '@/utils/format'
 import PostCard from '@/components/PostCard.vue'
 import PostComposer from '@/components/PostComposer.vue'
 import { usePagedPosts } from '@/composables/usePagedPosts'
@@ -153,6 +194,9 @@ const SOURCES = [
   { value: 'following', label: '关注' }
 ]
 
+// 话题卡与创建回执都要跳详情页（T3.8）。广场这张页原来是纯展示页，没有任何跳转需求，
+// 所以 router 是这一批才引入的 —— 注意它必须在 useFeedStore 之前之后都无差别可用。
+const router = useRouter()
 const feed = useFeedStore()
 const user = useUserStore()
 const topicList = ref([])
@@ -161,6 +205,26 @@ const pending = NOT_IMPLEMENTED_YET
 const activeType = ref('')
 const busy = reactive({ topics: false, recommend: false })
 const codes = reactive({ topics: null, recommend: null })
+// 创建话题弹窗的状态。done 与 error 在每次敲字时清掉：留着一份旧回执，
+// 用户会以为「第二次提交的结果」就是屏幕上那一块，而它其实是上一次的。
+const create = reactive({ open: false, name: '', desc: '', busy: false, done: null, error: null })
+
+const nameLine = computed(() => '已输入 ' + topicLength(create.name) + ' / 上限 ' + TOPIC_NAME_MAX
+  + ' 字（一个表情算一个字，与后端同口径）；首尾空白与连续空格会被折叠，全站重名会被拒')
+const descLine = computed(() => '已输入 ' + topicLength(create.desc) + ' / 上限 ' + TOPIC_DESC_MAX + ' 字；话题页上只显示前几行')
+const createErrorLine = computed(() => {
+  const code = Number(create.error)
+  if (code === CODE.CONTENT_REJECTED) {
+    return '机审把这个话题拦下了：名字或简介里有平台不允许发布的内容。换个说法再来一次 —— 被拦下的这次不落库，也不占今天的创建额度。'
+  }
+  if (code === CODE.RATE_LIMITED) return '今天的创建额度用完了，上限 ' + TOPIC_CREATE_PER_DAY + ' 个。先逛逛已有的话题吧。'
+  if (code === CODE.PARAM_INVALID) {
+    return '后端没接受这次提交，具体原因见上面那条提示：多半是名字为空、超过 ' + TOPIC_NAME_MAX + ' 字，或者这个话题已经有人建过了。'
+  }
+  if (code === CODE.FORBIDDEN) return '账号正在禁言期：能逛、能点赞、能关注话题，但不能创建话题（需求 BR6：禁言夺的是「说」的权利）。'
+  return ''
+})
+
 const sentinel = ref(null)
 let observer = null
 
@@ -238,11 +302,6 @@ async function loadFollowingMore() {
   await folLoadMore()
 }
 
-function fmtHot(v) {
-  const n = Number(v)
-  return Number.isFinite(n) ? n.toFixed(1) : '-'
-}
-
 async function loadTopics() {
   busy.topics = true
   codes.topics = null
@@ -254,6 +313,64 @@ async function loadTopics() {
     topicList.value = []
   } finally {
     busy.topics = false
+  }
+}
+
+function openCreate() {
+  create.open = true
+  create.done = null
+  create.error = null
+}
+
+function onCreateInput() {
+  create.done = null
+  create.error = null
+}
+
+/** 话题卡与刚建成的话题都跳同一个落点（T3.8 详情页）。搜索页那张卡走的是同一命名路由，不各写一份路径字符串。 */
+function goTopic(t) {
+  if (!t || t.id === undefined || t.id === null) return
+  router.push({ name: 'topic-detail', params: { id: t.id } })
+}
+
+function goCreated() {
+  goTopic(create.done)
+}
+
+async function doCreateTopic() {
+  const name = create.name.trim()
+  const desc = create.desc.trim()
+  if (!name) { ElMessage.warning('话题名要写点什么才好记'); return }
+  if (topicLength(name) > TOPIC_NAME_MAX) { ElMessage.warning('话题名最长 ' + TOPIC_NAME_MAX + ' 字'); return }
+  if (topicLength(desc) > TOPIC_DESC_MAX) { ElMessage.warning('简介最长 ' + TOPIC_DESC_MAX + ' 字'); return }
+  create.busy = true
+  create.done = null
+  create.error = null
+  try {
+    const data = await createTopic({ name: name, desc: desc })
+    const usable = !!(data && data.usable)
+    create.done = {
+      id: data ? data.id : null,
+      name: (data && data.name) || name,
+      usable: usable,
+      tone: usable ? 'success' : 'info',
+      title: usable ? '# ' + ((data && data.name) || name) + ' 已创建，现在就能进去发帖' : '# ' + ((data && data.name) || name) + ' 已提交',
+      tip: (data && data.tip) || '',
+      // 🔴 这句必须跟着回执一起说：后端那句「通常很快」在阶段 3 是不成立的 ——
+      // 预审开关（FR8.6）默认开着，而 audit_task.target_type 里还没有 topic 这一档，
+      // 也就是今天没有任何通道能把一个待审话题放行。管理端属任务 6.1，所以任务 3.8 只能标 ◐。
+      note: usable ? '' : '但要说明白：阶段 3 还没有审核台，今天没有人能把这条待审话题放行 ——'
+        + '管理端属任务 6.1。它已经落库了，不是没建上，只是暂时进不去。'
+    }
+    create.name = ''
+    create.desc = ''
+    // 只有 APPROVED 才进这面墙，而自建话题在预审开着时必定不是 APPROVED：
+    // 所以「重新加载话题墙」多半看不到变化，这一点由上面那句 note 解释，不假装刷新成功了。
+    loadTopics()
+  } catch (e) {
+    create.error = e && e.code !== undefined && e.code !== null ? e.code : 'network'
+  } finally {
+    create.busy = false
   }
 }
 
@@ -361,6 +478,14 @@ h2 { margin: 0; font-size: 16px; color: var(--mi-mist); letter-spacing: 1px; }
 .t-name { font-weight: 700; color: var(--mi-primary); }
 .t-desc { font-size: 12px; color: var(--mi-text-dim); margin: 6px 0; min-height: 32px; }
 .t-meta { display: flex; gap: 12px; font-size: 12px; color: var(--mi-mist); }
+.sec-ops { display: flex; align-items: center; gap: 4px; }
+.topic-link { cursor: pointer; }
+.topic-link:hover { border-color: var(--mi-primary); }
+.t-go { margin-left: auto; font-size: 12px; color: var(--mi-mist); }
+.dlg-line { margin: 10px 0 0; line-height: 1.8; }
+.dlg-body { margin: 4px 0 0; font-size: 13px; line-height: 1.7; }
+.dlg-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dlg-btns { display: flex; gap: 6px; }
 .lines { margin: 0; padding-left: 20px; line-height: 2; font-size: 13px; }
 .todo h2 { margin-bottom: 8px; }
 </style>

@@ -84,10 +84,28 @@ export function usePagedPosts(fetcher, opts) {
     return load(true)
   }
 
+  /**
+   * 不请求后端就把列表清干净：地址栏编号从「能读」变成「读不了」时用
+   * （UserHomeView 与 TopicDetailView 的 watch 各有一个调用点）。
+   * 为什么不能直接 reload()：reload 会带着空编号去打接口，既换回一个 404，
+   * 也违背「前端先判一次、不发注定失败的请求」那条口径。
+   * 这里顺手把 seq 推进一格、并把 loading 落回 false：否则还在路上的那一次响应
+   * 回来时会把已经清空的列表又填满上一个人的帖子，而「刷新」那颗按钮会一直转。
+   */
+  function clear() {
+    seq += 1
+    cursor = null
+    items.value = []
+    total.value = -1
+    hasMore.value = true
+    errorCode.value = null
+    loading.value = false
+  }
+
   function loadMore() {
     if (!hasMore.value) return Promise.resolve(false)
     return load(false)
   }
 
-  return { items, loading, hasMore, total, errorCode, reload, loadMore }
+  return { items, loading, hasMore, total, errorCode, reload, loadMore, clear }
 }

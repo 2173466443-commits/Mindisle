@@ -40,6 +40,8 @@ public class MindisleProperties {
     private Captcha captcha = new Captcha();
     /** 站内搜索（任务 T3.9 · 需求 FR4.8）。 */
     private Search search = new Search();
+    /** 话题创建与关注（任务 T3.8 · 手册 §6.1 行 3.8）。 */
+    private Topic topic = new Topic();
 
     @Data
     public static class Cache {
@@ -217,6 +219,50 @@ public class MindisleProperties {
          * 最需要真实验证的链路会被永远挡在门外（阶段 2/3 的 200 响应体欠账即由此而来）。</p>
          */
         private boolean enabled = true;
+    }
+
+    /**
+     * 话题域约束（任务 3.8 · 手册 §6.1 行 3.8「创建话题需 audit_status=待审（防刷）」）。
+     *
+     * <p>{@code maxNameChars} / {@code maxDescChars} 与 DDL 的列宽逐字对齐
+     * （{@code sql/04_community.sql} 表 15：name VARCHAR(32) / desc_txt VARCHAR(200)）。
+     * 两处必须同时改：只改配置，超长会在 INSERT 处被 MySQL 判 1406 变成 90004；
+     * 只改列宽，配置就成了一个骗人的上限。报告这两个数字前先在 {@code SHOW CREATE TABLE} 上核对。</p>
+     *
+     * <p>{@code maxCreatePerDay} 是手册那句「防刷」的唯一落地手段：阶段 3 没有管理员审核台
+     * （T6.1），一个脚本号一秒钟就能造出几百个待审话题把话题墙淹掉。取 5 的理由：
+     * 一个正常用户一天内想开的新圈子很少超过这个数，而它又足够让「一天建五个不同话题
+     * 试探敏感词库」变得不划算。这是配额，不是产品主张，改配置不改代码。</p>
+     */
+    @Data
+    public static class Topic {
+        /** 话题名最长字符数，与 topic.name 的 VARCHAR(32) 同宽。 */
+        private int maxNameChars = 32;
+        /** 话题简介最长字符数，与 topic.desc_txt 的 VARCHAR(200) 同宽。 */
+        private int maxDescChars = 200;
+        /** 单账号每日可创建话题数上限（手册 §6.1 行 3.8「防刷」）。 */
+        private int maxCreatePerDay = 5;
+        /**
+         * 话题预审开关 —— <b>需求 FR8.6「系统配置：话题预审开关」就是这一行</b>。
+         *
+         * <p>默认 true 是照抄 FR4.5 的字面要求（「话题创建需管理员审核（防刷屏）」）：
+         * 开 = 用户新建的话题一律落 {@code audit_status='PENDING'}，机审结论只是
+         * 附在日志里的一条参考，不改变结果；关 = 走机审直通，BLOCK 拒、REVIEW 转待审、
+         * 干净就直接 APPROVED。</p>
+         *
+         * <p><b>为什么阶段 3 只敢默认 true 而不敢做「关掉就全自动」的第二档</b>：
+         * {@code audit_task.target_type} 的 ENUM 里没有 {@code topic}（{@code sql/04_community.sql} 表 20），
+         * 也就是说今天<b>没有一条通道能把一个 PENDING 话题放行成 APPROVED</b> —— 管理端在 T6.1。
+         * 于是默认值下「用户新建话题」在阶段 3 的实际结局是停在待审，
+         * 这也是任务 3.8 只能标 ◐ 而不是 ☑ 的唯一原因（详见 docs/dev-log.md 阶段 3（续 9））。
+         * 把开关默认打开而不是偷偷做「机审直通」，是因为后者会让人以为
+         * 「审核」这一环已经存在了 —— 而它还不存在。</p>
+         *
+         * <p>这个配置可以按环境覆盖：本地开发与冒烟想验证「新建话题立刻能挂帖」这条链路，
+         * 设 {@code MINDISLE_TOPIC_PRE_REVIEW=false} 即可，不必改代码；
+         * 但那条链路在生产语义下不是默认行为，所以文档与取证都要注明用的是哪个值。</p>
+         */
+        private boolean requirePreReview = true;
     }
 
     @Data

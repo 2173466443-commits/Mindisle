@@ -61,3 +61,16 @@ export function fmtCount(n) {
   if (v < 10000) return String(v)
   return (v / 10000).toFixed(1).replace(/\.0$/, '') + '万'
 }
+
+/**
+ * 话题热度（topic.hot_score）的显示口径：一位小数，拿不到数就画「-」。
+ * 为什么从「各页私有」提成共享工具：广场与搜索页原先各有一份一模一样的实现，
+ * 话题详情页（T3.8）照抄模板里那一行时漏抄了函数本体，于是整个组件在渲染阶段抛
+ * TypeError: _ctx.fmtHot is not a function —— 头图和帖流一起消失，界面只剩一片空白。
+ * 一个「少一个 import」级别的错，症状却是白屏，只有真跑一遍 DOM 才看得见。
+ */
+export function fmtHot(v) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n.toFixed(1) : '-'
+}
+
