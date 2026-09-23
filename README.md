@@ -196,3 +196,5 @@ $env:SMOKE_PENDING_TOPIC_ID = "21"; node docs\smoke.mjs
 5. **API Key 只进 `.env` / 环境变量**，不进仓库、日志、截图；`.gitignore` 先于第一行代码。
 6. **所有缓存与工具落 E 盘**（`_cache`、`_tools`），禁止悄悄写 C 盘。
 7. 项目结束时更新 `E:\codex workspace\全局复利与踩坑日志.md`。
+#   M i n d i s l e  
+ 
