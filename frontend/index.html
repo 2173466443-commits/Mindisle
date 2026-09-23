@@ -2,6 +2,10 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <!-- 不写这一行，浏览器每次进页面都会自己发一个 GET /favicon.ico，开发服务器回 404，
+         而 DevTools 控制台把它记成一条红字 —— Gate3 第 4 条要求「无 console 红字」，
+         那就把图标真的提供出来，而不是在取证脚本里给它开后门。 -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>心屿 · 校园心理陪伴社区</title>
   </head>

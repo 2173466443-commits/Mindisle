@@ -89,7 +89,7 @@
         <el-button size="small" text :loading="busy.recommend" @click="loadRecommend">刷新</el-button>
       </div>
       <p class="formula">排序目标 emotion_match(u, i) = 1 − | valence_now(u) − comfort_valence(i) |，仅在当前心情为负向时启用（需求 §1.5 创新点 2）。</p>
-      <stage-notice v-if="codes.recommend" :code="codes.recommend" stage="4" api-name="GET /api/feed/recommend" />
+      <stage-notice v-if="codes.recommend" :code="codes.recommend" :stage="RECOMMEND_STAGE" api-name="GET /api/feed/recommend" />
       <el-empty v-else-if="!recList.length" description="暂无推荐结果（召回与加权分别排在阶段 3 / 阶段 4）" />
       <ul v-else class="lines">
         <li v-for="(r, i) in recList" :key="i">{{ r.title || r.name || JSON.stringify(r) }}</li>
@@ -204,7 +204,17 @@ const recList = ref([])
 const pending = NOT_IMPLEMENTED_YET
 const activeType = ref('')
 const busy = reactive({ topics: false, recommend: false })
-const codes = reactive({ topics: null, recommend: null })
+
+/* 推荐流的两件事，分开看：
+   1) 后端 GET /api/feed/recommend 在阶段 6/7 之前**恒返 90001 / HTTP 501**（这是刻意的诚实占位，不用假数据糊弄演示）；
+   2) 前端过去在 onMounted 里就调它一次，为一个**已经知道答案的问题**发请求，代价是每次进广场
+      DevTools 都多一条红色 501 —— Gate3 第 4 条要「无 console 红字」，而这条红字既不是故障也没带来新信息。
+   所以：占位说明改成由 RECOMMEND_LANDED 这个开关决定的静态状态，页面照常把「为什么这里没内容」讲清楚；
+   「刷新」按钮仍然真调这个接口，后端哪天接上，点一下就出真数据，不需要改回前端。
+   协同过滤落地时把 RECOMMEND_LANDED 置 true（并把 RECOMMEND_STAGE 里的「未实现」文案改掉）。 */
+const RECOMMEND_LANDED = false
+const RECOMMEND_STAGE = '6/7'
+const codes = reactive({ topics: null, recommend: RECOMMEND_LANDED ? null : 90001 })
 // 创建话题弹窗的状态。done 与 error 在每次敲字时清掉：留着一份旧回执，
 // 用户会以为「第二次提交的结果」就是屏幕上那一块，而它其实是上一次的。
 const create = reactive({ open: false, name: '', desc: '', busy: false, done: null, error: null })
@@ -446,7 +456,8 @@ function bindFollowingObserver() {
 
 onMounted(async () => {
   loadTopics()
-  loadRecommend()
+  // 见上面 RECOMMEND_LANDED 的注释：没落地就别去问，问了只会留一条红字
+  if (RECOMMEND_LANDED) loadRecommend()
   if (user.isLogged) {
     await reload()
     await nextTick()

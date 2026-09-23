@@ -1,0 +1,237 @@
+{
+  "at": "2026-09-23T10:34:11.455Z",
+  "base": "http://127.0.0.1:5173",
+  "chrome": "C:/Users/Drbrain/AppData/Local/Google/Chrome/Application/chrome.exe",
+  "browser": "150.0.7871.115",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "mobile": {
+    "width": 390,
+    "height": 844
+  },
+  "account": "smoke_runner",
+  "accountId": 8,
+  "samples": {
+    "postTotal": 208,
+    "topicId": 1,
+    "postId": 308,
+    "authorId": 214
+  },
+  "leakCount": 0,
+  "errorCount": 0,
+  "checkFailCount": 0,
+  "shots": [
+    {
+      "file": "01-U2登录页-未登录.png",
+      "url": "/login",
+      "desc": "U2 登录页（深色主题下的表单与危机入口），无 token",
+      "chars": 136,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "02-路由守卫-未登录进广场被弹回登录.png",
+      "url": "/feed",
+      "desc": "未登录访问 /feed，守卫应换成登录页并把 redirect 带上",
+      "chars": 136,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "03-U3广场-推荐流.png",
+      "url": "/feed",
+      "desc": "U3 广场：发布器紧凑形态 + 来源切换 + 类型 Tab + 信息流",
+      "chars": 3301,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "03b-U3广场-整页.png",
+      "url": "/feed",
+      "desc": "U3 广场整页（含无限滚动已加载的全部内容，验证长页不破版）",
+      "chars": 3301,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "04-U3-b关注流.png",
+      "url": "/feed",
+      "desc": "切到「关注」来源：应换成关注流且地址栏带 ?type=follow",
+      "chars": 1534,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "05-U6话题详情.png",
+      "url": "/topic/1",
+      "desc": "U6 话题圈：头图/发帖数/关注按钮 + 该话题的公开帖流",
+      "chars": 2104,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "06-U4帖子详情-评论区.png",
+      "url": "/post/308",
+      "desc": "U4 详情：正文 + 评论树 + 互动条",
+      "chars": 1102,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "07-U4详情-举报弹层.png",
+      "url": "/post/308",
+      "desc": "举报对话框（FR8.5 先审后发的用户侧入口），验弹层深色一致 + 理由单选左对齐",
+      "chars": 1342,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "08-U5发布器.png",
+      "url": "/publish",
+      "desc": "U5 发布器全形态：类型/可见性/话题/情绪与树洞提示",
+      "chars": 554,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "09-U5发布器-话题预选.png",
+      "url": "/publish?topic=1",
+      "desc": "从话题页跳来：?topic= 预填应带进表单（闭环那条）",
+      "chars": 574,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "10-搜索-帖子.png",
+      "url": "/search?q=%E7%84%A6%E8%99%91",
+      "desc": "站内搜索帖子通道（LIKE 路径；全文通道未开）",
+      "chars": 524,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "11-搜索-话题.png",
+      "url": "/search?m=topic&q=%E7%84%A6%E8%99%91",
+      "desc": "站内搜索话题通道",
+      "chars": 610,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "12-搜索-屿友.png",
+      "url": "/search?m=user&q=%E5%86%92%E7%83%9F",
+      "desc": "站内搜索屿友通道",
+      "chars": 985,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "13-搜索-空态.png",
+      "url": "/search?q=zzz%E8%BF%99%E6%9D%A1%E4%B8%80%E5%AE%9A%E6%90%9C%E4%B8%8D%E5%88%B0zzz",
+      "desc": "空态文案：搜不到不等于不存在（全文通道未开的诚实提示）",
+      "chars": 524,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "14-U12我的帖子.png",
+      "url": "/me/posts",
+      "desc": "U12 我的：私密/待审/未通过三态筛选",
+      "chars": 478,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "15-U11屿友主页.png",
+      "url": "/user/214",
+      "desc": "U11 他人主页：公开帖列表 + 关注按钮",
+      "chars": 838,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "16-顶栏通知铃铛.png",
+      "url": "/feed",
+      "desc": "顶栏铃铛弹层（T3.11-b 站内通知），验 popover 深色",
+      "chars": 3301,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "17-危机求助页.png",
+      "url": "/help",
+      "desc": "免登录可达的危机求助页（FR10：12356 转介）",
+      "chars": 207,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "18-404页.png",
+      "url": "/no-such-page-xyz",
+      "desc": "NotFound：直接敲一个不存在的地址不该白屏",
+      "chars": 22,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "19-移动端-广场.png",
+      "url": "/feed",
+      "desc": "390x844 手机视口下的广场（响应式基线，不承诺移动端产品）",
+      "chars": 3301,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "20-移动端-话题详情.png",
+      "url": "/topic/1",
+      "desc": "390x844 话题详情",
+      "chars": 2104,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errors": 0,
+      "pass": true
+    }
+  ]
+}

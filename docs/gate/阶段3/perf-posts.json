@@ -1,0 +1,115 @@
+{
+  "started": "Wed Sep 23 2026 18:26:45 GMT+0800 (中国标准时间)",
+  "base": "http://127.0.0.1:8080",
+  "proxy": "http://127.0.0.1:5173",
+  "rateLimitPerMinute": 60,
+  "budgetPerWindow": 40,
+  "warm": 3,
+  "thresholdMs": 500,
+  "mainP95": 33,
+  "worstP95": 57,
+  "dbTotal": 508,
+  "pass": true,
+  "scenes": [
+    {
+      "scene": "S1 广场首屏 page=0 size=20",
+      "samples": 60,
+      "throttled": 0,
+      "total": 508,
+      "pageSize": 20,
+      "min": 10,
+      "p50": 11,
+      "p95": 33,
+      "p99": 55,
+      "max": 55,
+      "avg": 14,
+      "avgBytes": 7145,
+      "remainSeen": [
+        45,
+        44,
+        43
+      ],
+      "feed": true
+    },
+    {
+      "scene": "S2 广场深翻 page=10 size=20",
+      "samples": 40,
+      "throttled": 0,
+      "total": 508,
+      "pageSize": 20,
+      "min": 10,
+      "p50": 11,
+      "p95": 12,
+      "p99": 14,
+      "max": 14,
+      "avg": 11,
+      "avgBytes": 7771,
+      "remainSeen": [
+        32,
+        31,
+        30
+      ],
+      "feed": true
+    },
+    {
+      "scene": "S3 游标翻页 size=50 beforeId",
+      "samples": 40,
+      "throttled": 0,
+      "total": -1,
+      "pageSize": 50,
+      "min": 11,
+      "p50": 20,
+      "p95": 57,
+      "p99": 63,
+      "max": 63,
+      "avg": 27,
+      "avgBytes": 17862,
+      "remainSeen": [
+        29,
+        28,
+        27
+      ],
+      "feed": true
+    },
+    {
+      "scene": "S4 话题流 topics/1/posts",
+      "samples": 40,
+      "throttled": 0,
+      "total": 43,
+      "pageSize": 20,
+      "min": 11,
+      "p50": 12,
+      "p95": 57,
+      "p99": 59,
+      "max": 59,
+      "avg": 21,
+      "avgBytes": 7441,
+      "remainSeen": [
+        26,
+        25,
+        24
+      ],
+      "feed": false
+    },
+    {
+      "scene": "S5 对照：走 Vite 5173 代理",
+      "samples": 40,
+      "throttled": 0,
+      "total": 508,
+      "pageSize": 20,
+      "min": 12,
+      "p50": 21,
+      "p95": 44,
+      "p99": 58,
+      "max": 58,
+      "avg": 24,
+      "avgBytes": 7145,
+      "remainSeen": [
+        23,
+        22,
+        21
+      ],
+      "feed": true
+    }
+  ]
+}

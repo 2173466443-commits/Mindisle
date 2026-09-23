@@ -1,5 +1,18 @@
-/* 心屿深色治愈主题（制作步骤文档 §5.8 第 6 条）
-   只覆盖 Element Plus 的 CSS 变量，不 fork 组件库样式。 */
+/* 心屿深色治愈主题（制作步骤文档 §5.8 第 6 条 · 需求 Q9「午夜蓝 #0E1626 + 暖珊瑚 #F0876B」）
+   全站只有这一套深色，没有浅色开关 —— 这是产品决策，不是没做完。 */
+
+/* 【2026-09-23 真浏览器取证勘误：为什么 EP 的变量覆盖必须写到 html.dark:root 上】
+   上一版把 Element Plus 的令牌覆盖写在 :root 里，看起来天经地义（它排在 main.js 里 EP 样式的后面）。
+   但 vite.config.js 用了 unplugin-vue-components + ElementPlusResolver：每个用到的组件还会各自
+   import 一份 EP 基础样式，其中那个 :root 令牌块会在 theme.css 之后再注入一次。实测 <style> 注入顺序：
+     0 = EP 基础 :root 令牌块 / 1 = 本文件 / 2 = 第二份 EP 基础 :root 令牌块
+   同特异度后来者胜 —— 于是 --el-color-primary 又变回 #409eff、--el-fill-color-blank 变回 #fff，
+   输入框、文本域、单选按钮组、对话框、通知弹层全是白底，主按钮是 EP 默认蓝，而这一切在 jsdom 里
+   永远看不出来（它不加载 EP 样式，也不跑 CSS 级联）。
+   结论：跟自动导入拼注入顺序是拼不赢的，要拼特异度。html.dark:root 的特异度是 (0,2,1)，
+   恒高于 EP 的 :root(0,1,0) 和它自带的 html.dark(0,1,1)，无论谁先注入都是我们这套值生效。 */
+
+/* ---- 1 品牌令牌：只有心屿自己用，跟组件库无关，放 :root 就够 ---- */
 :root {
   --mi-bg: #0E1626;
   --mi-card: #16203A;
@@ -17,23 +30,48 @@
   --mi-fear: #8E6BAF;
   --mi-disgust: #7A8B3C;
   --mi-neutral: #8A94A6;
+}
 
-  /* Element Plus 变量覆盖 */
+/* ---- 2 Element Plus 深色令牌 ----
+   :root 那条是「html 上万一没挂上 dark 类」的兜底，真正保证赢的是 html.dark:root 那条；
+   选择器列表里任一条命中即应用同一份声明，所以两处都拿到同一套值。
+   深色模式下 light-N 是「往背景色里混」（越 light 越暗），dark-2 反而更亮 —— 与 EP 官方 dark 同一约定，
+   否则 hover 出来的浅珊瑚会直接把白底请回来。 */
+:root,
+html.dark:root {
   --el-color-primary: #F0876B;
-  --el-color-primary-light-3: #f5a692;
-  --el-color-primary-light-5: #f8bfaf;
-  --el-color-primary-light-7: #fad8cd;
-  --el-color-primary-light-8: #fce5de;
-  --el-color-primary-light-9: #fef1ed;
-  --el-color-primary-dark-2: #c06c56;
+  --el-color-primary-light-3: #AC6556;
+  --el-color-primary-light-5: #7F4F49;
+  --el-color-primary-light-7: #52383B;
+  --el-color-primary-light-8: #3B2D34;
+  --el-color-primary-light-9: #25212D;
+  --el-color-primary-dark-2: #F39F89;
+
   --el-bg-color: #16203A;
-  --el-bg-color-overlay: #1b2745;
+  --el-bg-color-page: #0E1626;
+  --el-bg-color-overlay: #1B2745;
+
   --el-text-color-primary: #E8EEF7;
-  --el-text-color-regular: #cbd6e6;
+  --el-text-color-regular: #CBD6E6;
   --el-text-color-secondary: #93A1B8;
-  --el-border-color: #24304d;
-  --el-border-color-light: #24304d;
+  --el-text-color-placeholder: #6D7F99;
+  --el-text-color-disabled: #5A6A80;
+
+  --el-border-color: #24304D;
+  --el-border-color-light: #24304D;
+  --el-border-color-lighter: #1F2A44;
+  --el-border-color-extra-light: #1B2540;
+  --el-border-color-dark: #2C3B5E;
+  --el-border-color-darker: #33436B;
+
+  --el-fill-color: #1C2942;
+  --el-fill-color-light: #1A2540;
+  --el-fill-color-lighter: #18223C;
+  --el-fill-color-extra-light: #172038;
+  --el-fill-color-dark: #21304C;
+  --el-fill-color-darker: #263754;
   --el-fill-color-blank: #16203A;
+
   --el-mask-color: rgba(14, 22, 38, 0.75);
 }
 

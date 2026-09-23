@@ -374,7 +374,11 @@ async function submitReport() {
 .acts .act-report:hover { color: var(--mi-primary); }
 .report-receipt { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .dlg-note { margin: 0 0 12px; font-size: 12px; line-height: 1.8; color: var(--mi-text-dim); }
-.reasons { display: flex; flex-direction: column; gap: 2px; }
+/* 2026-09-23 真浏览器截图（docs/gate/阶段3/07）抓出来的布局 bug：
+   EP 的 .el-radio-group 自带 align-items:center。下面这条把它的排版方向改成 column 之后,
+   交叉轴就变成了水平轴 —— 于是五个举报理由被整体推到弹层中间，单选圈和文字之间空出一大截。
+   jsdom 不跑布局，这一类问题只有真量一次 getBoundingClientRect 才现形，故显式写回 flex-start。 */
+.reasons { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .reason { height: auto; margin-right: 0; align-items: flex-start; }
 .reason-desc { margin-left: 8px; font-size: 12px; color: var(--mi-text-dim); }
 .reason-warn { margin-top: 10px; }
