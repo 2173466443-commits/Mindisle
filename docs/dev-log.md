@@ -813,7 +813,7 @@ D_表行数  user 43 / post 111 / post_like 16 / user_follow 0
 - **`post/CommentService.java`(586，本轮主产出)**：`comment()` 写侧七步 = 取帖并判可见（不可见 **404/30001**，与详情同口径，评论接口不是存在性枚举通道）→ 账号状态与 BR4 当日评论配额 → 内容合规（换行归一 + trim + 空内容 400/10001 + **码点**长度 ≤1000）→ `findParent` 定位父级 → 3.2 机审 → 匿名遮联系方式与马甲分配 → 落库 + `refreshCommentCnt` + 危机工单；`list()` 读侧 = 一级评论正序翻页（每棵子树预览 `REPLY_PREVIEW=3` 条、带回 `replyTotal`）或 `rootId` 一次展开整棵（`MAX_SUBTREE_REPLIES=500` 封顶）。静态方法 `isVisibleTo`/`toItem`/`auditTipOf` 全部**包级可见**，让 43 例单测不打桩 Spring 就能直接钉判据。
 - `post/CommentStoreAdapter.java`(156)：`CommentStore` 端口的 MyBatis 实现，业务类零 Spring 依赖可裸测（沿用 T3.5/T3.6 的端口—适配器分工）。
 - 4 个 DTO：`CommentCreateRequest`(16)、`CommentCreateView`(15，含 `comment`/`tip`/`hotline`)、`CommentItem`(41)、`CommentThread`(17)。
-- 端点收进 `web/PostController.java`(128 → **187**)：`POST /api/posts/{id:\d+}/comments`、`GET /api/posts/{id:\d+}/comments`，**恒返 200**（被机审拦下、转人工、遮罩都是「请求成功、内容被处置」），只有真入参错误走 4xx。**为什么不新建 `CommentController`**：可见性判据要「先问帖再问这条评论」，另起一类就是把判据复制第二份；且 Swagger `@Tag` 分组数被 `docs/openapi-check` 的断言写死，多一个分组会打挂既有校验。
+- 端点收进 `web/PostController.java`(128 → **187**)：`POST /api/posts/{id:\d+}/comments`、`GET /api/posts/{id:\d+}/comments`，**恒返 200**（被机审拦下、转人工、遮罩都是「请求成功、内容被处置」），只有真入参错误走 4xx。**为什么不新建 `CommentController`**：可见性判据要「先问帖再问这条评论」，另起一类就是把判据复制第二份；且 Swagger `@Tag` 分组数被 `docs/openapi-check` 的断言写死，多一个分组会打挂既有校验。**【v1.2.1 订正】**后半句是**假事实**：`git grep 'openapi-check' HEAD` 只命中 4 处、全部是自我引用（本手册 L844 与 L1764、本行、`PostController` 类注释），`docs/` 下**没有这个脚本**，`docs/smoke.mjs` 也不校验 `/v3/api-docs`；本轮把 `OpenApiConfig` 的 @Tag 分组从 7 加到 **8**，没有任何校验被打挂。**结论不变**（仍然不新建 `CommentController`），但成立的理由只剩前半句那一条「可见性判据不复制第二份」。工作区里的源码注释（`OpenApiConfig.java` L20、`PostController.java` L61–L63）本轮已改对，历史原文不改写。
 - 复用而非抄写：`post/PostService.java`(625 → **638**) 把组工单抽成 `static newTicket(userId, sourceType, sourceId, ...)` 并暴露 `tipContactMasked()`；`mapper/PostMapper.java`(84 → **99**) 加 `refreshCommentCnt`；`config/MindisleProperties.java` 加 `mindisle.post.max-comment-chars = 1000`（与 DDL `VARCHAR(1000)` 同宽）。
 
 ### 三条设计口径（写下来是因为它们都「反直觉一次」）
@@ -874,3 +874,74 @@ D_表行数  user 43 / post 111 / post_like 16 / user_follow 0
 - **README 首稿把 `comment_cnt` 的机制写成了「`comment_cnt = comment_cnt + 1` 库内原子累加」，这是错的**。真实现 = `PostMapper.refreshCommentCnt`（**L53–L56**）的 `UPDATE post SET comment_cnt = (SELECT COUNT(*) FROM comment WHERE post_id = post.id AND status = 'PUBLISHED' AND deleted = 0) WHERE id = #{id}`，即**按真相表重算覆盖写**；调用链是 `CommentService`(L218) → 端口 `refreshPostCommentCnt` → `CommentStoreAdapter`(L74–L77)。源码注释原文就是「漂移在结构上不可能发生，而不是『+1 再定期回写』」。**教训：机制描述和数字一样要回源码读一遍，「记得大概」在文档里会产生和代码相反的事实。**
 - 手册 `制作步骤文档.md` 的行数：HEAD 1744 → 本轮回写后 1765 → 再补 §14 第 36 条（行数口径与机制描述必须现量现读）后**终值 1766**；README 与手册目录里的 §14 计数同步为 **36 条**（目录行原本还写着「30 条」，属第二个滞后值，一并改）。
 - `docs/smoke.mjs` 第 16 步打印的「跑完回查 SQL」里 `alert_ticket` 用了 `risk_level` —— 那是 `chat_risk_alert` 的列名，照抄必报 `Unknown column`。已改成 **`level`, `risk_score`, `sla_at`**。**注意：本次只改了脚本里的提示字符串、未复跑冒烟**（冒烟的既有 137 项 / 127 断言 / 0 失败 仍以 `smoke_t37c.txt` **L139** 为准，字符串不参与断言、不影响退出码，但下一次复跑前别把它当成新证据）。
+
+## 2026-09-21 阶段 3（续 7）—— T3.11 举报 + T3.11-b 站内通知：第一次「点着测」，也第一次被自己的近似谓词骗了一下
+
+### 本轮挑这件事的理由
+
+- T3.6 与 T3.7 之后，社区主链上只剩两件事没闭环：**举报**是全站唯一还没有写入口的写路径，**互动通知**是「赞 / 评论 / 关注落库之后没有任何人知道」。§6.4 Gate3 的判定项里「点了有反馈」是唯一还开着的那一格。
+- `notify_message` 是阶段 2 `sql/08_config.sql` 里的第 30 张表，本轮**第一次有写入方** —— 表已建、判据已定、只差代码，性价比最高。
+- 第三个理由是方法层的：上一轮 dev-log 明明白白写白过「探针这一轮**仍只 GET**，一颗写按钮都没点过」。本轮就去还这笔账：让 jsdom 探针第一次真的点写按钮，把「界面画得对」和「点下去真的写对」两段证据接起来。
+
+### 交付物：后端（举报 · T3.11 前半）
+
+- **第 32 张物理表 `content_report`**（`sql/12_report.sql` 65 行）：`uk_reporter_target(reporter_id, target_type, target_id)` 把「一人一条」写进库里而不是 Java 里 —— 这不是防重复提交的技巧，而是一条产品口径（重复举报不叠加权重，否则一个人对着不喜欢的人连点二十次就能凭空造出二十个「被举报次数」）。`docs/init-db.ps1`(168 → **169**) 的文件清单加这一份、base table 断言 31 → **32**；2026-09-23 root 直连复核 `base_tables=32`。
+- `entity/ContentReport`(84) + `entity/AuditTask`(83) + `ContentReportMapper`(47) + `AuditTaskMapper`(66) + 2 个 DTO（`ReportRequest`20 / `ReportView`24）。`audit_task` 是阶段 2 的第 25 张表，`git grep AuditTask HEAD` 在 Java 侧**零命中** —— 本轮它第一次有了实体与写入方（FR4.7「举报即刻生成待审任务」）。
+- **`post/ReportService.java`(477，本轮主产出)** + `post/ReportStoreAdapter`(111) + **`ReportServiceTest`(730 行 / 32 例)**。一次举报只做四件事：落一行 `content_report` → 按真相表重算 `post.report_cnt` → 保证这条内容有一张待审 `audit_task`（已有则只在风险更高时升优先级）→ 举报**人数**达阈值即转 `HUMAN_REVIEW`。举报**不**下架内容、也不改内容本身 —— 「举报成立」是一个需要人来下的结论（需求 §7.2 把处置权限给了管理员）。
+- 类住在 `com.mindisle.post` 而不是 `com.mindisle.audit`（**推翻了解决方案文档上一版的包归属**）：它必须复用三条包级可见的既有判据 —— `PostQueryService.visibleTo`、`PostService` 的状态常量、「不可见一律 404/30001 绝不 403」。挪进 audit 包只有两种结局：把那三样改成 public（等于把内容状态机的访问控制权交出去），或者在举报里抄第二份可见性判据（等于制造第二条判据）。
+- 端点 `POST /api/posts/{id:\d+}/report` 收进既有 `web/PostController.java`(187 → **233**)；`config/OpenApiConfig.java`(70 → **82**) 加第 8 个 @Tag 分组 —— 顺带证伪了上一轮写在手册里的那句「分组数被 `docs/openapi-check` 断言写死」（本轮抓出的第一条假事实，订正见手册 §6.1 行 3.7 与本日志上一条目末尾的 v1.2.1 订正）。
+- `config/MindisleProperties.java`(197 → **219**) + `application.yml`(159 → **164**) 新增 `mindisle.report.*` 四项：`auto-review-threshold=3`（FR4.4 那个从阶段 2 就占着 `post.report_cnt` 这一列、却一直没落地方的阈值）、`max-description-chars=200`（列宽 500 留的是余量，**这一项才是产品口径**）、`max-evidence-images=3`、`sla-hours=24`（非危机举报的处理时限；危机类读 crisis 的 L2/L3 SLA，不读这一项）。需求 NFR10「阈值不写死」第一次有了具体调用方。
+- `mapper/PostMapper.java`(99 → **132**) 加 `refreshReportCnt`：与 `like_cnt` / `comment_cnt` 同法，子查询按真相表重算覆盖写。**为什么不复用 `POST /posts/{id}/actions`**（需求 §9.1 原本把举报并进那个端点，本任务改口并把理由写进类注释）：举报自带 reason / 描述 / 证据三段载荷，还要写自己的真相表与工单。
+- `self-harm` 这一类只回 `hotline=12356` 与求助话术，**不抬等级、不转人工、不建危机单**：发帖建单的判据是「这段话是他自己写的」，而举报是针对别人内容的单方面主观判断 —— 自动开一张 30 分钟时限的工单，等于把「用举报骚扰同学、顺手消耗干预资源」的成本降到一次点击（需求 §18.3 要的恰恰是别让资源被假的挤掉）。
+### 交付物：后端（站内通知 · T3.11-b）
+
+- 没有建新表。`entity/NotifyMessage`(80) + `NotifyMessageMapper`(98) + **`notify/NotifyService.java`(331)**（内含 `NotifyStore` 端口 L78、`PushHook` 接口 L106）+ `NotifyStoreAdapter`(60) + `LoggingPushHook`(31) + 4 个 DTO（`NotifyItem`24 / `NotifyPage`19 / `MarkReadRequest`16 / `MarkReadView`15）+ **`web/NotificationController.java`(91)**：`GET /api/notifications`（游标倒序翻页，**每页都带回 `unreadCount`**，所以前端不必再单独开一个未读接口）与 `POST /api/notifications/read`（`{ids:[…]}` 或 `{all:true}` 二选一，两个都不给是 400/10001 而不是「当成全部已读」）。测试侧 **`NotifyServiceTest`(410 行 / 23 例)** + `RecordingNotifyService`(124，记录型桩)。
+- 三个写入调用点：`CommentService`(586 → **631**)、`PostInteractionService`(175 → **193**)、`RelationshipService`(175 → **187**)。本轮只做 like / comment（含 reply）/ follow 三类事件，DDL 里那八类的其余五类（私信 / 审核 / 危机 / 报告 / 系统）仍只有表结构。
+- 未读数用**覆盖索引上的 `COUNT(*)`**（`NotifyStore.countUnread`），没有引入 Redis Hash。取舍记录在案：这张表按用户增长、单用户未读量有上限，先证明「够用」再谈缓存；如果将来「一键已读」变成高频写，这条 COUNT 会先变成瓶颈。
+- 三条**刻意**的取舍（都写进类注释，不藏）：① 幂等靠「先查后插 + 文案全等」（`shouldSkip` 比到 title 与 content）而**不是唯一索引** —— 本表没有 `actor_user_id` 列，能当幂等键的四列 `(user_id, type, ref_type, ref_id)` 会把「A 赞了这帖」和「B 赞了这帖」判成同一件事，那是两条都该留的通知；② **异常不吞** —— 写通知与业务写在同一个 `@Transactional` 里，插入失败会让点赞一起回滚，因为「点赞成功、通知丢了」是**静默**故障、没有任何地方能补，真正解耦的做法是 outbox（阶段 5 与 WebSocket 一起做，本阶段不假装做过）；③ **取消赞不撤回通知** —— 同样缺 actor 列，只能按文案找，那会把别人的同名通知一起标掉。
+- `PushHook` 就是手册那行要求的「预留推送口」，目前唯一的实现只打一行 debug 日志；阶段 5 T5.8 换成本类之外的 STOMP 实现即可，**业务服务与写链路一行都不用改**。本轮没有接 WebSocket，所以红点的实时性 = 30 秒心跳，不是推送。
+- 举报本轮**不写**通知：回执是即时的（`ReportView.tip` 已经把话说完），而「你的举报被采纳了」要等 T6.1 的处置结论，那时才写 `type=report`；现在写一条 `status=PENDING` 的通知等于把「已提交」说两遍。
+
+### 交付物：前端
+
+- `api/post.js`(79 → **106**)：`reportPost`（**刻意不 silent** —— 举报的失败原因恰好就是界面上该说的那句话）+ `POST_REPORT_REASONS` 六类（与后端 `ReportService.REASONS` 的键与顺序**逐字同源**，两边任何一侧单独加一类另一侧就会收到 10001）+ `REPORT_DESC_MAX=200` / `REPORT_EVIDENCE_MAX=3` 两个同源常量。
+- **`views/post/PostDetailView.vue`(175 → 391)**：举报弹层 —— 六选一理由（label + 副标题人话 `desc`，只提交 `value`）、描述 `0 / 200` 按码点计数、证据截图最多 3 张且**只回填 `/uploads/` 前缀的本站地址**、回执**就地** `el-alert` 不弹 toast、**只展示后端返回的 `tip`**（前端不再翻译一遍）、作者本人不给举报按钮（删除权本来就在自己手里）。
+- **`stores/notify.js`(12 → 110)** + 顶栏铃铛 **`layouts/BasicLayout.vue`(115 → 219)**：`el-badge` + `el-popover`（`@show` 才拉列表；未登录那一块整棵 `v-if` 掉，不给游客留一颗点开必 401 的空壳）；未读数**只来自后端每页带回的 `unreadCount`**，store 里没有任何本地累加（一旦允许 +1，红点就有了两个真相）；徽标刷新**复用页头那条 30s 心跳**（L163–L170 的 `refreshUnread()`），不另开计时器；「全部已读」按钮只在 `unread > 0` 时画（0 未读还给它一颗按钮，就是邀请一次空写入）；条目跳转**只认 `refType`** 不猜文案；**登出与登录态变化两处都清 store**（L152 `doLogout` / L175 `watch(logged)`）—— 不清的后果是「红点跟着上一个人走」。
+- `api/notify.js`(67)：读接口 silent（铃铛取不到数据时该显示「暂时没读到」，不是一进来就糊一条全局红条）、写接口不 silent；`NOTIFY_TYPES` 只用于「按类型决定跳到哪儿」，界面上的中文标签用后端每条带回的 `typeLabel`（后端加一类而这里忘了同步，最坏结果是跳转兜底到广场，而不是列表里冒出一个没人认识的英文码）。
+### 取证（每条都指到一次真实执行的日志行号）
+
+- 单测：`mvn -o -B test` **228 → 296 例 / 0 失败 / 1 跳过**（`test-t311b-3.log` **L198** 汇总、**L201** BUILD SUCCESS）。算式：新增 `ReportServiceTest` **32**（L183）+ 新增 `NotifyServiceTest` **23**（L71）+ `CommentServiceTest` 43 → **49**（L124，+6 是通知调用点）+ `PostInteractionServiceTest` 11 → **15** + `RelationshipServiceTest` 11 → **14** = **+68**。`src/test` 下 .java 19 → **22**（含 `RecordingNotifyService` 桩）。
+- 真 HTTP 冒烟：`node docs/smoke.mjs` **187 项 / 175 条断言 / 失败 0 / 退出码 0**（`smoke_t311b4.txt` **L189** 汇总行），脚本 `docs/smoke.mjs` 1016 → **1393 行 / 18 步**。新增两步：第 17 步举报 **23 项**、第 18 步通知 **25 项** —— 覆盖未登录 401/10002、理由白名单外 400/10001（文案把六个码整串列出）、描述 201 字 400/10001（文案带 200）、证据外链 400/10001（点名 `/uploads/`）、别人私密帖与不存在帖**同一句 404/30001**、作者自举报 400/10001、首报 `duplicated=false reportCnt=1`、重复举报 `duplicated=true` 且 `reportCnt` 不变、第二人未达阈值第三人达阈值 → `escalated=true` 且**第三人读它 404**、作者仍可读并带 `auditTip`、`self-harm` 回 `hotline=12356` 且不转审；通知侧覆盖三类事件落库、游标翻页、**越权点别人的通知 → 200 但 `updated=0`**（写接口 WHERE 里带着 user_id）、重复标已读幂等、101 个 id 400/10001、`is_read` 与 `read_at` 同起同落。
+- jsdom DOM 探针：`node frontend/probe/domprobe.mjs` **42 → 61 项 / 0 失败**（`domprobe_t311b.txt` **L93** 汇总），脚本 382 → **589 行**；新增**第 11 组 19 项**，本轮第一次点写按钮：注册三名一次性账号（甲 / 乙 / 丙）→ 甲关注乙 → **另开一个 jsdom 窗口以乙的身份重挂**（改 localStorage 不会让已经建好的 pinia 重来）→ 点铃铛 → 点条目跳主页 → 丙再关注乙 → 关掉重开 → 点「全部已读」→ **再用 node 侧独立 `GET /api/notifications` 回读证库**（不看界面自说自话）。
+- 前端构建：`npm run build` **exit 0 / vite v8.3.0 / ✓ 1777 modules transformed / ✓ built in 3.51s**（`build-t311b.log` **L5 / L7 / L107**，2026-09-23 复跑）。
+- 真库（2026-09-23 root 直连复核）：`base_tables=32`；user **105 行 / max id 106**、post **208**、comment **226**、`notify_message` **153 行 / max id 153**（末次冒烟落在 150–153）、`content_report` **28**、`audit_task` **14**、`alert_ticket` **74**、`anonymous_alias` **44**。
+- 谓词取证：`ev_t311b_final.sql` 十二条（`dup_same_everything=0`、`read_without_at=0`、`unread_with_at=0`、`over_width=0`、`alias_title_rows=7`、最长 title 15 / content 18）+ `q-tight.sql` 三条（raw **36** → tight **0**、被排除 18 条正好当正面控制）。**判据口径：每条「应为 0」都必须配一条「应 >0」的正面控制，否则恒真的 0 不算证据。**
+
+### 三个真问题（本轮最贵的三条）
+
+1. **TDZ 只坏首屏**：`PostDetailView.vue` 里 `watch(() => route.params.id, load, { immediate: true })` 写在它要用的那批 `ref`（现 L228–L236）**之前** —— `immediate` 让回调在 setup 里当场执行，`load()` 第一句 `reportTip.value = ''` 撞进暂时性死区抛 `ReferenceError`，被 Vue 的 `callWithErrorHandling` 吞成**一条 console.error**：setup 照常完成、组件照常渲染，坏的只有「直接打开一条帖 = 永远空态（连骨架屏都不出）」这一条路径。从别的帖切进来复用实例一切正常，所以第 10 组一直是绿的。修法：watch 移到所有依赖状态之后（现 **L246**）。**教训：只测复用路径等于没测首屏；`{immediate:true}` 的 watcher 与它引用的状态之间有顺序契约，而 Vue 不会替你报错。**
+2. **`short()` 只吃响应壳**：冒烟脚本里那个打印截断函数遇到 `data` 对象（而不是 `{code,data,msg}`）时抛异常，让整脚本异常退出、前面 175 条 PASS 全白跑 —— 表现是「明明跑到第 18 步了，怎么没有汇总行」。已让 `short()` 兼容任意入参。**取证脚本里任何一处格式化函数都不能假设输入形状。**
+3. **近似谓词的「0」不是不变式**：上一轮记录 `anon_leaked_global_tight = 0`，本轮重跑得 **36**。逐行看是 18 条正常实名评论通知 × 2 条匿名评论的笛卡尔积（同一个人既匿名又实名，±2s 时间邻接把它们配到了一起）。加 `NOT EXISTS(同人同帖 ±2s 内的非匿名评论)` 之后回到 **0**，被排除的那 18 条正好当正面控制。**结论：重跑历史取证谓词本身就是复利动作，「上次是 0」不构成证据**；根因还是这张表没有 `actor_user_id` 与来源评论 id，全局「匿名不泄漏」在结构上做不到精确，只能「本窗口精确 + 正面控制 + 收紧后的时间邻接近似」三条并列。
+
+### 环境事实（下一轮照着跑，不用重新摸）
+
+- 冒烟每跑一次新增约 **5–6 个账号 / 6 帖 / 20+ 评论 / 若干通知**（第 17 步两名举报人 + 第 18 步一对收发件人 + 既有三名）；本轮末次复跑落在 user 105/106、post 208、notify 150–153。
+- 🔴 **`domprobe` 不再是只读探针**：第 11 组会注册一次性账号并写通知。本轮三次复跑留下 user **77–79 / 80–82 / 83–85**（`probe_ntf_a/b/c<时间戳>`，昵称「探针通知甲/乙/丙」）与 notify **58–63**，**均未清理**（README 里那句「`domprobe` 与 `proxycheck` 只读不写」本轮订正掉了 —— 它已经是假话）。
+- 全站 60 次/分/身份的限流窗口会被 18 步打满，冒烟第 16 步之后多出一条「等限流窗口」的 INFO —— 这也是 187 项比上一版 137 项「多出来一条 INFO」的唯一原因，与断言无关。
+- 🔴 `q-cmd.cmd` 打的 `MYSQL_EXIT=0` 会**假绿**：SQL 文件不存在或路径被拆断时 mysql 根本没跑，cmd 照样返回 0。判据必须再加一条「**期望的结果表头真的出现在 `.out` 里**」；先看 `Select-String ERROR`，再看 exit code。
+
+### 文档回写
+
+- 手册升 **v1.2.1**：`制作步骤文档.md` 1766 → **1785 行**（CRLF、无 BOM、无 Tab，2026-09-23 落盘）——L1 标题补版本号（**v1.2.0 那轮漏改了 L1，标题还停在 v1.1.9，这是本轮抓出的第二条假事实**）、L3 修订行、§14 目录行 36 → 42 条、§6.1 行 3.11 转正 + **v1.2.1 实测回写 10 行**（L857–L866）、L844 追加「`docs/openapi-check` 是假事实」订正、§6.2 新增顶栏铃铛一行 + U4 行换尾（举报弹层六码 + TDZ 修法）、§6.4 第 4 条下补实测、§14 新增 **37–42** 六条、§15 T3.11 ☐→**☑** 且 T3.16 ☐→**◐**、阶段 3 收工口径 **☑ 8 / ◐ 3 / ☐ 6**（**本行数字是收尾时订正过的**：口径句初稿写 8 / 2 / 7，而逐行数 §15 那 17 行实得 ☑8 / ◐3 / ☐6 —— 漏了 T3.16 本轮也升了 ◐；手册 L1518 与 Gate3 行 L1757 已同步改）、§18 Gate3 整段重写（未过不打 tag）、§19 新增 v1.2.1 行与「下一步」重写为 ⑩ 条。**任务总数、人日、追溯矩阵、Gate 行数均未变：117 / 144.30 / 101 / 10。**
+- README：手册版本 v1.2.0 → v1.2.1、故障速查 36 → 42 条、表数 31 → 32 张、单测与冒烟数字 228/137 → **296/187**、目录树的类计数与文件计数重数、`domprobe` 只读那句假话订正、进度清单补 09-21（续 7）一节与阶段 3 口径 ☑8/◐3/☐6。
+- 全局《复利与踩坑日志》补 009 **第 9 轮**（TDZ 只坏首屏、近似谓词 36→0、两个信号要等在同一谓词里、`q-cmd` 假绿、`short()` 假设输入形状等十条）。
+- **本轮收尾自查**：`docs/smoke.mjs` L1360 的注释把「近似谓词」这条教训指向「§14 第 43 条」，而手册 §14 只到 42 条、正确编号是 **39** —— 已改（改的是注释字符串，未复跑冒烟，不构成新证据）。
+
+### 仍未做（截至本轮，别自我感觉良好）
+
+- **评论举报**（`content_report.target_type` 的 ENUM 已留 `comment`，但服务端与界面只开 `post` 一条宿主）、**评论点赞**（`comment.like_cnt` 仍是空列）、**@通知**、`notify_preference`、**U13 通知中心整页（T3.16）**：本轮只做到「顶栏铃铛能看能点」。
+- `HUMAN_REVIEW` 仍不进管理端处置队列（T6.1）—— 举报转审之后**没有人接手**，`audit_task` 只是多了一行；`alert_ticket.source_type` 仍没有 `comment` / `report` 两档；工单通知（T6.4）未做。
+- 危机通知没有实时通道：`PushHook` 只打日志，红点靠 30s 心跳。
+- **重赞会被幂等查重吞掉一条**（文案全等即跳过）、**取消赞不撤回通知** —— 两条都是缺 `actor_user_id` 列的直接后果，补列才能真正解决。
+- 真浏览器仍未测（jsdom 不含样式与布局），§6.4 第 4 条继续 ☐、T3.13 维持 ◐；`PUT /api/users/me/profile` 仍 90001；U1/U6、T3.8 话题、T3.9 搜索、T3.10 埋点、T3.15 编辑与销毁、T3.17 关注流未做；阶段 1B 论文材料按用户指令继续顺延。
+- **仍未打 tag**（Gate3 未过，最新 tag `stage-2-skeleton`）。

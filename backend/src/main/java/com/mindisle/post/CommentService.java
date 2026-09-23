@@ -23,6 +23,7 @@ import com.mindisle.entity.AnonymousAlias;
 import com.mindisle.entity.Comment;
 import com.mindisle.entity.Post;
 import com.mindisle.entity.User;
+import com.mindisle.notify.NotifyService;
 import com.mindisle.post.dto.CommentCreateRequest;
 import com.mindisle.post.dto.CommentCreateView;
 import com.mindisle.post.dto.CommentItem;
@@ -63,6 +64,11 @@ import org.springframework.transaction.annotation.Transactional;
  * <p><b>REJECTED 与转人审都照样消耗配额、也照样建危机工单</b>：理由与发帖一致
  * （见 {@link PostService#publish} 第 9 步）——拦的是内容不是人，
  * 也不能替攻击者免费开放「无限试探拦截边界」的通道。</p>
+ *
+ * <p><b>评论与回复会写站内通知</b>（任务 T3.11-b · 需求 FR9.1）：判据全部集中在
+ * {@link #notifyParties} 一处——只有已发布的评论才发、展示名只用 {@code CommentItem.authorName}
+ * （匿名评论必须显示马甲名）、被回复者是楼主时只发更具体的那一条。写通知与评论落库同一个事务，
+ * 理由与不吞异常的取舍见 {@link NotifyService} 类注释。</p>
  */
 @Service
 public class CommentService {
@@ -134,16 +140,19 @@ public class CommentService {
     private final CacheService cacheService;
     private final AnonymousAliasService aliasService;
     private final MindisleProperties properties;
+    private final NotifyService notifyService;
 
     public CommentService(CommentStore store, PostingQuotaService quotaService,
                           SensitiveWordEngine engine, CacheService cacheService,
-                          AnonymousAliasService aliasService, MindisleProperties properties) {
+                          AnonymousAliasService aliasService, MindisleProperties properties,
+                          NotifyService notifyService) {
         this.store = store;
         this.quotaService = quotaService;
         this.engine = engine;
         this.cacheService = cacheService;
         this.aliasService = aliasService;
         this.properties = properties;
+        this.notifyService = notifyService;
     }
 
     // ================================================================ 写
@@ -224,7 +233,43 @@ public class CommentService {
         // 求助卡片只在「这次真的命中危机」时随评论回执给出；帖子自己是不是求助帖由详情接口负责
         String hotline = decision.care() ? properties.getCrisis().getHotline() : null;
         CommentItem item = toItem(row, contextOfReply(row, author, alias, parent, userId, post.getUserId()));
+        // 通知放在回执组装之后、返回之前：同一个事务，且 authorName 已经在 item 里算好了，
+        // 复用它而不是再算一次，是「匿名评论不许漏真名」这条规则的结构性保证。
+        notifyParties(post, row, item, placement, userId, postId, storedContent);
         return new CommentCreateView(item, hotline, tip);
+    }
+
+    /**
+     * 评论落库之后的两条通知（任务 T3.11-b · 需求 FR9.1 · 手册 §6.1 行 3.11）。
+     *
+     * <p><b>只有已发布的评论才发通知</b>：待审评论仅作者自己可见（见类注释第 5 段），
+     * 这时候给楼主推一条「有人评论了你」，点进去却什么都没有——那等于把没过审的内容广播出去。
+     * REJECTED 更不发。</p>
+     *
+     * <p><b>展示名取 {@code item.authorName()}，绝不取 {@code PostService.displayNameOf(author)}</b>：
+     * 匿名评论要显示马甲名（FR1.4），拿账号行算名字就等于把真名写进通知正文并永久留在库里。
+     * {@code item} 在调用点已经算好了，复用它既省一次计算，也让这条红线变成结构上走不通的路。</p>
+     *
+     * <p><b>被回复者恰好是楼主时只发「回复了你的评论」</b>：那条更具体，而「评论了你的帖子」
+     * 是它的子集，同时发两条等于让同一件事占两个红点。</p>
+     *
+     * <p>与点赞一样：同一个事务、异常不吞，取舍见 {@link NotifyService} 类注释第 3 条。</p>
+     */
+    private void notifyParties(Post post, Comment row, CommentItem item, Placement placement,
+                               long commenterId, long postId, String content) {
+        if (!PUBLISHED.equals(row.getStatus())) {
+            return;
+        }
+        long ownerId = post.getUserId() == null ? 0L : post.getUserId();
+        Long replyToId = placement == null ? null : placement.replyToUserId();
+        // 回复自己那条评论（replyToId == commenterId）不算「有人回复了你」，同自赞不发通知一个道理
+        boolean replied = replyToId != null && replyToId > 0L && replyToId != commenterId;
+        if (replied) {
+            notifyService.notifyReply(replyToId, item.authorName(), postId, content);
+        }
+        if (ownerId > 0L && ownerId != commenterId && !(replied && replyToId == ownerId)) {
+            notifyService.notifyComment(ownerId, item.authorName(), postId, content);
+        }
     }
 
     // ================================================================ 读

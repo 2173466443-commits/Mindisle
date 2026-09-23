@@ -28,8 +28,10 @@ import com.mindisle.config.MindisleProperties;
 import com.mindisle.entity.AlertTicket;
 import com.mindisle.entity.AnonymousAlias;
 import com.mindisle.entity.Comment;
+import com.mindisle.entity.NotifyMessage;
 import com.mindisle.entity.Post;
 import com.mindisle.entity.User;
+import com.mindisle.notify.RecordingNotifyService;
 import com.mindisle.post.dto.CommentCreateRequest;
 import com.mindisle.post.dto.CommentCreateView;
 import com.mindisle.post.dto.CommentItem;
@@ -76,6 +78,7 @@ class CommentServiceTest {
     private PostingQuotaService quota;
     private AnonymousAliasService aliasService;
     private CommentService service;
+    private RecordingNotifyService notify;
 
     private static String row(String group, String level, String action, String scope,
                              String matchType, String word) {
@@ -97,8 +100,9 @@ class CommentServiceTest {
         store.users.put(AUTHOR_ID, activeUser(AUTHOR_ID, "楼主"));
         store.users.put(ME, activeUser(ME, "我"));
         store.users.put(OTHER, activeUser(OTHER, "路人"));
+        notify = new RecordingNotifyService();
         service = new CommentService(store, quota, engine, new CaffeineCacheService(),
-                aliasService, properties);
+                aliasService, properties, notify.service());
     }
 
     // ------------------------------------------------------------------ 造数据
@@ -585,7 +589,81 @@ class CommentServiceTest {
                 .isEqualTo(PostQueryService.ANONYMOUS_FALLBACK);
     }
 
-    // ------------------------------------------------------------------ 出参组装（纯函数）
+    // ------------------------------------------------------------------ 站内通知（T3.11-b · FR9.1）
+
+    @Test
+    @DisplayName("评论别人的帖子：楼主收到一条 comment 通知，正文是评论摘录，状态未读")
+    void commentOnOthersPostNotifiesPostOwner() {
+        comment(ME, POST_ID, "楼主抱抱");
+        assertThat(notify.size()).as(notify.dump()).isEqualTo(1);
+        NotifyMessage sent = notify.rows().get(0);
+        assertThat(sent.getUserId()).isEqualTo(AUTHOR_ID);
+        assertThat(sent.getType()).isEqualTo(NotifyMessage.TYPE_COMMENT);
+        assertThat(sent.getTitle()).isEqualTo("我 评论了你的帖子");
+        assertThat(sent.getContent()).as("摘录加书名号引号，前端不必再拼").isEqualTo("「楼主抱抱」");
+        assertThat(sent.getRefType()).isEqualTo(NotifyMessage.REF_POST);
+        assertThat(sent.getRefId()).isEqualTo(POST_ID);
+        assertThat(sent.getIsRead()).as("新通知必须未读，红点只数这个").isEqualTo(0);
+        assertThat(notify.pushCount()).as("推送口每落一行调一次（阶段 5 换成 WebSocket 时靠这条回归）").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("回复楼主自己的评论：只留「回复了你的评论」一条，同一件事不占两个红点")
+    void replyToOwnerCollapsesIntoSingleNotification() {
+        long root = seedComment(5070L, POST_ID, AUTHOR_ID, null, null, Comment.STATUS_PUBLISHED).getId();
+        reply(ME, POST_ID, "同意楼主", root);
+        assertThat(notify.dump()).as("楼主既是被回复者又是帖主，只发更具体的那条").isEqualTo("comment|" + AUTHOR_ID + "|我 回复了你的评论");
+        assertThat(notify.rows().get(0).getContent()).isEqualTo("「同意楼主」");
+    }
+
+    @Test
+    @DisplayName("回复别人的评论：被回复者与楼主各一条，两件事不能合成一条")
+    void replyNotifiesRepliedUserAndPostOwnerSeparately() {
+        long root = seedComment(5071L, POST_ID, OTHER, null, null, Comment.STATUS_PUBLISHED).getId();
+        reply(ME, POST_ID, "我补充一句", root);
+        assertThat(notify.size()).as(notify.dump()).isEqualTo(2);
+        assertThat(notify.ofType(NotifyMessage.TYPE_COMMENT)).hasSize(2);
+        assertThat(notify.rows()).anySatisfy(row -> {
+            assertThat(row.getUserId()).isEqualTo(OTHER);
+            assertThat(row.getTitle()).isEqualTo("我 回复了你的评论");
+        });
+        assertThat(notify.rows()).anySatisfy(row -> {
+            assertThat(row.getUserId()).as("楼主看到的仍是「评论了你的帖子」").isEqualTo(AUTHOR_ID);
+            assertThat(row.getTitle()).isEqualTo("我 评论了你的帖子");
+        });
+    }
+
+    @Test
+    @DisplayName("匿名评论的通知只写马甲名：真昵称一旦进正文就永久留痕（FR1.4）")
+    void anonymousCommentNotificationUsesAliasNameOnly() {
+        store.users.get(ME).setNickname("我的真名");
+        service.comment(ME, POST_ID, new CommentCreateRequest("抱抱楼主", null, true), DAY);
+        assertThat(notify.size()).as(notify.dump()).isEqualTo(1);
+        NotifyMessage sent = notify.rows().get(0);
+        assertThat(sent.getTitle()).startsWith("匿名屿民·").doesNotContain("我的真名");
+    }
+
+    @Test
+    @DisplayName("待审与被驳回的评论不发通知；楼主自评也不发")
+    void pendingRejectedAndSelfCommentsSendNothing() {
+        comment(ME, POST_ID, "你就是个傻逼");
+        assertThat(notify.size()).as("转人审的评论只有作者自己看得见，不该广播").isZero();
+        comment(ME, POST_ID, "卖枪支弹药的");
+        assertThat(notify.size()).isZero();
+        comment(AUTHOR_ID, POST_ID, "楼主自己补充一句");
+        assertThat(notify.size()).as("自己评论自己的帖子，不需要提醒自已").isZero();
+    }
+
+    @Test
+    @DisplayName("超过 60 字的评论只落摘录并补省略号：通知是提醒不是阅读器")
+    void longCommentIsExcerptedIntoNotification() {
+        String long500 = "话".repeat(70);
+        comment(ME, POST_ID, long500);
+        NotifyMessage sent = notify.rows().get(0);
+        assertThat(sent.getContent()).startsWith("「" + "话".repeat(60)).endsWith("」").contains("…");
+        assertThat(sent.getContent().codePointCount(0, sent.getContent().length())).isEqualTo(63);
+    }
+
 
     @Test
     @DisplayName("isVisibleTo 三条腿：公开人人可见、待审只给作者、驳回谁都不给")

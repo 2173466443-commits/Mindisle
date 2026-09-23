@@ -12,6 +12,7 @@ import com.mindisle.common.BizException;
 import com.mindisle.common.ErrorCode;
 import com.mindisle.entity.Post;
 import com.mindisle.entity.User;
+import com.mindisle.notify.NotifyService;
 import com.mindisle.post.dto.PostActionView;
 
 /**
@@ -43,6 +44,11 @@ import com.mindisle.post.dto.PostActionView;
  * <p><b>不可见的帖子做互动 → 404/30001，绝不 403</b>：与详情接口同一口径
  * （见 {@link PostQueryService#detail}）。报 403 等于向调用者承认「这条存在但你没权限」，
  * 那就成了一条免费的存在性枚举通道，而点赞接口恰恰是最容易被拿来枚举的。</p>
+ *
+ * <p><b>点赞会顺带写一条站内通知</b>（任务 T3.11-b · 需求 FR9.1 · 手册 §6.1 行 3.11）：
+ * 它落在本类唯一的写方法 {@code act} 同一个 {@code @Transactional} 里，<b>写失败就连同这一赞一起回滚</b>。
+ * 为什么不吞异常、为什么取消赞不撤回、为什么收藏不发通知，理由只写在 {@link NotifyService}
+ * 的类注释与本方法现场注释里，这里不重复第二份。</p>
  */
 @Service
 public class PostInteractionService {
@@ -92,10 +98,12 @@ public class PostInteractionService {
 
     private final InteractionStore store;
     private final PostingQuotaService quotaService;
+    private final NotifyService notifyService;
 
-    public PostInteractionService(InteractionStore store, PostingQuotaService quotaService) {
+    public PostInteractionService(InteractionStore store, PostingQuotaService quotaService, NotifyService notifyService) {
         this.store = store;
         this.quotaService = quotaService;
+        this.notifyService = notifyService;
     }
 
     /**
@@ -150,11 +158,21 @@ public class PostInteractionService {
         Set<String> after = store.activeActionsOf(actorId, postId);
         boolean liked = after.contains(ACTION_LIKE);
         boolean collected = after.contains(ACTION_COLLECT);
-        return new PostActionView(postId, action, after.contains(actionType) != wasActive,
+        boolean changed = after.contains(actionType) != wasActive;
+        boolean selfAction = PostQueryService.isOwner(post, actorId);
+        // 三个条件缺一不可，且都以「写完之后再查库」的结果为准：
+        // changed 挡掉幂等重放（连点两下、请求重发不该出两条「有人赞了你」）；
+        // ACTION_LIKE 是因为收藏<b>不发通知</b>——收藏列表只有主人能看，推一条「X 收藏了你的帖子」
+        // 等于替对方把「谁在收集我的内容」公开出去，需求里没有这一条，BR1 的最小化原则下不自己加；
+        // selfAction 挡掉自赞自提提醒。取消赞不撤回通知（判据见 NotifyService 类注释第 4 条）。
+        if (positive && changed && ACTION_LIKE.equals(actionType) && !selfAction) {
+            notifyService.notifyLike(post.getUserId(), PostService.displayNameOf(actor), postId, post.getTitle());
+        }
+        return new PostActionView(postId, action, changed,
                 liked, collected,
                 store.countActiveUsers(postId, ACTION_LIKE),
                 store.countActiveUsers(postId, ACTION_COLLECT),
-                PostQueryService.isOwner(post, actorId));
+                selfAction);
     }
 
     /**

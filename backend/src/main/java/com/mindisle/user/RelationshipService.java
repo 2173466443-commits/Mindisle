@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.mindisle.common.BizException;
 import com.mindisle.common.ErrorCode;
 import com.mindisle.entity.User;
+import com.mindisle.notify.NotifyService;
 import com.mindisle.post.PostService;
 import com.mindisle.post.PostingQuotaService;
 import com.mindisle.user.dto.FollowView;
@@ -36,6 +37,10 @@ import com.mindisle.user.dto.UserHomepage;
  * （{@code @TableLogic} 自动过滤注销），查不到即 20001/404。BANNED 账号的主页要不要显示、
  * 要显示成什么样，需求没写，这里就不替产品决定；<b>封禁只挡「发起人」这一侧</b>（BR6），
  * 那是唯一有明确条文依据的一条。</p>
+ *
+ * <p><b>关注成立才发通知</b>（任务 T3.11-b · 需求 FR9.1）：判据是 {@code positive && changed}，
+ * 复用的就是刷冗余列那个 {@code changed} 标记，于是「按钮被连点两下」既不会多写一行关系、
+ * 也不会多发一条提醒。取关方向<b>不撤回</b>已经发出去的那条，理由见 {@code NotifyService} 类注释第 4 条。</p>
  */
 @Service
 public class RelationshipService {
@@ -81,10 +86,12 @@ public class RelationshipService {
 
     private final RelationStore store;
     private final PostingQuotaService quotaService;
+    private final NotifyService notifyService;
 
-    public RelationshipService(RelationStore store, PostingQuotaService quotaService) {
+    public RelationshipService(RelationStore store, PostingQuotaService quotaService, NotifyService notifyService) {
         this.store = store;
         this.quotaService = quotaService;
+        this.notifyService = notifyService;
     }
 
     /**
@@ -131,6 +138,11 @@ public class RelationshipService {
             // 而那个数字恰恰是管理端与大屏唯一会去读的列。
             refreshPair(actorId);
             refreshPair(targetId);
+            if (positive) {
+                // 与冗余列同一个 changed 判据：关注这件事真的发生了，才值得给对方一条提醒。
+                // 展示名用 PostService.displayNameOf（昵称空时兜底成「用户+id」），不传原始 nickname 也不传 id。
+                notifyService.notifyFollow(targetId, PostService.displayNameOf(actor), actorId);
+            }
         }
         return new FollowView(targetId, action, changed, following,
                 store.countFollowers(targetId), store.countFollowing(actorId));

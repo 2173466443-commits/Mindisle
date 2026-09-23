@@ -80,6 +80,39 @@ public interface PostMapper extends BaseMapper<Post> {
   int refreshCollectCnt(@Param("id") long id);
 
   /**
+   * 被举报次数重算（任务 T3.11 · 需求 FR4.4、FR4.7）。
+   *
+   * <p>与 {@link #refreshCommentCnt}、{@link #refreshLikeCnt} 同一教义：<b>按真相表重算覆盖写</b>，
+   * 不做 {@code report_cnt = report_cnt + 1}。差别只在数的对象——这里数的是「多少个人举报过」
+   * （{@code COUNT(DISTINCT reporter_id)}），因为 {@code uk_reporter_target} 决定一个人对一条内容
+   * 只有一次表达机会，重复点击不叠加权重（BR2 幂等）。这一列将来还要喂给 T3.10 的行为埋点
+   * （举报 = -5，需求 §8.2.1），到那时它必须仍然等于「几个人说过」，否则质量分就跟着重复点击漂。</p>
+   *
+   * <p>只数 {@code target_type='post'}：评论举报算评论自己的账，不计进帖子的阈值——
+   * 否则一个人可以在自己帖下自导自演十条评论、再举报十条，把一条正常帖子打进人审队列。</p>
+   */
+  @Update("UPDATE post SET report_cnt = "
+      + "(SELECT COUNT(DISTINCT reporter_id) FROM content_report WHERE target_type = 'post' "
+      + "AND target_id = post.id AND deleted = 0) WHERE id = #{id}")
+  int refreshReportCnt(@Param("id") long id);
+
+  /**
+   * 状态比较改写（任务 T3.11 举报转人审 · BR10 状态机）。
+   *
+   * <p><b>为什么不用 {@code updateById(post)}</b>：手里那份 Post 是这次请求开始时读的快照，
+   * 拿它整体回写会把窗口期内作者本人的编辑、别的通道的处置一起覆盖掉——「举报刚好把
+   * 管理员刚下架的帖子又改回可见」这种事只有在并发下才露头。带 {@code AND status = #{fromStatus}}
+   * 之后，状态一旦被别人改走就是 0 行，调用方据此安静地什么都不做。</p>
+   *
+   * <p>这里<b>不</b>顺带写 published_at 之类的字段：转入人审不是发布，
+   * 而流转留痕由 {@code post_status_log} 负责（{@code ReportService} 只在影响行数 = 1 时写日志，
+   * 于是「日志条数 = 真实流转次数」这条不变式仍然成立）。</p>
+   */
+  @Update("UPDATE post SET status = #{toStatus} WHERE id = #{id} AND status = #{fromStatus} AND deleted = 0")
+  int compareAndSetStatus(@Param("id") long id, @Param("fromStatus") String fromStatus,
+      @Param("toStatus") String toStatus);
+
+  /**
    * 主页「获赞数」（任务 3.6 · 需求 FR1.5）。
    *
    * <p>只统计<b>公开且非匿名</b>的已发布帖：主页上的「他收到过多少赞」如果把自己的树洞帖

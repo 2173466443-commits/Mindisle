@@ -21,8 +21,10 @@ import com.mindisle.cache.CaffeineCacheService;
 import com.mindisle.common.BizException;
 import com.mindisle.common.ErrorCode;
 import com.mindisle.config.MindisleProperties;
+import com.mindisle.entity.NotifyMessage;
 import com.mindisle.entity.Post;
 import com.mindisle.entity.User;
+import com.mindisle.notify.RecordingNotifyService;
 import com.mindisle.post.dto.PostActionView;
 
 /**
@@ -50,9 +52,13 @@ class PostInteractionServiceTest {
     private static final long AUTHOR_ID = 900L;
     private static final long VIEWER_ID = 901L;
 
+    /** post.title 在 DDL 里 NOT NULL，通知正文要用它，fake 必须给。 */
+    private static final String TITLE = "求助：有人知道怎么办吗";
+
     private FakeStore store;
     private PostingQuotaService quota;
     private PostInteractionService service;
+    private RecordingNotifyService notify;
 
     @BeforeEach
     void setUp() {
@@ -61,7 +67,8 @@ class PostInteractionServiceTest {
         store.users.put(AUTHOR_ID, activeUser(AUTHOR_ID, "作者"));
         store.users.put(VIEWER_ID, activeUser(VIEWER_ID, "看客"));
         quota = new PostingQuotaService(new CaffeineCacheService(), new MindisleProperties());
-        service = new PostInteractionService(store, quota);
+        notify = new RecordingNotifyService();
+        service = new PostInteractionService(store, quota, notify.service());
     }
 
     // ---------- 准备工具 ----------
@@ -73,6 +80,7 @@ class PostInteractionServiceTest {
         post.setStatus(PostService.STATUS_PUBLISHED);
         post.setVisibility(PostQueryService.VISIBILITY_PUBLIC);
         post.setIsAnonymous(0);
+        post.setTitle(TITLE);
         // DDL 里四列计数都是 NOT NULL DEFAULT 0，fake 必须一样，否则「零写入」路径会拿到 null，
         // 断言就会因为 fake 太宽松而假绿（本轮实测踩过一次）。
         post.setViewCnt(0);
@@ -337,6 +345,53 @@ class PostInteractionServiceTest {
         assertCountsMatchTruth(POST_ID);
         assertThat(store.posts.get(POST_ID).getLikeCnt()).isZero();
         assertThat(store.posts.get(POST_ID).getCollectCnt()).isZero();
+    }
+
+    // ---------- T3.11-b：点赞写通知（调用方判据） ----------
+
+    @Test
+    @DisplayName("别人赞了我的帖子：楼主收到一条 like 通知，正文是被赞的帖标题")
+    void likeNotifiesPostOwner() {
+        service.act(VIEWER_ID, POST_ID, "like", DAY1_NOON);
+        assertThat(notify.size()).as(notify.dump()).isEqualTo(1);
+        NotifyMessage sent = notify.rows().get(0);
+        assertThat(sent.getUserId()).as("收件人取自帖子行，绝不取自请求体").isEqualTo(AUTHOR_ID);
+        assertThat(sent.getType()).isEqualTo(NotifyMessage.TYPE_LIKE);
+        assertThat(sent.getTitle()).isEqualTo("看客 赞了你的帖子");
+        assertThat(sent.getContent()).isEqualTo("「" + TITLE + "」");
+        assertThat(sent.getRefType()).isEqualTo(NotifyMessage.REF_POST);
+        assertThat(sent.getRefId()).isEqualTo(POST_ID);
+        assertThat(sent.getIsRead()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("幂等重放不发第二条通知；取消赞也不撤回已发的那条")
+    void idempotentReplaySendsNothingAndUnlikeKeepsTheRow() {
+        service.act(VIEWER_ID, POST_ID, "like", DAY1_NOON);
+        service.act(VIEWER_ID, POST_ID, "like", DAY1_NOON);
+        assertThat(notify.ofType(NotifyMessage.TYPE_LIKE)).as("第二次 changed=false").hasSize(1);
+        service.act(VIEWER_ID, POST_ID, "unlike", DAY1_NOON);
+        assertThat(notify.ofType(NotifyMessage.TYPE_LIKE))
+                .as("取消赞不撤回：这一赞确实发生过，而本表没有 actor 列可以定位到那一行").hasSize(1);
+    }
+
+    @Test
+    @DisplayName("作者赞自己不通知自己；收藏一条通知都不发")
+    void selfLikeAndCollectSendNothing() {
+        service.act(AUTHOR_ID, POST_ID, "like", DAY1_NOON);
+        assertThat(notify.size()).as(notify.dump()).isZero();
+        service.act(VIEWER_ID, POST_ID, "collect", DAY1_NOON);
+        assertThat(notify.size())
+                .as("收藏是私有动作，推给楼主等于替对方公开「谁在收集我的帖子」").isZero();
+    }
+
+    @Test
+    @DisplayName("互动失败（404/20003）时一条通知都不写：通知排在全部校验之后、同一事务内")
+    void failedInteractionWritesNoNotification() {
+        codeOf(() -> service.act(VIEWER_ID, 999_999L, "like", DAY1_NOON));
+        store.users.get(VIEWER_ID).setStatus("BANNED");
+        codeOf(() -> service.act(VIEWER_ID, POST_ID, "like", DAY1_NOON));
+        assertThat(notify.size()).as(notify.dump()).isZero();
     }
 
     // ---------- 内存 fake：实现真 uk 语义 ----------

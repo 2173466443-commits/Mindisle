@@ -18,7 +18,9 @@ import com.mindisle.cache.CaffeineCacheService;
 import com.mindisle.common.BizException;
 import com.mindisle.common.ErrorCode;
 import com.mindisle.config.MindisleProperties;
+import com.mindisle.entity.NotifyMessage;
 import com.mindisle.entity.User;
+import com.mindisle.notify.RecordingNotifyService;
 import com.mindisle.post.PostService;
 import com.mindisle.post.PostingQuotaService;
 import com.mindisle.user.dto.FollowView;
@@ -45,6 +47,7 @@ class RelationshipServiceTest {
 
     private FakeStore store;
     private RelationshipService service;
+    private RecordingNotifyService notify;
 
     @BeforeEach
     void setUp() {
@@ -52,7 +55,8 @@ class RelationshipServiceTest {
         store.users.put(ACTOR_ID, user(ACTOR_ID, "小屿"));
         store.users.put(TARGET_ID, user(TARGET_ID, "  阿屿  "));
         PostingQuotaService quota = new PostingQuotaService(new CaffeineCacheService(), new MindisleProperties());
-        service = new RelationshipService(store, quota);
+        notify = new RecordingNotifyService();
+        service = new RelationshipService(store, quota, notify.service());
     }
 
     private static User user(long id, String nickname) {
@@ -233,6 +237,42 @@ class RelationshipServiceTest {
     @DisplayName("主页主人不存在（含被 @TableLogic 过滤的注销账号）：20001/404")
     void homepageOfMissingUserFailsAsNotFound() {
         assertThat(codeOf(() -> service.homepage(ACTOR_ID, 999_999L))).isEqualTo(ErrorCode.USER_NOT_FOUND);
+    }
+
+    // ---------- T3.11-b：关注写通知 ----------
+
+    @Test
+    @DisplayName("关注成功：被关注者收到一条 follow 通知，ref 指向发起人的公开主页")
+    void followNotifiesTheFollowedUser() {
+        service.follow(ACTOR_ID, TARGET_ID, "follow");
+        assertThat(notify.size()).as(notify.dump()).isEqualTo(1);
+        NotifyMessage sent = notify.rows().get(0);
+        assertThat(sent.getUserId()).isEqualTo(TARGET_ID);
+        assertThat(sent.getType()).isEqualTo(NotifyMessage.TYPE_FOLLOW);
+        assertThat(sent.getTitle()).as("展示名与主页同一个函数：昵称两侧空白被去掉").isEqualTo("小屿 关注了你");
+        assertThat(sent.getRefType()).isEqualTo(NotifyMessage.REF_USER);
+        assertThat(sent.getRefId()).isEqualTo(ACTOR_ID);
+        assertThat(notify.pushCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("重复关注不再发、取关不发也不撤回：一条关注只对应一条通知")
+    void repeatedFollowAndUnfollowSendNothing() {
+        service.follow(ACTOR_ID, TARGET_ID, "follow");
+        service.follow(ACTOR_ID, TARGET_ID, "follow");
+        assertThat(notify.ofType(NotifyMessage.TYPE_FOLLOW)).as("第二次 changed=false").hasSize(1);
+        service.follow(ACTOR_ID, TARGET_ID, "unfollow");
+        assertThat(notify.size()).as("取关既不发新通知，也撤回不了已发的那条").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("关注不存在的账号 / 关注自己被拒时，一条通知都不写")
+    void rejectedFollowWritesNoNotification() {
+        codeOf(() -> service.follow(ACTOR_ID, 123_456L, "follow"));
+        codeOf(() -> service.follow(ACTOR_ID, ACTOR_ID, "follow"));
+        store.users.get(ACTOR_ID).setStatus("BANNED");
+        codeOf(() -> service.follow(ACTOR_ID, TARGET_ID, "follow"));
+        assertThat(notify.size()).as(notify.dump()).isZero();
     }
 
     // ---------- 内存 fake ----------

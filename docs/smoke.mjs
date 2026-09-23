@@ -1004,6 +1004,383 @@ async function main() {
     info("16", "第 12/14 步的样本帖没备齐，本步整体跳过（根因在上面，不逐条报 401）", "");
   }
 
+  // ---------- 17 举报（任务 3.11 · 需求 FR4.7）----------
+  // 三件事只有真 HTTP + 真 MySQL 能证明，单测替代不了：
+  // ① 重复举报撞的是 uk_reporter_target，不新增行，post.report_cnt 也不该被顺手抬一次；
+  // ② 阈值按「不同举报人数」算，满 3 人就 CAS 转 HUMAN_REVIEW：第三人立刻 404，作者自己照常可读；
+  // ③ self-harm 只给求助卡片与一张 L3 待审任务，不建 alert_ticket、不改被举报帖的状态。
+  const repOn = function (token, id, body) {
+    const opts = token ? asToken(token, jsonBody(body)) : jsonBody(body);
+    return rlSafe(function () { return send("POST", "/api/posts/" + id + "/report", opts); });
+  };
+  const regAccount = async function (name, nick) {
+    const rr = await rlSafe(function () {
+      return send("POST", "/api/auth/register", jsonBody({
+        username: name, password: "Smoke#2026x", nickname: nick,
+        captchaId: captchaId || "00000000000000000000000000000000", captchaCode: "ZZZZ",
+        agreeTerms: true, agreePrivacy: true, consentVersion: "v1.0", regSource: "smoke-script"
+      }));
+    });
+    return rr.json && rr.json.data ? rr.json.data.accessToken : null;
+  };
+  if (publicId && privateId && anonHoleId && seenToken && accessToken) {
+    const repA = await regAccount("smoke_rep_a" + stamp, "冒烟举报甲");
+    const repB = await regAccount("smoke_rep_b" + stamp, "冒烟举报乙");
+    check("17", "注册两名举报人：阈值按人数算，同一个人刷一百次也不该把帖子推去人审",
+      !!repA && !!repB, "a=" + !!repA + " b=" + !!repB);
+
+    r = await repOn(null, publicId, { reason: "spam" });
+    check("17", "未登录举报 → 401/10002：举报人只来自 JWT，请求体里没有 reporter_id 这种东西",
+      r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+
+    r = await repOn(accessToken, publicId, { reason: "porn" });
+    check("17", "理由不在六类白名单 → 400/10001，且文案把六个码整串列出（前端下拉与后端白名单同源，不各写一份）",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "self-harm") && isMsg(r, "spam"),
+      r.status + " msg=" + (r.json && r.json.msg));
+
+    r = await repOn(accessToken, publicId, { reason: "abuse", description: "啊".repeat(201) });
+    check("17", "描述 201 字 → 400/10001 且文案带 200：先拒再落库，不靠列宽静默截断",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "200"), r.status + " msg=" + (r.json && r.json.msg));
+
+    r = await repOn(accessToken, publicId, { reason: "abuse", evidenceUrls: ["https://evil.example.com/a.png"] });
+    check("17", "证据给站外链 → 400/10001 且点名 /uploads/：这个字段只认本站上传回执，不是把服务当图床的口子",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "/uploads/"), r.status + " msg=" + (r.json && r.json.msg));
+
+    r = await repOn(accessToken, privateId, { reason: "spam" });
+    check("17", "举报别人的私密帖 → 404/30001，与详情/评论同口径：举报接口不是存在性枚举通道",
+      r.status === 404 && code(r) === "30001", r.status + " code=" + code(r));
+
+    r = await repOn(accessToken, 99999999, { reason: "spam" });
+    check("17", "举报不存在的帖子 → 404/30001，与「别人的私密帖」同一句话（能区分就等于能探测）",
+      r.status === 404 && code(r) === "30001", r.status + " code=" + code(r));
+
+    r = await repOn(seenToken, publicId, { reason: "spam" });
+    check("17", "作者举报自己的帖 → 400/10001「不能举报自己的内容」：删除权本来就在自己手里，不必绕举报下架",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "不能举报自己"), r.status + " msg=" + (r.json && r.json.msg));
+
+    r = await repOn(accessToken, publicId, { reason: "spam", description: "满屏外链引流" });
+    const rv1 = bodyOf(r);
+    check("17", "首次举报 → 200 + duplicated=false + reportCnt=1 + escalated=false + auditTaskId 非空（FR4.7 举报即建待审任务的物证）",
+      r.status === 200 && code(r) === "0" && rv1.duplicated === false && rv1.reportCnt === 1
+      && rv1.escalated === false && !!rv1.auditTaskId && rv1.reasonLabel === "广告" && rv1.autoReviewThreshold === 3,
+      r.status + " " + short(r, 220));
+    check("17", "非 self-harm 的回执不带 hotline（hotline 非空 = 前端必须挂求助卡片，全站唯一判据）",
+      rv1.hotline === undefined, "hotline=" + rv1.hotline);
+
+    r = await repOn(accessToken, publicId, { reason: "abuse", description: "换个理由再来一次" });
+    const rv2 = bodyOf(r);
+    check("17", "同一人重复举报 → 200 + duplicated=true + reportCnt 仍是 1：唯一键挡住新增，换理由也不重开一条（BR2 不叠加权重）",
+      r.status === 200 && code(r) === "0" && rv2.duplicated === true && rv2.reportCnt === 1,
+      r.status + " " + short(r, 220));
+    check("17", "重复举报的文案说「不用重复举报」，而不是把「举报已提交」再许诺一遍",
+      String(rv2.tip || "").indexOf("重复举报") >= 0 && String(rv2.tip || "").indexOf("举报已提交") < 0,
+      "tip=" + rv2.tip);
+    check("17", "重复举报仍回本次提交的理由（回执描述这次请求），工单号沿用首张（同一内容同时只有一张待审单）",
+      rv2.reason === "abuse" && rv2.auditTaskId === rv1.auditTaskId,
+      "reason=" + rv2.reason + " taskId=" + rv2.auditTaskId + " 首张=" + rv1.auditTaskId);
+
+    r = await repOn(repA, publicId, { reason: "abuse" });
+    const rv3 = bodyOf(r);
+    check("17", "第二名举报人 → reportCnt=2、escalated=false：还差一个人，帖子此刻仍在广场上",
+      r.status === 200 && rv3.duplicated === false && rv3.reportCnt === 2 && rv3.escalated === false,
+      r.status + " " + short(r, 200));
+    r = await rlSafe(function () { return detailGet(repA, publicId); });
+    check("17", "未达阈值时举报人仍能读到原帖：转人审只由人数触发，不由「有人举报过」触发",
+      r.status === 200 && code(r) === "0", r.status + " code=" + code(r));
+
+    r = await repOn(repB, publicId, { reason: "privacy" });
+    const rv4 = bodyOf(r);
+    check("17", "第三名举报人达到阈值 → reportCnt=3 且 escalated=true：FR4.4 的自动转人审真的由 HTTP 触发了一次",
+      r.status === 200 && rv4.reportCnt === 3 && rv4.escalated === true, r.status + " " + short(r, 240));
+    check("17", "达到阈值的文案说清「已转人工 + 暂时隐藏」，隐藏是事实不是许诺",
+      String(rv4.tip || "").indexOf("达到阈值") >= 0 && String(rv4.tip || "").indexOf("暂时") >= 0,
+      "tip=" + rv4.tip);
+    r = await rlSafe(function () { return detailGet(repA, publicId); });
+    check("17", "转人审之后第三人读它 → 404/30001：与别人的待审帖逐字一致，「暂时隐藏」是真的隐藏",
+      r.status === 404 && code(r) === "30001", r.status + " code=" + code(r));
+    r = await rlSafe(function () { return detailGet(seenToken, publicId); });
+    check("17", "作者本人仍能读到被举报转审的帖并看到 auditTip：先发后审要被感知，不能让人觉得帖凭空消失",
+      r.status === 200 && String(bodyOf(r).auditTip || "").indexOf("审核") >= 0,
+      r.status + " auditTip=" + bodyOf(r).auditTip);
+
+    r = await repOn(accessToken, anonHoleId, { reason: "self-harm", description: "楼主的话让人担心" });
+    const rv5 = bodyOf(r);
+    check("17", "举报「自伤风险」→ 200 + hotline=12356 + 提示给求助话术：这条回执的第一读者是看到那句话的人",
+      r.status === 200 && code(r) === "0" && rv5.hotline === "12356" && String(rv5.tip || "").indexOf("电话") >= 0,
+      r.status + " " + short(r, 240));
+    check("17", "提示文案里不出现号码本身（号码只有 hotline 一个出口，两处文案两个号码是迟早的事）",
+      String(rv5.tip || "").indexOf("12356") < 0, "tip=" + rv5.tip);
+    check("17", "举报 self-harm 不抬等级也不转审：单个人的一条主观判断不该直接决定别人的帖子存亡",
+      rv5.reportCnt === 1 && rv5.escalated === false && !!rv5.auditTaskId,
+      "cnt=" + rv5.reportCnt + " escalated=" + rv5.escalated + " taskId=" + rv5.auditTaskId);
+    r = await rlSafe(function () { return detailGet(repA, anonHoleId); });
+    check("17", "被 self-harm 举报的帖子仍对第三人可读：判断对方有没有风险是审核的事，不是举报人的权限",
+      r.status === 200 && code(r) === "0", r.status + " code=" + code(r));
+
+    info("17", "SQL 取证（跑完用 root 直连复核，别信脚本自证）：一人一条、report_cnt 与真相表同源、举报不建危机单（评论危机单的 source_id 也是帖 id，必须按 evidence_text 排除）",
+      "SELECT id,reporter_id,target_type,target_id,post_id,reason,status FROM content_report WHERE post_id IN ("
+      + publicId + "," + anonHoleId + ") ORDER BY id; "
+      + "SELECT COUNT(*) AS dup_reporter FROM (SELECT reporter_id,target_type,target_id FROM content_report"
+      + " GROUP BY 1,2,3 HAVING COUNT(*) > 1) t; "
+      + "SELECT id,report_cnt,status FROM post WHERE id IN (" + publicId + "," + anonHoleId + "); "
+      + "SELECT id,target_type,target_id,source,channel,risk_level,status,sla_at FROM audit_task"
+      + " WHERE target_type='post' AND target_id IN (" + publicId + "," + anonHoleId + ") ORDER BY id; "
+      + "SELECT post_id,from_status,to_status,reason FROM post_status_log WHERE post_id IN ("
+      + publicId + "," + anonHoleId + ") ORDER BY id; "
+      + "SELECT COUNT(*) AS report_made_ticket FROM alert_ticket WHERE source_id IN ("
+      + publicId + "," + anonHoleId + ") AND evidence_text NOT LIKE '%（评论 id=%';");
+  } else {
+    info("17", "第 12/14 步的样本没备齐，本步整体跳过（根因在上面，不逐条报 401）", "");
+  }
+
+  // ---------- 18 站内通知（任务 3.11-b · 需求 FR9.1、FR9.2）----------
+  // 单测能钉住「规则」，钉不住「这条 HTTP 路径真的存在、真的落到了收件人身上」。本步只做
+  // 四件必须真环境才能证明的事：
+  // ① 一次真实互动（赞 / 匿名评论 / 回复 / 关注）之后，收件人 GET /api/notifications 立刻能读回来，
+  //    且 unreadCount 是按 (user_id,is_read,id) 覆盖索引 COUNT 出来的真相，不是前端自己累加的；
+  // ② 匿名评论触发的通知里只有马甲名——文案一落库就是对外内容，事后没法再脱敏，所以必须在这一层验；
+  // ③ 越权：B 拿自己的令牌去点 A 的通知 id，SQL 层 WHERE user_id 让它只能影响 0 行；
+  // ④ 重复点「全部已读」是 updated=0 而不是报错，重复点赞也不会刷出第二条通知。
+  const ntfList = function (token, qs) {
+    const opts = token ? { headers: { Authorization: "Bearer " + token } } : {};
+    return rlSafe(function () { return send("GET", "/api/notifications" + (qs ? "?" + qs : ""), opts); });
+  };
+  const ntfRead = function (token, payload) {
+    const opts = token ? asToken(token, jsonBody(payload)) : jsonBody(payload);
+    return rlSafe(function () { return send("POST", "/api/notifications/read", opts); });
+  };
+  const nAct = function (token, id, action) {
+    return rlSafe(function () {
+      return send("POST", "/api/posts/" + id + "/actions", asToken(token, jsonBody({ action: action })));
+    });
+  };
+  const nFollow = function (token, id, action) {
+    return rlSafe(function () {
+      return send("POST", "/api/users/" + id + "/follow", asToken(token, jsonBody({ action: action })));
+    });
+  };
+  // short() 要的是「一次响应的壳」（有 .json / .body），本步有好几处要打印的是已经拆出来的 data，
+  // 直接喂给它会踩 r.body.toString —— 脚本会整段异常退出，冒烟跑到一半的账还留在库里。
+  const nj = function (v) {
+    const str = JSON.stringify(v);
+    return str && str.length > 220 ? str.slice(0, 220) + "…" : str;
+  };
+  const nOf = function (page, type) {
+    return (page.list || []).filter(function (x) { return x.type === type; });
+  };
+
+  const ntA = await regAccount("smoke_ntf_a" + stamp, "冒烟收件人");
+  const ntB = await regAccount("smoke_ntf_b" + stamp, "冒烟发件人");
+  check("18", "注册收发两名一次性账号：通知必须有真实收件人，前 17 步的夹具（user 23 / post 39-42）不能被本步污染",
+    !!ntA && !!ntB, "a=" + !!ntA + " b=" + !!ntB);
+  if (ntA && ntB) {
+    r = await rlSafe(function () { return send("GET", "/api/users/me", { headers: { Authorization: "Bearer " + ntA } }); });
+    const ntAId = bodyOf(r).id;
+    r = await rlSafe(function () { return send("GET", "/api/users/me", { headers: { Authorization: "Bearer " + ntB } }); });
+    const ntBId = bodyOf(r).id;
+    r = await rlSafe(function () {
+      return send("POST", "/api/posts", asToken(ntA, jsonBody({ title: "冒烟·通知靶子", content: "这条会被赞、被评论、被回复。" })));
+    });
+    const ntPostId = bodyOf(r).id;
+    check("18", "A 发一条公开帖当靶子（必须 PUBLISHED：待审帖本来就不该给任何人推通知）",
+      r.status === 200 && bodyOf(r).status === "PUBLISHED" && !!ntPostId && !!ntAId && !!ntBId,
+      r.status + " status=" + bodyOf(r).status + " post=" + ntPostId + " a=" + ntAId + " b=" + ntBId);
+
+    r = await ntfList(ntA, "");
+    const p0 = bodyOf(r);
+    check("18", "新账号的列表是空的而不是报错：list=[]、unreadCount=0、nextCursor 整个键缺席（Jackson NON_NULL，不是 null）",
+      r.status === 200 && Array.isArray(p0.list) && p0.list.length === 0 && p0.unreadCount === 0
+      && p0.nextCursor === undefined && p0.hasMore === false, r.status + " " + short(r, 200));
+
+    // 自赞：互动成立（changed=true）但不该给自己发提醒
+    r = await nAct(ntA, ntPostId, "like");
+    const selfAct = bodyOf(r);
+    r = await ntfList(ntA, "");
+    const pSelf = bodyOf(r);
+    check("18", "A 赞自己的帖：互动照常受理（changed/selfAction 都为 true），但一条通知都不发——自己不需要被提醒",
+      r.status === 200 && selfAct.changed === true && selfAct.selfAction === true
+      && pSelf.unreadCount === 0 && pSelf.list.length === 0,
+      "changed=" + selfAct.changed + " self=" + selfAct.selfAction + " unread=" + pSelf.unreadCount);
+
+    // B 赞 A
+    r = await nAct(ntB, ntPostId, "like");
+    r = await ntfList(ntA, "");
+    const pLike = bodyOf(r);
+    const likeRow = nOf(pLike, "like")[0] || {};
+    check("18", "B 赞了之后 A 侧立刻读回一条 like：文案是「谁 + 做了什么」，跳转靠 ref_type/ref_id 而不是把帖 id 拼进文案",
+      likeRow.title === "冒烟发件人 赞了你的帖子" && likeRow.content === "「冒烟·通知靶子」"
+      && likeRow.typeLabel === "赞" && likeRow.refType === "post" && likeRow.refId === ntPostId
+      && likeRow.read === false && pLike.unreadCount === 1, r.status + " " + nj(pLike));
+
+    r = await nAct(ntB, ntPostId, "like");
+    const dupLike = bodyOf(r);
+    r = await ntfList(ntA, "");
+    const pDup = bodyOf(r);
+    check("18", "同一个 B 再点一次赞：互动层 changed=false，通知一条也没多刷出来（刷第二下的成本不该落在收件人身上）",
+      dupLike.changed === false && nOf(pDup, "like").length === 1 && pDup.unreadCount === 1,
+      "changed=" + dupLike.changed + " 行数=" + nOf(pDup, "like").length + " unread=" + pDup.unreadCount);
+
+    const unAct = bodyOf(await nAct(ntB, ntPostId, "unlike"));
+    r = await ntfList(ntA, "");
+    const pUn = bodyOf(r);
+    check("18", "B 取消赞：那条「赞了你」不撤回——没有 actor 列就认不出哪一行是他的，而「这件事发生过」不是假话（手册 §14 已记取舍）",
+      unAct.changed === true && nOf(pUn, "like").length === 1 && pUn.unreadCount === 1,
+      "changed=" + unAct.changed + " like行=" + nOf(pUn, "like").length + " unread=" + pUn.unreadCount);
+
+    // B 匿名评论 A 的实名帖
+    r = await cAdd(ntB, ntPostId, { content: "匿名顶一下，不想被认出来", anonymous: true });
+    const ntRootC = cmt(r);
+    r = await ntfList(ntA, "");
+    const pCmt = bodyOf(r);
+    const cRow = nOf(pCmt, "comment")[0] || {};
+    check("18", "B 匿名评论后 A 收到的通知只写马甲名：昵称一个字都不能出现——文案落库即对外内容，这一层不脱敏就再也没有机会了",
+      ntRootC.anonymous === true && !!ntRootC.authorName && cRow.title === ntRootC.authorName + " 评论了你的帖子"
+      && cRow.title.indexOf("冒烟发件人") < 0 && cRow.content === "「匿名顶一下，不想被认出来」"
+      && cRow.refType === "post" && cRow.refId === ntPostId && pCmt.unreadCount === 2,
+      "马甲=" + ntRootC.authorName + " " + nj(cRow));
+
+    // A 回复 B 的评论：收件人是 B，A 自己不该因为「别人在我帖下说话」而多一条
+    r = await cAdd(ntA, ntPostId, { content: "谢谢顶帖", parentId: ntRootC.id });
+    const myReply = cmt(r);
+    r = await ntfList(ntB, "");
+    const pReply = bodyOf(r);
+    const rpRow = nOf(pReply, "comment")[0] || {};
+    r = await ntfList(ntA, "");
+    const pAfterReply = bodyOf(r);
+    check("18", "A 回复 B 的评论：通知发给被回复的人（「回复了你的评论」），而不是发给帖子作者本人——两条规则在同一个接口里分岔",
+      myReply.status === "PUBLISHED" && rpRow.title === "冒烟收件人 回复了你的评论"
+      && rpRow.refType === "post" && rpRow.refId === ntPostId && pReply.unreadCount === 1
+      && pAfterReply.unreadCount === 2 && nOf(pAfterReply, "comment").length === 1,
+      "B侧=" + nj(rpRow) + " A未读=" + pAfterReply.unreadCount);
+
+    r = await nFollow(ntB, ntAId, "follow");
+    const fvw = bodyOf(r);
+    r = await ntfList(ntA, "");
+    const pAll = bodyOf(r);
+    const fRow = nOf(pAll, "follow")[0] || {};
+    check("18", "B 关注 A → A 收到 follow，ref 指向关注者主页（关注关系本身不匿名，FR4.6）：三类事件在一张表里各就各位",
+      fvw.changed === true && fRow.title === "冒烟发件人 关注了你" && fRow.content === "去他的主页看看"
+      && fRow.refType === "user" && fRow.refId === ntBId && pAll.unreadCount === 3
+      && nOf(pAll, "like").length === 1 && nOf(pAll, "comment").length === 1 && nOf(pAll, "follow").length === 1,
+      "changed=" + fvw.changed + " " + nj(fRow) + " unread=" + pAll.unreadCount);
+    const idsDesc = pAll.list.map(function (x) { return x.id; });
+    check("18", "列表按 id 倒序（新的在前），且不出 actor 列也不出 user_id：匿名者的真实身份没有反查通道",
+      idsDesc.length === 3 && idsDesc.every(function (v, i) { return i === 0 || idsDesc[i - 1] > v; })
+      && pAll.list.every(function (x) { return x.userId === undefined && x.deleted === undefined; }),
+      "ids=" + idsDesc.join(">") + " 标题=" + pAll.list.map(function (x) { return x.title; }).join(" | "));
+
+    r = await ntfList(ntA, "size=2");
+    const pg1 = bodyOf(r);
+    r = await ntfList(ntA, "size=2&beforeId=" + pg1.nextCursor);
+    const pg2 = bodyOf(r);
+    const overlap = (pg1.list || []).filter(function (x) {
+      return (pg2.list || []).some(function (y) { return y.id === x.id; });
+    });
+    check("18", "游标翻页不重不漏：第一页 2 条 + hasMore=true + nextCursor=末条 id，第二页 1 条且与第一页无交集",
+      r.status === 200 && pg1.list.length === 2 && pg1.hasMore === true
+      && pg1.nextCursor === pg1.list[pg1.list.length - 1].id && pg2.list.length === 1
+      && pg2.hasMore === false && overlap.length === 0,
+      "pg1=" + pg1.list.length + " cursor=" + pg1.nextCursor + " pg2=" + pg2.list.length + " 重叠=" + overlap.length);
+    check("18", "每页都带回同一个 unreadCount：红点只有一个数据来源，不必再开一个 unread 接口自相矛盾",
+      pg1.unreadCount === 3 && pg2.unreadCount === 3 && pAll.unreadCount === 3,
+      pg1.unreadCount + "/" + pg2.unreadCount);
+
+    r = await ntfList(ntA, "size=999");
+    check("18", "size 超上限按上限取而不是报错（与帖子列表同一口径）：把参数写错的成本不该由用户付",
+      r.status === 200 && code(r) === "0" && (bodyOf(r).list || []).length <= 50,
+      r.status + " code=" + code(r) + " n=" + (bodyOf(r).list || []).length);
+
+    const crossId = likeRow.id;
+    r = await ntfRead(ntB, { ids: [crossId] });
+    const crossView = bodyOf(r);
+    check("18", "越权点别人的通知 → 200 但 updated=0：写接口的 WHERE 里带着 user_id，前端传谁都影响不到别人的红点",
+      r.status === 200 && code(r) === "0" && crossView.updated === 0 && crossView.unreadCount === 1
+      && crossView.all === false, r.status + " " + short(r, 200));
+    r = await ntfList(ntA, "");
+    check("18", "上一步之后 A 的未读仍是 3：updated=0 是真的没动，不是「动了但回执撒谎」",
+      bodyOf(r).unreadCount === 3 && nOf(bodyOf(r), "like")[0].read === false,
+      "unread=" + bodyOf(r).unreadCount);
+
+    r = await ntfRead(ntB, { all: true });
+    const bAll = bodyOf(r);
+    check("18", "B 一键已读只清自己的（updated=1 且自己归零），A 的一条没被带走：两个账号在同一张表里互不越界",
+      bAll.updated === 1 && bAll.unreadCount === 0 && bAll.all === true, r.status + " " + short(r, 200));
+
+    r = await ntfRead(ntA, {});
+    check("18", "两个字段都不给 → 400/10001：把「漏传字段」当成「全部已读」是最坏的一种宽容",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "不能为空"), r.status + " msg=" + (r.json && r.json.msg));
+    const tooMany = [];
+    for (let i = 0; i < 101; i += 1) { tooMany.push(900000000 + i); }
+    r = await ntfRead(ntA, { ids: tooMany });
+    check("18", "一次给 101 个 id → 400/10001 且文案带 100：批量上限挡的是拿 id 遍历攻击，不是给用户添堵",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "100"), r.status + " msg=" + (r.json && r.json.msg));
+
+    r = await ntfRead(ntA, { ids: [crossId] });
+    const oneRead = bodyOf(r);
+    check("18", "A 点掉自己那一条 → updated=1、未读数当场从 3 变 2：回执直接给真相，前端不必再请求一次列表",
+      oneRead.updated === 1 && oneRead.unreadCount === 2 && oneRead.all === false, r.status + " " + short(r, 200));
+    r = await ntfRead(ntA, { ids: [crossId] });
+    check("18", "同一条再点一次 → updated=0 而不是报错：SQL 里那句 AND is_read=0 就是为连点两下准备的",
+      bodyOf(r).updated === 0 && bodyOf(r).unreadCount === 2, r.status + " " + short(r, 200));
+
+    r = await ntfRead(ntA, { all: true });
+    const allRead = bodyOf(r);
+    r = await ntfList(ntA, "");
+    const pRead = bodyOf(r);
+    check("18", "一键已读：updated=2（只数真的从未读变已读的）→ 未读归零、列表三条全 read=true 而条数不变",
+      allRead.updated === 2 && allRead.unreadCount === 0 && allRead.all === true
+      && pRead.list.length === 3 && pRead.list.every(function (x) { return x.read === true; })
+      && pRead.unreadCount === 0, "updated=" + allRead.updated + " " + nj(pRead));
+    r = await ntfRead(ntA, { all: true });
+    check("18", "重复一键已读 → updated=0：幂等，第二下不产生任何写",
+      bodyOf(r).updated === 0 && bodyOf(r).unreadCount === 0, r.status + " " + short(r, 200));
+
+    r = await ntfList(null, "");
+    check("18", "未登录读通知 → 401/10002：收件人只来自 JWT，这个接口没有「看别人通知」的参数",
+      r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+    r = await ntfRead(null, { all: true });
+    check("18", "未登录标已读 → 401/10002：写接口同样不认请求体里的身份",
+      r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+
+    info("18", "SQL 取证（root 直连复核，别信脚本自证）：落库形状 / 查重 / is_read 与 read_at 同起同落 / 匿名不泄漏。"
+      + "四条谓词全部实测跑过（数字见手册 §6.1 末 v1.2.1 回写）：本轮 window=1 行、this_round=0、control=1、dup=0。"
+      + "判据口径：每条「应为 0」都必须配一条「应 >0」的正面控制，否则恒真的 0 不算证据。",
+      "SELECT id,user_id,type,title,content,ref_type,ref_id,is_read,read_at,created_at FROM notify_message"
+      + " WHERE user_id IN (" + ntAId + "," + ntBId + ") ORDER BY id; "
+      // 查重的口径只有一条与实现对得上：文案 + 跳转对象全等才算重复。
+      // 只按 (user_id,type,title) 分组会捞出一堆假阳性（本轮 9 组，同一个人给不同帖子点两次赞本来就合法）。
+      + "SELECT COUNT(*) AS dup_same_everything FROM (SELECT user_id,type,ref_type,ref_id,title,content"
+      + " FROM notify_message WHERE deleted=0 GROUP BY 1,2,3,4,5,6 HAVING COUNT(*) > 1) t; "
+      + "SELECT COUNT(*) AS read_without_at FROM notify_message WHERE is_read=1 AND read_at IS NULL; "
+      + "SELECT COUNT(*) AS unread_with_at FROM notify_message WHERE is_read=0 AND read_at IS NOT NULL; "
+      // 匿名不泄漏：本表没有 actor 列也没有来源评论 id，全局判据在这一层结构上做不到精确，只能三条并列——
+      // ① 本窗口精确（已知收发两人 + 那条靶子帖）应为 0；② 正面控制：同一条 LIKE 换个非匿名 actor 必须 >0；
+      // ③ 全局只能按时间邻接近似，且**必须排除「同一个人在同一窗口内还发过实名评论」这种正常数据**：
+      //    不排除时本轮实录 36 行（= 18 条正常实名评论通知 × 2 条匿名评论的交叉乘积），排除后 0。
+      //    近似谓词的 0 不是不变式，只是数据还没撞上——这条写在手册 §14 第 39 条（原文 L1440）。
+      + "SELECT COUNT(*) AS anon_leaked_this_round FROM notify_message WHERE user_id=" + ntAId
+      + " AND ref_id=" + ntPostId + " AND type='comment'"
+      + " AND title LIKE CONCAT('%', (SELECT nickname FROM user WHERE id=" + ntBId + "), '%'); "
+      + "SELECT COUNT(*) AS anon_leaked_control FROM notify_message WHERE user_id=" + ntBId
+      + " AND type='comment'"
+      + " AND title LIKE CONCAT('%', (SELECT nickname FROM user WHERE id=" + ntAId + "), '%'); "
+      + "SELECT COUNT(*) AS anon_leaked_global_raw FROM notify_message n JOIN comment c"
+      + " ON c.post_id = n.ref_id AND c.is_anonymous = 1 AND n.type = 'comment' AND n.ref_type = 'post'"
+      + " JOIN user u ON u.id = c.user_id"
+      + " WHERE ABS(TIMESTAMPDIFF(SECOND, n.created_at, c.created_at)) <= 2"
+      + " AND n.title LIKE CONCAT('%', u.nickname, '%'); "
+      + "SELECT COUNT(*) AS anon_leaked_global_tight FROM notify_message n JOIN comment c"
+      + " ON c.post_id = n.ref_id AND c.is_anonymous = 1 AND n.type = 'comment' AND n.ref_type = 'post'"
+      + " JOIN user u ON u.id = c.user_id"
+      + " WHERE ABS(TIMESTAMPDIFF(SECOND, n.created_at, c.created_at)) <= 2"
+      + " AND n.title LIKE CONCAT('%', u.nickname, '%')"
+      + " AND NOT EXISTS (SELECT 1 FROM comment c2 WHERE c2.post_id = c.post_id"
+      + " AND c2.user_id = c.user_id AND c2.is_anonymous = 0"
+      + " AND ABS(TIMESTAMPDIFF(SECOND, c2.created_at, n.created_at)) <= 2);");
+  } else {
+    info("18", "两名一次性账号没注册成功，本步整体跳过（根因在第 17 步同一段注册逻辑上）", "");
+  }
+
   console.log("");
   console.log("冒烟汇总：" + rows.length + " 项，断言 " + (rows.filter(function (x) { return x.ok !== null; }).length)
     + " 条，失败 " + failures + " 条");

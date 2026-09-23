@@ -82,6 +82,9 @@ if (!token) {
 } else {
   notes.push('login via 5173 proxy: code=' + loginBody.code + ' tokenLen=' + token.length)
   await runProbe(bundle, token)
+  // 第 11 段刻意放在最后：它会写库、还要另开一个 jsdom 窗口，
+  // 不能让它把前面 1–10 段那些只读断言的环境搅浑。
+  await runBellProbe(bundle)
   finish()
 }
 
@@ -366,6 +369,210 @@ async function runProbe(bundleCode, accessToken) {
   dom.window.close()
   notes.push('tail DOM text: ' + lastText.slice(0, 120))
   notes.push('window logs: ' + (logs.length ? logs.slice(0, 8).join(' || ') : 'none'))
+}
+
+// ---------- 11 顶栏铃铛（任务 T3.11-b）：这个探针第一次真的「点一次写路径」 ----------
+//
+// 上面 1–10 段全程只发 GET、一颗按钮也没点过（当时的边界写在注释里：不污染夹具）。
+// 于是「点铃铛到底会不会发列表请求」「点已读到底会不会把 is_read 写成 1」这两件事
+// 只有 JUnit 和 docs/smoke.mjs 在证，界面这一环是空的。这一段把它补上。
+// 代价是它确实会写库，所以所有写入都落在三个一次性账号身上（甲→乙、丙→乙）：
+// 只有「乙」收通知，甲丙互不相干，夹具 user 23 与 post 39–42 一行都不碰。
+async function runBellProbe(bundleCode) {
+  const stamp = String(Date.now()).slice(-9)
+  const nameA = "probe_ntf_a" + stamp
+  const nameB = "probe_ntf_b" + stamp
+  const nameC = "probe_ntf_c" + stamp
+
+  async function api(method, p, token, body) {
+    const headers = { "Content-Type": "application/json" }
+    if (token) headers.Authorization = "Bearer " + token
+    const resp = await fetch(BASE + p, {
+      method: method, headers: headers, body: body ? JSON.stringify(body) : undefined
+    })
+    let json = null
+    try { json = await resp.json() } catch (e) { json = null }
+    return { status: resp.status, json: json }
+  }
+  async function register(username, nickname) {
+    const r = await api("POST", "/api/auth/register", null, {
+      username: username, password: "Smoke#2026x", nickname: nickname,
+      captchaId: "00000000000000000000000000000000", captchaCode: "ZZZZ",
+      agreeTerms: true, agreePrivacy: true, consentVersion: "v1.0", regSource: "probe-script"
+    })
+    const d = r.json && r.json.data ? r.json.data : {}
+    return { token: d.accessToken || null, id: d.user ? Number(d.user.id) : null, status: r.status }
+  }
+
+  const A = await register(nameA, "探针通知甲")
+  const B = await register(nameB, "探针通知乙")
+  const C = await register(nameC, "探针通知丙")
+  check("11", "注册三名一次性账号（甲/乙/丙），本段所有写入只落在这三个人身上",
+    !!A.token && !!B.token && !!C.token && !!A.id && !!B.id && !!C.id,
+    "a=" + A.id + " b=" + B.id + " c=" + C.id)
+  if (!A.token || !B.token || !C.token) {
+    notes.push("BELL PROBE 提前收工：注册没拿到 token（甲 " + A.status + " 乙 " + B.status + " 丙 " + C.status + "）")
+    return
+  }
+  const fAB = await api("POST", "/api/users/" + B.id + "/follow", A.token, { action: "follow" })
+  check("11", "甲关注乙 → changed=true（下面要点掉的那条未读就是它）",
+    fAB.status === 200 && !!(fAB.json && fAB.json.data) && fAB.json.data.changed === true,
+    fAB.status + " " + JSON.stringify((fAB.json && fAB.json.data) || {}).slice(0, 150))
+
+  // 换一份登录态就得换一个窗口：令牌是挂载那一刻从 localStorage 读的，
+  // 中途改 localStorage 不会让已经建好的 pinia store 重来一遍。
+  const mod = await import(pathToFileURL(JSDOM_ENTRY).href)
+  const JSDOM = mod.JSDOM
+  const blogs = []
+  const vc = new mod.VirtualConsole()
+  vc.on("jsdomError", function (e) { blogs.push("jsdomError: " + ((e && e.message) || String(e))) })
+  vc.on("error", function () { blogs.push("console.error: " + Array.prototype.join.call(arguments, " ")) })
+  const dom = new JSDOM('<!doctype html><html><head><meta charset="utf-8"></head><body><div id="app"></div></body></html>', {
+    url: BASE + "/feed", runScripts: "dangerously", pretendToBeVisual: true, virtualConsole: vc
+  })
+  const w = dom.window
+  w.IntersectionObserver = function IntersectionObserver() {
+    this.observe = function () {}; this.unobserve = function () {}; this.disconnect = function () {}
+  }
+  w.ResizeObserver = function ResizeObserver() {
+    this.observe = function () {}; this.unobserve = function () {}; this.disconnect = function () {}
+  }
+  w.matchMedia = function matchMedia() {
+    return { matches: false, media: "", onchange: null,
+      addListener: function () {}, removeListener: function () {},
+      addEventListener: function () {}, removeEventListener: function () {},
+      dispatchEvent: function () { return false } }
+  }
+  w.HTMLElement.prototype.scrollTo = function scrollTo() {}
+  w.Element.prototype.scrollIntoView = function scrollIntoView() {}
+  w.localStorage.setItem("mindisle_token", B.token)
+  const sc = w.document.createElement("script")
+  sc.textContent = bundleCode
+  w.document.head.appendChild(sc)
+
+  const items = function () {
+    return Array.prototype.slice.call(w.document.querySelectorAll(".mi-notify-item"))
+  }
+  const unreadItems = function () {
+    return w.document.querySelectorAll(".mi-notify-item.is-unread")
+  }
+  const itemText = function (i) {
+    const el = items()[i]
+    return el ? el.textContent.replace(/\s+/g, " ").trim() : ""
+  }
+  const badge = function () {
+    const e = w.document.querySelector(".mi-badge .el-badge__content")
+    return e ? e.textContent.trim() : ""
+  }
+  const headText = function () {
+    const e = w.document.querySelector(".mi-notify-count")
+    return e ? e.textContent.replace(/\s+/g, " ").trim() : ""
+  }
+  const headBtns = function () {
+    return Array.prototype.slice.call(w.document.querySelectorAll(".mi-notify-head button"))
+      .map(function (b) { return b.textContent.replace(/\s+/g, "").trim() })
+  }
+  function docText2() { return w.document.body.textContent.replace(/\s+/g, " ") }
+  async function until2(fn, ms, label) {
+    const t0 = Date.now()
+    for (;;) {
+      let ok = false
+      try { ok = !!fn() } catch (e) { ok = false }
+      if (ok) return true
+      if (Date.now() - t0 > ms) {
+        notes.push("TIMEOUT " + label + " 之后 DOM 文本=「" + docText2().slice(0, 200) + "」")
+        return false
+      }
+      await sleep(120)
+    }
+  }
+
+  const mounted = await until2(function () { return w.__probeMounted === true }, 12000, "bell-mount")
+  const onFeed = mounted && await until2(function () {
+    return w.__probeRouter && w.__probeRouter.currentRoute.value.name === "feed"
+  }, 8000, "bell-feed")
+  check("11", "以乙的身份重新挂载并停在广场（顶栏每个页面都挂着，铃铛就在这一层）",
+    onFeed, w.location.pathname)
+  const bell = w.document.querySelector(".mi-bell")
+  check("11", "已登录时顶栏画出铃铛（未登录那一块整棵 v-if 掉，不给游客留一个点开必 401 的空壳）",
+    !!bell)
+
+  // onMounted 里那次 refreshUnread 走的就是同一个 /api/notifications（size=1），
+  // 但它刻意不把拿到的那一条塞进 items。下面两条一起钉这件事：
+  // 红点已经亮了（说明轻量刷新真读到了），列表却还是没有行（说明它没顺手当列表用）。
+  const dot1 = await until2(function () { return badge() === "1" }, 10000, "bell-badge")
+  check("11", "红点由挂载时那次 size=1 的轻量刷新点亮：徽标显示 1", dot1, 'badge="' + badge() + '"')
+  check("11", "还没点铃铛之前列表是空的：轻量刷新只取 unreadCount，不把那一条例塞进 items",
+    items().length === 0, "items=" + items().length)
+
+  if (bell) bell.click()
+  const oneItem = await until2(function () { return items().length === 1 }, 12000, "bell-list-1")
+  check("11", "点铃铛 → 真的发出 GET /api/notifications 并渲染出那一条（列表只在点开这一刻读）",
+    oneItem, "items=" + items().length)
+  const line1 = itemText(0)
+  check("11", "文案来自后端 typeLabel+title：「探针通知甲 关注了你」，界面上不出现登录名 " + nameA,
+    line1.indexOf("探针通知甲 关注了你") >= 0 && line1.indexOf("关注") >= 0 && line1.indexOf(nameA) < 0,
+    line1)
+  check("11", "未读那条带 is-unread（左侧色条是「没读过」唯一的视觉标记）",
+    unreadItems().length === 1, "unread=" + unreadItems().length)
+  check("11", "头部计数与按钮跟着未读数走：「1 条未读」+ 一颗「全部已读」",
+    headText().indexOf("1 条未读") >= 0 && headBtns().indexOf("全部已读") >= 0,
+    'head="' + headText() + '" btns=' + JSON.stringify(headBtns()))
+
+  // ---------- 逐条已读：点一条通知 = 一次 POST /notifications/read + 一次跳转 ----------
+  const firstLi = items()[0]
+  if (firstLi) firstLi.click()
+  const jumpedToA = await until2(function () {
+    return w.__probeRouter.currentRoute.value.name === "user-home"
+  }, 8000, "bell-jump")
+  check("11", "点这条 follow 通知跳到甲的主页（跳转只认 refType=user，不猜文案）",
+    jumpedToA && w.__probeRouter.currentRoute.value.params.id === String(A.id),
+    "path=" + w.__probeRouter.currentRoute.value.path + " 应为 /user/" + A.id)
+  const readOne = await until2(function () { return unreadItems().length === 0 && badge() === "" }, 8000, "bell-read-one")
+  check("11", "点完这条就不亮了：is-unread 归零、徽标消失（markRead 回执里的 unreadCount 直接刷了红点）",
+    readOne, 'badge="' + badge() + '" unread=' + unreadItems().length + ' items=' + items().length + ' head="' + headText() + '"')
+  const srvAfterOne = await api("GET", "/api/notifications?size=20", B.token, null)
+  check("11", "服务端同步认为已读：乙自己再读一次列表 unreadCount=0（界面不是自说自话）",
+    srvAfterOne.status === 200 && Number(srvAfterOne.json.data.unreadCount) === 0,
+    "unreadCount=" + (srvAfterOne.json && srvAfterOne.json.data ? srvAfterOne.json.data.unreadCount : "?"))
+
+  // ---------- 再来一条未读，然后一键已读 ----------
+  const fCB = await api("POST", "/api/users/" + B.id + "/follow", C.token, { action: "follow" })
+  check("11", "丙再关注乙一次 → 又来一条未读（同一个人不能替别人把通知读完）",
+    fCB.status === 200 && !!(fCB.json && fCB.json.data) && fCB.json.data.changed === true,
+    fCB.status + " " + JSON.stringify((fCB.json && fCB.json.data) || {}).slice(0, 150))
+  // 重新点开才会再读一次：@show 只在「由关到开」那一刻发，所以这里只能反复点，
+  // 奇偶交给循环去试，而不是靠猜 popper 现在是 display:none 还是压根没渲染。
+  let reopened = false
+  for (let k = 0; k < 4 && !reopened; k++) {
+    if (bell) bell.click()
+    await sleep(400)
+    reopened = await until2(function () { return items().length === 2 }, 3000, "bell-reopen-" + k)
+  }
+  check("11", "关掉再点开 → 重新读了一次列表，两条都在（reset 是替换不是叠加）",
+    reopened, "items=" + items().length)
+  check("11", "重读之后只有新来的那条亮着：上一轮的已读是真落库了，不是前端记在内存里",
+    unreadItems().length === 1 && items().length === 2,
+    "unread=" + unreadItems().length + " items=" + items().length)
+  const allBtn = Array.prototype.slice.call(w.document.querySelectorAll(".mi-notify-head button"))
+    .find(function (b) { return b.textContent.replace(/\s+/g, "") === "全部已读" })
+  if (allBtn) allBtn.click()
+  const allRead = await until2(function () { return unreadItems().length === 0 }, 8000, "bell-mark-all")
+  check("11", "点「全部已读」→ 两条都熄灭，头部变成「暂无未读」，那颗按钮自己也跟着消失",
+    allRead && headText().indexOf("暂无未读") >= 0 && headBtns().indexOf("全部已读") < 0,
+    'head="' + headText() + '" btns=' + JSON.stringify(headBtns()))
+  const srvAfterAll = await api("GET", "/api/notifications?size=20", B.token, null)
+  const listAll = (srvAfterAll.json && srvAfterAll.json.data && srvAfterAll.json.data.list) || []
+  check("11", "一键已读落到库里：两条 read 都是 true（第二次独立取证，不看界面）",
+    srvAfterAll.status === 200 && listAll.length === 2 && listAll.every(function (x) { return x.read === true }),
+    "n=" + listAll.length + " read=" + listAll.map(function (x) { return x.read }).join(","))
+  check("11", "整段铃铛交互没有弹过全局错误条：读是 silent 的，写也没出错",
+    w.document.querySelectorAll(".el-message").length === 0,
+    "n=" + w.document.querySelectorAll(".el-message").length)
+  notes.push("bell 一次性账号：" + nameA + "(" + A.id + ") " + nameB + "(" + B.id + ") " + nameC + "(" + C.id + ")")
+  notes.push("bell 通知 id：" + listAll.map(function (x) { return x.id }).join(","))
+  notes.push("bell window logs: " + (blogs.length ? blogs.slice(0, 6).join(" || ") : "none"))
+  dom.window.close()
 }
 
 function finish() {

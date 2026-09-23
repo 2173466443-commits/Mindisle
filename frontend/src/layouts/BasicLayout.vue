@@ -21,9 +21,45 @@
             {{ backendUp ? '后端连接正常' : '后端未连接' }}
           </el-tag>
         </el-tooltip>
-        <el-badge :value="notify.unread" :hidden="!notify.unread" class="mi-badge">
-          <el-button link @click="notify.clear()">🔔</el-button>
-        </el-badge>
+        <!-- 铃铛（任务 T3.11-b · FR9.1 红点 + FR9.2 列表与一键已读）。
+             点开才拉列表：顶栏每个页面都挂着，未登录态和游客态不该各发一次无谓请求；
+             未读数字则跟着 30s 的心跳一起轻量刷新（refreshUnread 只取 unreadCount）。
+             未登录时整块不渲染，而不是渲染一个点开必 401 的空壳。 -->
+        <el-popover v-if="user.isLogged" ref="bell" placement="bottom-end" :width="352"
+          trigger="click" popper-class="mi-notify-popper" @show="onBellShow">
+          <template #reference>
+            <el-badge :value="notify.unread" :max="99" :hidden="!notify.unread" class="mi-badge">
+              <el-button link class="mi-bell" title="通知">🔔</el-button>
+            </el-badge>
+          </template>
+          <div class="mi-notify">
+            <div class="mi-notify-head">
+              <span class="mi-notify-title">通知</span>
+              <span class="mi-notify-count">{{ notify.unread ? notify.unread + ' 条未读' : '暂无未读' }}</span>
+              <el-button v-if="notify.unread > 0" link type="primary" :loading="marking" @click="markAll">
+                全部已读
+              </el-button>
+            </div>
+            <el-scrollbar max-height="336px">
+              <div v-if="notify.loading && !notify.items.length" class="mi-notify-blank">正在读取…</div>
+              <div v-else-if="notify.error" class="mi-notify-blank">{{ notify.error }}</div>
+              <div v-else-if="!notify.items.length" class="mi-notify-blank">还没有人找你。去广场发一条，或先给别人的帖子点个赞。</div>
+              <ul v-else class="mi-notify-list">
+                <li v-for="it in notify.items" :key="it.id" :class="{ 'is-unread': !it.read }"
+                  class="mi-notify-item" @click="openItem(it)">
+                  <span class="mi-notify-icon">{{ notifyIcon(it.type) }}</span>
+                  <span class="mi-notify-body">
+                    <span class="mi-notify-line">{{ it.title }}</span>
+                    <span v-if="it.content" class="mi-notify-sub">{{ it.content }}</span>
+                    <span class="mi-notify-meta">{{ it.typeLabel }} · {{ fromNow(it.createdAt) }}</span>
+                  </span>
+                </li>
+              </ul>
+              <el-button v-if="notify.hasMore" link class="mi-notify-more" :loading="notify.loading"
+                @click="notify.loadMore().catch(function () {})">看更早的通知</el-button>
+            </el-scrollbar>
+          </div>
+        </el-popover>
         <span v-if="user.isLogged" class="mi-who">{{ who }}</span>
         <el-button v-if="user.isLogged" link @click="doLogout">退出</el-button>
         <el-button v-else link @click="$router.push({ name: 'login' })">登录</el-button>
@@ -37,10 +73,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { systemInfo } from '@/api/system'
 import { logout } from '@/api/auth'
+import { notifyIcon, notifyRoute } from '@/api/notify'
+import { fromNow } from '@/utils/format'
 import { useUserStore } from '@/stores/user'
 import { useNotifyStore } from '@/stores/notify'
 
@@ -74,6 +112,43 @@ const backendTip = computed(() => {
   return '后端正常'
 })
 
+const bell = ref(null)
+const marking = ref(false)
+
+// 点开才读列表。失败不额外弹一条：store.error 已经存着那句话，列表区就地显示它，
+// 而全局红条会在「令牌刚过期」那一刻和登录跳转叠成两条提示。
+function onBellShow() {
+  notify.load(true).catch(function () {})
+}
+
+async function markAll() {
+  marking.value = true
+  try {
+    await notify.markAll()
+  } catch (e) {
+    /* 10001/10002 的话 http 层已经说过一次了，这里不再复述 */
+  } finally {
+    marking.value = false
+  }
+}
+
+function openItem(item) {
+  if (item && !item.read && item.id) {
+    // 点不掉一条通知不该挡住跳转：跳转是用户要的那件事，已读只是顺手。
+    notify.markRead([item.id]).catch(function () {})
+  }
+  if (bell.value && typeof bell.value.hide === 'function') bell.value.hide()
+  if (!item) return
+  const to = notifyRoute(item)
+  if (to) {
+    router.push(to).catch(function () {})
+    return
+  }
+  // 没有 ref 的通知（crisis/system）跳不了具体对象。危机关怀那一条的第一读者
+  // 是「需要马上找到入口」的人，所以给它求助页；其余的原地不动，不做无意义的跳转。
+  if (item.type === 'crisis') router.push({ name: 'help' }).catch(function () {})
+}
+
 async function doLogout() {
   try {
     await logout()
@@ -87,7 +162,18 @@ async function doLogout() {
 
 onMounted(() => {
   check()
-  timer = setInterval(check, 30000)
+  if (user.isLogged) notify.refreshUnread()
+  timer = setInterval(function () {
+    check()
+    // 复用同一个 30s 心跳去刷红点：再开一个 interval 就是给同一件事两份漂移的时钟。
+    if (user.isLogged) notify.refreshUnread()
+  }, 30000)
+})
+
+// 登录态一变，通知状态必须跟着归零：不这么做的后果是「退出再登录，红点还挂着上一个人的未读」。
+watch(() => user.isLogged, (logged) => {
+  if (logged) notify.refreshUnread()
+  else notify.clear()
 })
 onUnmounted(() => timer && clearInterval(timer))
 </script>
@@ -108,6 +194,24 @@ onUnmounted(() => timer && clearInterval(timer))
 .mi-nav a.router-link-active, .mi-nav a:hover { color: var(--mi-primary); }
 .mi-nav .mi-help { color: var(--mi-anger); }
 .mi-status { display: flex; align-items: center; gap: 14px; }
+.mi-bell { font-size: 18px; line-height: 1; }
+.mi-notify { display: flex; flex-direction: column; gap: 6px; }
+.mi-notify-head { display: flex; align-items: center; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--mi-border); }
+.mi-notify-title { font-size: 14px; font-weight: 600; color: var(--mi-text); }
+.mi-notify-count { font-size: 12px; color: var(--mi-text-dim); flex: 1; }
+.mi-notify-blank { padding: 18px 4px; font-size: 13px; color: var(--mi-text-dim); text-align: center; }
+.mi-notify-list { list-style: none; margin: 0; padding: 0; }
+.mi-notify-item { display: flex; gap: 10px; padding: 10px 6px; border-bottom: 1px dashed var(--mi-border); cursor: pointer; }
+.mi-notify-item:hover { background: var(--mi-mist-bg, rgba(64, 158, 255, 0.06)); }
+.mi-notify-item.is-unread .mi-notify-line { font-weight: 600; }
+.mi-notify-item.is-unread { border-left: 3px solid var(--mi-primary); padding-left: 3px; }
+.mi-notify-icon { font-size: 16px; line-height: 1.4; }
+.mi-notify-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.mi-notify-line { font-size: 13px; color: var(--mi-text); }
+.mi-notify-sub { font-size: 12px; color: var(--mi-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mi-notify-meta { font-size: 11px; color: var(--mi-text-dim); }
+.mi-notify-more { width: 100%; margin-top: 6px; }
+
 .mi-ver { font-size: 12px; color: var(--mi-text-dim); }
 .mi-who { font-size: 13px; color: var(--mi-mist); }
 .mi-main { padding: 24px 28px; max-width: 1080px; margin: 0 auto; width: 100%; flex: 1; }
