@@ -21,7 +21,11 @@ export const logout = () => http.post('/auth/logout', {}, { silent: true })
  * GET/POST /api/posts/{id}/comments（T3.7 评论与楼中楼）、
  * POST /api/posts/{id}/report（T3.11 举报）、GET/POST /api/users/{id}/follow 与
  * GET /api/users/{id}/profile（T3.6）、GET /api/users/me/posts（T3.13）、
- * GET /api/notifications 与 POST /api/notifications/read（T3.11-b 站内通知，顶栏铃铛已接通）。
+ * GET /api/notifications 与 POST /api/notifications/read（T3.11-b 站内通知，顶栏铃铛已接通）、
+ * GET /api/feed/following（T3.17 关注流，首页「广场 / 关注」两个 Tab 已接通）、
+ * GET /api/search/{posts,topics,users}（T3.9 站内搜索，/search 页已接通）。
+ * 后两批是 2026-09-23 按 web 包里的 @*Mapping 反推核对的。搜索这条不存在「从表里删掉旧的一行」，
+ * 因为需求 §9.1 那条单接口 /search 后端从来没映射过 —— 它一落地就是三条路径。
  * 独立的「通知中心」整页仍属任务 3.16 —— 那是同一批接口的第二个消费者，不是接口没做，
  * 所以它不进这张表：这张表列的是「点了会没反应」，不是「还没长成设计稿那样」。</p>
  *
@@ -33,7 +37,6 @@ export const logout = () => http.post('/auth/logout', {}, { silent: true })
 export const NOT_IMPLEMENTED_YET = [
   'GET  /api/feed/recommend（情绪感知协同过滤推荐）→ 阶段 6/7，接口在但直接返 90001',
   'PATCH/DELETE /api/posts/{id}（编辑进重审、树洞到期销毁）→ 任务 3.15',
-  'GET /api/feed/following（关注 Tab 时间线）→ 任务 3.17',
   'POST /api/emotions/checkin（情绪打卡与档案）→ 阶段 4',
   'POST /api/ai/chat/stream（SSE 流式对话）→ 阶段 4',
   'GET/DELETE /api/ai/conversations（会话历史）→ 阶段 4',

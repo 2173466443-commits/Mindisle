@@ -14,8 +14,8 @@ import org.springframework.context.annotation.Configuration;
  * OpenAPI 分组（springdoc-openapi 3.1.1，见手册 §5.3）。
  *
  * <p>分组口径与 Gate 2 验收一致：在 /doc.html 的下拉里能看到分组列表——阶段 2 为 5 个，阶段 3 先加「06-audit 内容安全」
- * 与「07-file 文件与上传」到 7 个，任务 T3.11-b 再加「08-notify 站内通知」到 8 个；接口总数不少于 20，
- * 论文第 6 章接口清单按同一口径统计，避免答辩时数字对不上。</p>
+ * 与「07-file 文件与上传」到 7 个，任务 T3.11-b 再加「08-notify 站内通知」到 8 个，任务 T3.9 加「09-search 站内搜索」到 9 个；
+ * 接口总数不少于 20，论文第 6 章接口清单按同一口径统计，避免答辩时数字对不上。</p>
  *
  * <p><b>分组数没有被任何脚本写死</b>：手册 v1.2.0 之前有一句「Swagger 的 @Tag 分组数被 docs/openapi-check
  * 断言写死」，实测 docs/ 下不存在该脚本、smoke.mjs 也不校验 /v3/api-docs，已按 bug 订正（手册 §19 v1.2.1）。
@@ -78,5 +78,17 @@ public class OpenApiConfig {
     public GroupedOpenApi notifyApi() {
         return GroupedOpenApi.builder().group("08-notify 站内通知")
                 .pathsToMatch("/api/notifications/**").build();
+    }
+
+    /**
+     * 搜索分组（任务 T3.9）。
+     *
+     * <p>三条子路径的出参形状各不相同（帖是分页流、话题与人是定长数组），所以没有把它们
+     * 挤进一条 {@code /api/search} 路径——理由与口径偏离的记录写在 {@code SearchController} 的类注释里。</p>
+     */
+    @Bean
+    public GroupedOpenApi searchApi() {
+        return GroupedOpenApi.builder().group("09-search 站内搜索")
+                .pathsToMatch("/api/search/**").build();
     }
 }

@@ -152,6 +152,10 @@ mindisle:
     max-description-chars: 200    # FR4.7 描述字数上限，列宽 500 留的是余量
     max-evidence-images: 3        # FR4.7 截图证据张数
     sla-hours: 24                 # 非危机举报的处理时限；危机类走上面 crisis 的 L2/L3 SLA
+  search:                        # 任务 T3.9 站内搜索（需求 FR4.8 · NFR10 不写死）
+    max-keyword-chars: 64        # 超长直接 10001，不做「截断兜底」：截断会悄悄改变用户要查的东西
+    max-profiles: 20             # 搜话题 / 搜人一次返回的条数上限，也是缺省值被夹住的上界
+    fulltext: false              # MATCH 需先执行 sql/10_index.sql（任务 2.2 ◐）；没索引就开 = 每次先抛 1191 再回落
   captcha:                       # 任务 T2.16 图形验证码总开关
     # 默认 true 是 fail-closed：不配这个键就必须验码。答案只进缓存、不返回也不打日志，
     # 所以自动化冒烟拿不到它 —— 只有本地开发/CI 才显式设 MINDISLE_CAPTCHA_ENABLED=false，

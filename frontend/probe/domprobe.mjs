@@ -82,9 +82,10 @@ if (!token) {
 } else {
   notes.push('login via 5173 proxy: code=' + loginBody.code + ' tokenLen=' + token.length)
   await runProbe(bundle, token)
-  // 第 11 段刻意放在最后：它会写库、还要另开一个 jsdom 窗口，
-  // 不能让它把前面 1–10 段那些只读断言的环境搅浑。
+  // 第 11、12 段刻意放在最后：它们都会写库、都要另开一个 jsdom 窗口，
+  // 不能让它们把前面 1–10 段那些只读断言的环境搅浑。
   await runBellProbe(bundle)
+  await runSourceSearchProbe(bundle)
   finish()
 }
 
@@ -572,6 +573,318 @@ async function runBellProbe(bundleCode) {
   notes.push("bell 一次性账号：" + nameA + "(" + A.id + ") " + nameB + "(" + B.id + ") " + nameC + "(" + C.id + ")")
   notes.push("bell 通知 id：" + listAll.map(function (x) { return x.id }).join(","))
   notes.push("bell window logs: " + (blogs.length ? blogs.slice(0, 6).join(" || ") : "none"))
+  dom.window.close()
+}
+
+// ---------- 12 关注流 Tab + 站内搜索页（任务 T3.17 / T3.9 的前端半程） ----------
+// 这一段和第 11 段一样会写库：两名一次性账号、四条夹具帖、一条关注关系。
+// 它要证明的三件事，build 和接口冒烟都给不出证据：
+// ① 广场页现在同时挂着两份分页列表，切 Tab 用的是 v-show 而不是 v-if —— 节点不销毁，
+//    两份无限滚动的哨兵才还在（这一条只能靠「两节同时存在于 DOM 里」看出来）；
+// ② 切回来不重抓。这只能看请求日志，看界面是猜：状态被保留和「又抓了一遍同样的数据」长得一模一样；
+// ③ 搜索页三条路径各自的空态、结果表、类型筛选、地址栏同步与深链自动执行。
+async function runSourceSearchProbe(bundleCode) {
+  const stamp = String(Date.now()).slice(-9)
+  const nameR = "probe_src_r" + stamp
+  const nameD = "probe_src_d" + stamp
+  const kw = "探针关注" + stamp
+  const nickD = "探针作者" + stamp
+
+  async function api(method, p, token, body) {
+    const headers = { "Content-Type": "application/json" }
+    if (token) headers.Authorization = "Bearer " + token
+    const resp = await fetch(BASE + p, {
+      method: method, headers: headers, body: body ? JSON.stringify(body) : undefined
+    })
+    let json = null
+    try { json = await resp.json() } catch (e) { json = null }
+    return { status: resp.status, json: json }
+  }
+  async function register(username, nickname) {
+    const r = await api("POST", "/api/auth/register", null, {
+      username: username, password: "Smoke#2026x", nickname: nickname,
+      captchaId: "00000000000000000000000000000000", captchaCode: "ZZZZ",
+      agreeTerms: true, agreePrivacy: true, consentVersion: "v1.0", regSource: "probe-script"
+    })
+    const d = r.json && r.json.data ? r.json.data : {}
+    return { token: d.accessToken || null, id: d.user ? Number(d.user.id) : null, status: r.status }
+  }
+
+  const R = await register(nameR, "探针读者" + stamp)
+  const D = await register(nameD, nickD)
+  check("12", "注册两名一次性账号：读者 R 只负责看关注流，作者 D 只负责被关注（本段所有写入都落在这两个人身上）",
+    !!R.token && !!D.token && !!R.id && !!D.id,
+    "r=" + R.id + "(" + R.status + ") d=" + D.id + "(" + D.status + ")")
+  if (!R.token || !D.token) {
+    notes.push("SOURCE/SEARCH PROBE 提前收工：注册没拿到 token（读者 " + R.status + " 作者 " + D.status + "）")
+    return
+  }
+  const mk = async function (body) {
+    const rr = await api("POST", "/api/posts", D.token, body)
+    return rr.json && rr.json.data ? rr.json.data : null
+  }
+  const pub1 = await mk({ title: kw + "甲", content: "关注流夹具甲，正文也带 " + kw })
+  const pub2 = await mk({ title: kw + "乙", content: "关注流夹具乙，正文也带 " + kw })
+  const hole = await mk({ title: kw + "洞", content: "树洞夹具一条 " + kw, type: "hole" })
+  const privv = await mk({ title: kw + "私", content: "私密夹具一条 " + kw, visibility: "private" })
+  const fixIds = [pub1, pub2, hole, privv].filter(Boolean).map(function (x) { return x.id })
+  check("12", "作者落库四条夹具：两条公开实名 + 一条树洞（自动匿名）+ 一条仅自己可见 —— 新号 24 小时内每日 5 帖，这里只占 4 条",
+    fixIds.length === 4 && hole && hole.anonymous === true
+      && String(hole.displayName || "").indexOf("匿名屿民·") === 0
+      && privv && privv.visibility === "private",
+    "ids=" + fixIds.join(",") + " hole=" + (hole ? hole.displayName : "-") + " priv=" + (privv ? privv.visibility : "-"))
+  const fRD = await api("POST", "/api/users/" + D.id + "/follow", R.token, { action: "follow" })
+  check("12", "读者关注作者 → changed=true：关注流读的就是这条 user_follow（后端每次现取，没有缓存，取关立刻消失）",
+    fRD.status === 200 && !!(fRD.json && fRD.json.data) && fRD.json.data.changed === true,
+    fRD.status + " " + JSON.stringify((fRD.json && fRD.json.data) || {}).slice(0, 120))
+
+  const mod = await import(pathToFileURL(JSDOM_ENTRY).href)
+  const blogs = []
+  const vc = new mod.VirtualConsole()
+  vc.on("jsdomError", function (e) { blogs.push("jsdomError: " + ((e && e.message) || String(e))) })
+  vc.on("error", function () { blogs.push("console.error: " + Array.prototype.join.call(arguments, " ")) })
+  const dom = new mod.JSDOM('<!doctype html><html><head><meta charset="utf-8"></head><body><div id="app"></div></body></html>', {
+    url: BASE + "/feed", runScripts: "dangerously", pretendToBeVisual: true, virtualConsole: vc
+  })
+  const w = dom.window
+  w.IntersectionObserver = function IntersectionObserver() {
+    this.observe = function () {}; this.unobserve = function () {}; this.disconnect = function () {}
+  }
+  w.ResizeObserver = function ResizeObserver() {
+    this.observe = function () {}; this.unobserve = function () {}; this.disconnect = function () {}
+  }
+  w.matchMedia = function matchMedia() {
+    return { matches: false, media: "", onchange: null,
+      addListener: function () {}, removeListener: function () {},
+      addEventListener: function () {}, removeEventListener: function () {},
+      dispatchEvent: function () { return false } }
+  }
+  w.HTMLElement.prototype.scrollTo = function scrollTo() {}
+  w.Element.prototype.scrollIntoView = function scrollIntoView() {}
+  // 请求日志：装在挂载之前，整段都用它。axios 在浏览器构建里走 XHR，
+  // 包一层 open 就能拿到真实 URL —— 判「切 Tab 有没有重抓」只有这一种不骗自己的办法。
+  w.__reqLog = []
+  const originOpen = w.XMLHttpRequest.prototype.open
+  w.XMLHttpRequest.prototype.open = function (method, url) {
+    w.__reqLog.push(String(method) + " " + String(url))
+    return originOpen.apply(this, arguments)
+  }
+  const reqs = function (needle) {
+    return (w.__reqLog || []).filter(function (line) { return line.indexOf(needle) >= 0 })
+  }
+  w.localStorage.setItem("mindisle_token", R.token)
+  const sc = w.document.createElement("script")
+  sc.textContent = bundleCode
+  w.document.head.appendChild(sc)
+
+  const txt = function (el) { return el ? el.textContent.replace(/s+/g, " ").trim() : "" }
+  const secs = function () { return Array.prototype.slice.call(w.document.querySelectorAll("section.plaza")) }
+  // 两节的区分不靠 DOM 顺序：广场那节顶部有类型 Tab（一个 radio-group），关注那节没有。
+  const plazaSec = function () {
+    return secs().find(function (x) { return !!x.querySelector(".el-radio-group") }) || null
+  }
+  const folSec = function () {
+    return secs().find(function (x) { return !x.querySelector(".el-radio-group") }) || null
+  }
+  const cardsIn = function (sec) {
+    return sec ? Array.prototype.slice.call(sec.querySelectorAll("article.post")) : []
+  }
+  const titlesIn = function (sec) {
+    return cardsIn(sec).map(function (c) { return txt(c.querySelector(".title")) })
+  }
+  const dismissBtns = function (sec) {
+    if (!sec) return []
+    return Array.prototype.slice.call(sec.querySelectorAll("article.post button"))
+      .filter(function (b) { return txt(b).indexOf("不感兴趣") >= 0 })
+  }
+  function pickIn(root, label) {
+    if (!root) return false
+    const btn = Array.prototype.slice.call(root.querySelectorAll(".el-radio-button"))
+      .find(function (x) { return txt(x) === label })
+    if (!btn) return false
+    const inp = btn.querySelector("input")
+    if (!inp) return false
+    inp.click()
+    return true
+  }
+  function docText4() { return w.document.body.textContent.replace(/s+/g, " ") }
+  async function until4(fn, ms, label) {
+    const t0 = Date.now()
+    for (;;) {
+      let ok = false
+      try { ok = !!fn() } catch (e) { ok = false }
+      if (ok) return true
+      if (Date.now() - t0 > ms) {
+        notes.push("TIMEOUT " + label + " 之后 DOM 文本=「" + docText4().slice(0, 200) + "」")
+        return false
+      }
+      await sleep(120)
+    }
+  }
+  const route4 = function () { return w.__probeRouter.currentRoute.value }
+
+  const mounted4 = await until4(function () { return w.__probeMounted === true }, 12000, "src-mount")
+  const onFeed4 = mounted4 && await until4(function () { return route4().name === "feed" }, 8000, "src-feed")
+  check("12", "以读者身份挂载并停在广场（这一段的入口是页面本身，不是任何接口）",
+    onFeed4, w.location.pathname)
+  const twoSecs = await until4(function () { return secs().length === 2 }, 10000, "src-two-sections")
+  check("12", "广场页同时挂着两节列表：切 Tab 用的是 v-show 而不是 v-if —— 节点一旦被销毁，那两份无限滚动的哨兵就再也等不到「第二次进视野」",
+    twoSecs && secs().length === 2, "n=" + secs().length)
+  const plazaReady = await until4(function () { return cardsIn(plazaSec()).length > 0 }, 12000, "src-plaza")
+  const plazaTitles0 = titlesIn(plazaSec()).join("|")
+  const plazaDismiss0 = dismissBtns(plazaSec()).length
+  check("12", "首屏只露出广场：广场节有卡片且带「不感兴趣」，关注节整节 display:none（数据没取，节点已经在）",
+    plazaReady && plazaTitles0.split("|").length > 0 && plazaDismiss0 > 0
+      && plazaSec().style.display !== "none" && folSec().style.display === "none",
+    'plazaCards=' + cardsIn(plazaSec()).length + ' plazaHide=' + plazaDismiss0
+      + ' folStyle="' + folSec().getAttribute("style") + '"')
+
+  w.__reqLog.length = 0
+  const clickedFol = pickIn(w.document.querySelector(".mi-card.source"), "关注")
+  const folTwo = await until4(function () { return cardsIn(folSec()).length === 2 }, 12000, "src-follow-2")
+  check("12", "点「关注」→ 只发出一次 GET /api/feed/following（不是又抓一遍广场，也不是不发请求）",
+    clickedFol && reqs("/api/feed/following").length === 1,
+    JSON.stringify(reqs("/api/feed/following")))
+  check("12", "关注流恰好两张卡片，标题全部来自作者这次的夹具：树洞与私密那两条恒不出现（前端没做任何二次过滤，接口回什么就画什么）",
+    folTwo && titlesIn(folSec()).length === 2
+      && titlesIn(folSec()).every(function (t) { return t.indexOf(kw) === 0 })
+      && titlesIn(folSec()).join("|").indexOf(kw + "洞") < 0
+      && titlesIn(folSec()).join("|").indexOf(kw + "私") < 0,
+    "titles=" + titlesIn(folSec()).join("|"))
+  check("12", "切过来之后是关注节显示、广场节 display:none：两节互为镜像，都不靠重建",
+    folSec().style.display !== "none" && plazaSec().style.display === "none",
+    'fol="' + folSec().getAttribute("style") + '" plaza="' + plazaSec().getAttribute("style") + '"')
+  check("12", "关注流的卡片不带「不感兴趣」：那是广场的负反馈位，后端也没有对应的这条路径的接口（对比广场那节有 " + plazaDismiss0 + " 个）",
+    dismissBtns(folSec()).length === 0, "n=" + dismissBtns(folSec()).length)
+  check("12", "关注流的作者名两条都可点进主页（.who.link）：这条流里全是实名帖，这正是它和广场的区别",
+    folSec().querySelectorAll(".who.link").length === 2,
+    "link=" + folSec().querySelectorAll(".who.link").length
+      + " names=" + Array.prototype.slice.call(folSec().querySelectorAll(".who")).map(txt).join("/"))
+  check("12", "关注节的计数行报的是后端 total（页码模式首屏才有的那个字段），不是本页卡片数",
+    txt(folSec()).indexOf("关注的人共 2 条可见更新") >= 0,
+    "hint=" + Array.prototype.slice.call(folSec().querySelectorAll(".hint")).map(txt).join(" || ").slice(0, 180))
+
+  w.__reqLog.length = 0
+  const backPlaza = pickIn(w.document.querySelector(".mi-card.source"), "广场")
+  await sleep(900)
+  check("12", "切回广场：一条列表请求都没发，卡片与标题顺序和切走前逐字一致（两份列表各有各的游标与缓存，切 Tab 不重抓）",
+    backPlaza && reqs("/api/posts").length === 0 && titlesIn(plazaSec()).join("|") === plazaTitles0,
+    "reqs=" + JSON.stringify(reqs("/api/posts")) + " cards=" + cardsIn(plazaSec()).length)
+
+  await w.__probeRouter.push({ name: "search" })
+  const onSearch = await until4(function () { return route4().name === "search" }, 8000, "src-search-mount")
+  check("12", "顶栏「搜索」这条路进得来 /search（路由注册 + requiresAuth 放行已登录读者）",
+    onSearch, w.location.pathname)
+  check("12", "空关键词时给的是说明而不是错误：「输入关键词后按回车开搜」，且一条请求都不发（后端空词直接 10001）",
+    docText4().indexOf("输入关键词后按回车开搜") >= 0 && reqs("/api/search").length === 0,
+    "reqs=" + reqs("/api/search").length)
+  check("12", "结果类别是单选按钮组而不是下拉：与全站另外三处「换一张列表」同一个控件，本段也才能复用同一个点击器",
+    w.document.querySelectorAll(".modes .el-radio-button").length === 3
+      && w.document.querySelectorAll(".el-select").length === 0,
+    "modes=" + Array.prototype.slice.call(w.document.querySelectorAll(".modes .el-radio-button")).map(txt).join("/"))
+
+  const setKw = function (value) {
+    const input = w.document.querySelector("input.el-input__inner")
+    if (!input) return false
+    input.value = value
+    input.dispatchEvent(new w.Event("input", { bubbles: true }))
+    return true
+  }
+  const clickSearch = function () {
+    const btn = Array.prototype.slice.call(w.document.querySelectorAll(".el-input-group__append button"))
+      .find(function (b) { return txt(b) === "搜索" })
+    if (!btn) return false
+    btn.click()
+    return true
+  }
+  const searchCards = function () {
+    return Array.prototype.slice.call(w.document.querySelectorAll(".page .list article.post"))
+  }
+  const setOk = setKw(kw)
+  const subOk = clickSearch()
+  const got3 = await until4(function () { return searchCards().length === 3 }, 12000, "src-search-3")
+  check("12", "在输入框里打关键词、点「搜索」→ GET /api/search/posts 真发出并画出三张卡片：两条公开 + 那条树洞（它公开可见，只是匿名）",
+    setOk && subOk && got3 && reqs("/api/search/posts").length >= 1,
+    "reqs=" + JSON.stringify(reqs("/api/search/posts")).slice(0, 170) + " n=" + searchCards().length)
+  check("12", "私密夹具搜不到：四条落库的帖子里只回三条（可见性判据与广场共用同一份，不是搜索自己另写一套）",
+    searchCards().map(function (c) { return txt(c.querySelector(".title")) }).join("|").indexOf(kw + "私") < 0,
+    "titles=" + searchCards().map(function (c) { return txt(c.querySelector(".title")) }).join("|"))
+  check("12", "树洞那条在结果里带着马甲名「匿名屿民·」：搜索这条路径同样不能解匿（FR1.4）",
+    Array.prototype.slice.call(w.document.querySelectorAll(".page .list .who"))
+      .some(function (e) { return txt(e).indexOf("匿名屿民·") === 0 }),
+    "who=" + Array.prototype.slice.call(w.document.querySelectorAll(".page .list .who")).map(txt).join("/"))
+  check("12", "计数行报出后端 total：「共 3 条命中」，并把这次查询写进地址栏 ?q=（能刷新还在、能后退回去、链接能发给别人）",
+    docText4().indexOf("共 3 条命中") >= 0 && decodeURIComponent(w.location.search).indexOf(kw) >= 0,
+    "search=" + decodeURIComponent(w.location.search))
+  // ---------- 类型筛选：请求与地址栏各判一次（上一版就是只看界面没看地址栏，漏掉了没同步的那半条） ----------
+  const reqsBeforeType = reqs("/api/search/posts").length
+  const typeOk = pickIn(w.document.querySelector(".filters"), "树洞")
+  const got1 = await until4(function () { return searchCards().length === 1 }, 12000, "src-search-type")
+  const typeReqs = reqs("/api/search/posts")
+  check("12", "点类型筛选「树洞」→ 只多发一条请求，且 type=hole 是发请求那一刻才拼进去的（参数由 query() 现取，不是挂载时的快照）",
+    typeOk && typeReqs.length === reqsBeforeType + 1
+      && String(typeReqs[typeReqs.length - 1] || "").indexOf("type=hole") >= 0,
+    JSON.stringify(typeReqs).slice(0, 330))
+  check("12", "筛选后只剩那一条树洞，标题逐字对得上，计数行跟着后端重算成「共 1 条命中」",
+    got1 && searchCards().length === 1 && txt(searchCards()[0].querySelector(".title")) === kw + "洞"
+      && docText4().indexOf("共 1 条命中") >= 0,
+    "titles=" + searchCards().map(function (c) { return txt(c.querySelector(".title")) }).join("|"))
+  check("12", "筛选条件同步进了地址栏 ?type=hole：改回 run() 之前这里只调 reload()，筛选生效了链接却还是没筛的那条，「把这一屏发给同学」会发错",
+    decodeURIComponent(w.location.search).indexOf("type=hole") >= 0,
+    "search=" + decodeURIComponent(w.location.search))
+  // ---------- 清空：屏幕与地址栏要一起回到「还没搜」 ----------
+  const clearBtn = w.document.querySelector(".el-input__clear")
+  if (clearBtn) clearBtn.dispatchEvent(new w.MouseEvent("click", { bubbles: true }))
+  const clearedOut = await until4(function () { return searchCards().length === 0 }, 8000, "src-search-cleared")
+  check("12", "点输入框的清空叉 → 结果清空、回到「输入关键词后按回车开搜」那句说明，且清空本身不发请求（后端空词直接 10001）",
+    !!clearBtn && clearedOut && docText4().indexOf("输入关键词后按回车开搜") >= 0
+      && reqs("/api/search/posts").length === typeReqs.length,
+    "clearBtn=" + !!clearBtn + " reqs=" + reqs("/api/search/posts").length)
+  check("12", "清空连地址栏一起清：屏幕上已经是「还没搜」，链接里就不该还留着 q=（否则一刷新会凭空恢复一份刚被用户清掉的结果）",
+    decodeURIComponent(w.location.search).indexOf(kw) < 0,
+    "search=" + decodeURIComponent(w.location.search))
+  // ---------- 零命中 ----------
+  pickIn(w.document.querySelector(".filters"), "全部")
+  const kwNone = setKw(nickD) && clickSearch()
+  const emptied = await until4(function () { return docText4().indexOf("共 0 条命中") >= 0 }, 12000, "src-search-empty")
+  check("12", "换成一个只有昵称里才有的词（先退回「全部」类型）→ 零命中：画空态而不是报错，不许留着上一轮的结果，type 也从地址栏掉了",
+    kwNone && emptied && searchCards().length === 0
+      && w.document.querySelectorAll(".page .list .el-empty").length > 0
+      && decodeURIComponent(w.location.search).indexOf("type=") < 0,
+    "n=" + searchCards().length + " empty=" + w.document.querySelectorAll(".page .list .el-empty").length
+      + " search=" + decodeURIComponent(w.location.search))
+  const reqsBeforeUser = reqs("/api/search/users").length
+  const modeOk2 = pickIn(w.document.querySelector(".modes"), "屿友")
+  const oneUser = await until4(function () { return w.document.querySelectorAll(".page li.user").length === 1 }, 12000, "src-search-user")
+  check("12", "同一个关键词换到「屿友」这一栏就命中：三条路径查的是三张表，切栏不换词，且只多发自己那一条请求",
+    modeOk2 && oneUser && reqs("/api/search/users").length === reqsBeforeUser + 1
+      && txt(w.document.querySelector(".page li.user")).indexOf(nickD) >= 0
+      && txt(w.document.querySelector(".page li.user")).indexOf("uid " + D.id) >= 0,
+    "row=" + txt(w.document.querySelector(".page li.user")) + " reqs=" + reqs("/api/search/users").length)
+  check("12", "换栏也把类别写回了地址栏 ?m=user：刷新回来还在屿友这一栏，而不是被弹回帖子栏",
+    decodeURIComponent(w.location.search).indexOf("m=user") >= 0,
+    "search=" + decodeURIComponent(w.location.search))
+  const liUser = w.document.querySelector(".page li.user")
+  if (liUser) liUser.click()
+  const jumped = await until4(function () { return route4().name === "user-home" }, 8000, "src-jump-user")
+  check("12", "点这条屿友结果跳进作者主页 /user/" + D.id + "：搜索的落点与主页是同一条路由，不是另做一份资料卡",
+    jumped && String(route4().params.id) === String(D.id), "path=" + route4().path)
+
+  await w.__probeRouter.push({ name: "search", query: { m: "topic", q: "焦虑" } })
+  const topicHits = await until4(function () { return w.document.querySelectorAll(".page .topics .topic").length >= 2 }, 12000, "src-topic")
+  check("12", "带着 ?m=topic&q=焦虑 深链进搜索页：组件重新挂载时 onMounted 读地址栏自动跑了一次话题检索（刷新还在、链接可分享）",
+    route4().name === "search" && topicHits
+      && docText4().indexOf("秋招焦虑") >= 0 && reqs("/api/search/topics").length >= 1,
+    'search="' + w.location.search + '" reqs=' + JSON.stringify(reqs("/api/search/topics")).slice(0, 160))
+  check("12", "话题卡片点不动是写明白的：这一栏的解释跟着结果一起出现（话题详情页属任务 3.8）",
+    docText4().indexOf("话题卡片点不动是刻意的") >= 0, "note=" + (docText4().indexOf("话题卡片点不动是刻意的") >= 0))
+  check("12", "整段关注流 + 搜索页没弹过一条全局错误条：三条搜索路径都是 silent 的，401/10001/90002 各自由页面自己说清楚",
+    w.document.querySelectorAll(".el-message").length === 0,
+    "n=" + w.document.querySelectorAll(".el-message").length)
+  notes.push("src/search 一次性账号：" + nameR + "(" + R.id + ") " + nameD + "(" + D.id + ")")
+  notes.push("src/search 夹具帖 id：" + fixIds.join(",") + "（其中 " + (privv ? privv.id : "-") + " 是私密、" + (hole ? hole.id : "-") + " 是树洞）")
+  notes.push("src/search window logs: " + (blogs.length ? blogs.slice(0, 6).join(" || ") : "none"))
+  notes.push("本段触发搜索用的是「点搜索按钮」，没有测 @keyup.enter：jsdom 下 keyup 与 Element Plus 输入框包装层的对应关系不保证成立，键盘路径留给真浏览器")
   dom.window.close()
 }
 

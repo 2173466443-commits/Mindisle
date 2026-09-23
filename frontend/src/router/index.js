@@ -22,7 +22,11 @@ const routes = [
       { path: 'me/posts', name: 'my-posts', component: () => import('@/views/user/MyPostsView.vue'), meta: { requiresAuth: true } },
       { path: 'user/:id', name: 'user-home', component: () => import('@/views/user/UserHomeView.vue'), meta: { requiresAuth: true } },
       { path: 'ai', name: 'ai-chat', component: () => import('@/views/ai/ChatView.vue'), meta: { requiresAuth: true, requiresConsent: true } },
-      { path: 'emotion', name: 'emotion', component: () => import('@/views/emotion/EmotionView.vue'), meta: { requiresAuth: true, requiresConsent: true } }
+      { path: 'emotion', name: 'emotion', component: () => import('@/views/emotion/EmotionView.vue'), meta: { requiresAuth: true, requiresConsent: true } },
+      // 站内搜索（任务 T3.9 · 需求 FR4.8）。只要登录，不要敏感信息授权：
+      // 搜索读的是「已经对全体登录用户公开」的内容，输入关键词这件事本身不涉及处理敏感个人信息，
+      // 给这条加 requiresConsent 会把「没勾敏感授权的人」完全挡在站外，而他本来就该能搜帖。
+      { path: 'search', name: 'search', component: () => import('@/views/search/SearchView.vue'), meta: { requiresAuth: true } }
     ]
   },
   { path: '/:pathMatch(.*)*', name: 'notfound', component: () => import('@/views/NotFound.vue'), meta: { public: true } }

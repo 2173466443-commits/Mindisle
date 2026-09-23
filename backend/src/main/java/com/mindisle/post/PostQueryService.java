@@ -13,6 +13,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mindisle.common.BizException;
 import com.mindisle.common.ErrorCode;
+import com.mindisle.common.Keyword;
+import com.mindisle.common.LikePattern;
 import com.mindisle.common.PageQuery;
 import com.mindisle.common.PageResult;
 import com.mindisle.config.MindisleProperties;
@@ -33,6 +35,9 @@ import com.mindisle.mapper.UserMapper;
 import com.mindisle.post.dto.PostDetailView;
 import com.mindisle.post.dto.PostListItem;
 import com.mindisle.post.dto.PostView;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 /**
@@ -77,6 +82,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class PostQueryService {
 
+    private static final Logger log = LoggerFactory.getLogger(PostQueryService.class);
+
     /** 列表摘要长度：80 字够看清「说了什么」，又不至于把列表变成正文。 */
     static final int EXCERPT_CHARS = 80;
 
@@ -91,6 +98,19 @@ public class PostQueryService {
 
     /** 待审帖占位提示。与 PostService 给发帖人的一长句不同，列表里只放一行短标签。 */
     static final String AUDIT_TIP = "审核中，仅自己可见";
+
+    /**
+     * 关注流一次取出的作者数上限（任务 3.17 · 需求 FR4.6）。
+     *
+     * <p><b>为什么是 500 而不是「全取」</b>：关注列表在数据上没有上限，一条
+     * {@code IN (…几万个 id)} 会先撞 MySQL 的 max_allowed_packet，而且这条 SQL 本身
+     * 不可能快。500 个 id 拼进 IN 约 3KB，读侧两端都还是范围扫描
+     * （{@code user_follow} 走 uk_follow_pair 的 user_id 前缀，post 走 idx_user_status）。
+     * 超出部分按「最新关注的优先」被截掉
+     * （{@code UserFollowMapper#listFollowingIds} 的 {@code ORDER BY id DESC}），
+     * 所以丢的是最久以前关注的人——这是有依据的取舍，不是随手写的数。</p>
+     */
+    public static final int FOLLOWING_AUTHOR_CAP = 500;
 
     private final PostMapper postMapper;
     private final PostImageMapper postImageMapper;
@@ -535,11 +555,11 @@ public class PostQueryService {
      * 单测把这条钉住，不靠注释。</p>
      */
     static void applyPublicProfile(LambdaQueryWrapper<Post> wrapper, long userId, LocalDateTime now) {
-        wrapper.eq(Post::getUserId, userId)
-                .eq(Post::getStatus, PostService.STATUS_PUBLISHED)
-                .eq(Post::getVisibility, VISIBILITY_PUBLIC)
-                .and(real -> real.isNull(Post::getIsAnonymous).or().eq(Post::getIsAnonymous, 0))
-                .isNull(Post::getAliasId);
+        // 这里必须继续用 eq 而不是 in：PostListSqlConditionTest 里那条安全用例断言的就是
+        // user_id = ? 这个形状与 paramNameValuePairs 的集合。换成 IN 会让一条已经证明过
+        // 「主页不泄漏匿名帖」的用例变红——而它红的时候，没人敢顺手把断言改绿。
+        wrapper.eq(Post::getUserId, userId);
+        applyPublicRealNameScope(wrapper);
         applyNotExpired(wrapper, now);
     }
 
@@ -654,5 +674,196 @@ public class PostQueryService {
         boolean help = PostService.TYPE_HELP.equals(post.getType());
         return help || CrisisGrader.needsTicket(post.getRiskLevel())
                 ? properties.getCrisis().getHotline() : null;
+    }
+    // ============================================================ 站内搜索与关注流（任务 3.9 / 3.17）
+
+    /**
+     * 关键词搜帖（需求 FR4.8「站内搜索：关键词搜帖子 / 话题 / 人」中的「搜帖」那条）。
+     *
+     * <p><b>可见性判据必须就是广场那一条</b>：本方法在 {@link #applyVisible} 之上叠关键词，
+     * 而不是自己写一遍 status / visibility。否则就会出现「广场里已经看不到的帖，
+     * 搜索框里还能搜到」——手册 §14 第 27 条记的正是这类「同一判据两处实现」的事故。</p>
+     *
+     * <p><b>全文通道：先试 MATCH，两种情况都回落 LIKE</b>。回落条件不是只有抛异常：
+     * ① 抛异常——开发库还没建 {@code ft_title_content}（{@code sql/10_index.sql} 属任务 2.2 ◐，
+     * 至今未执行），{@code MATCH} 会报 1191；② 返回 0 命中。第 ② 条同样必须回落，
+     * 因为 InnoDB 的 {@code ngram_token_size} 默认是 2，单个汉字构成的词根本没进索引
+     * （同一个文件头部的「坑 1 / 坑 2」），此时「搜不到」是索引参数问题而不是内容问题，
+     * 直接回空页等于把功能判死。代价是一次额外的 SQL，只在 0 命中时付。</p>
+     *
+     * <p><b>三条已知的实现边界，答辩时按这三条说，不要说成「已完整实现」</b>：</p>
+     * <ol>
+     *   <li><b>相关度排序没做</b>。FR4.8 要「按相关度 + 时间」，这里只有时间序
+     *       （复用 {@link #pageResult} 的 {@code published_at DESC, id DESC}）。相关度序在
+     *       {@code LambdaQueryWrapper} 这一层做不到：ORDER BY 的表达式带不了占位符，
+     *       拼字符串等于把注入面请回来。真要按 {@code MATCH ... AGAINST} 的分数排，
+     *       得单独写一份 XML Mapper，已排到阶段 4（推荐域本来也要一份带权重的取数）。</li>
+     *   <li><b>{@code content} 是 MEDIUMTEXT，LIKE 走全表扫</b>。手册 §6.4 的「列表接口
+     *       P95 ≤ 500ms」只约束 {@code /api/posts}，没承诺过搜索接口。在
+     *       {@code mindisle.search.fulltext=true} 且索引真建起来之前，本接口数据量一大必然变慢。</li>
+     *   <li><b>匿名帖可以被搜到</b>，与广场同源（出参展示马甲名、{@code authorId} 为 null）；
+     *       但它<b>不能</b>通过昵称通道被反查——那条路在 {@code SearchService#users}，
+     *       两条路口径为何不同，写在 {@code SearchService} 的类注释里。</li>
+     * </ol>
+     *
+     * @param type 帖子形式过滤，与广场共用 {@link #normalizeTypeFilter} 那一份白名单
+     */
+    public PageResult<PostListItem> search(long viewerId, String keyword, String type, PageQuery query,
+                                           LocalDateTime now) {
+        PageQuery page = (query == null ? new PageQuery() : query).normalize();
+        String kw = Keyword.normalize(keyword, properties.getSearch().getMaxKeywordChars());
+        String typeFilter = normalizeTypeFilter(type);
+        if (properties.getSearch().isFulltext()) {
+            try {
+                PageResult<PostListItem> hits = pageResult(
+                        keywordWrapper(viewerId, typeFilter, now, kw, true), viewerId, page, now);
+                if (!hits.getList().isEmpty()) {
+                    return hits;
+                }
+                // 回落时重新拼一条 wrapper，而不是复用刚才那条：pageResult 会把游标条件、
+                // ORDER BY、limit 全都拼进同一个 wrapper 对象，拿它再查一次等于在旧锚点上叠第二层。
+            } catch (DataAccessException e) {
+                // 只降级不抛错：搜索框不该因为「运维没跑那个索引脚本」变成 500。
+                log.warn("全文检索通道不可用，已回落 LIKE：{}", e.getMessage());
+            }
+        }
+        return pageResult(keywordWrapper(viewerId, typeFilter, now, kw, false), viewerId, page, now);
+    }
+
+    /**
+     * 关注流时间线（需求 FR4.6「关注 TA，就能在首页看到 TA 更新的内容」·任务 3.17）。
+     *
+     * <p><b>作者列表为空时一条 SQL 都不发</b>：MyBatis-Plus 的 {@code in(column, 空集合)}
+     * 会拼出 {@code IN ()}，MySQL 直接判语法错。真走到那一步，「刚注册、还没关注任何人」
+     * 这个最常见的新人状态就会变成 500，而它本该是一句空态文案。</p>
+     *
+     * <p><b>关注流只给「实名 + 公开 + 已过审」的帖</b>（{@link #applyPublicRealNameScope}）：
+     * 匿名帖的前提是「读者不知道作者是谁」，而这条时间线里每一条帖的作者都在读者自己的关注列表里——
+     * 同一个人不能既是「我关注的某某」又是「匿名屿民·晚风」。把匿名帖放进来，等于让关注关系
+     * 自己把马甲脱了（需求 FR1.4，与 {@link #applyPublicProfile} 是同一条判据、同一个理由）。</p>
+     *
+     * <p><b>没有缓存</b>：每次现取 {@code user_follow}，所以取关之后下一条帖立刻从时间线消失，
+     * 不存在「取关了还能刷到」的窗口。任务 3.10 的埋点与阶段 4 的推荐缓存都不在这条路上。</p>
+     *
+     * @param authorIds 当前用户关注的作者 id，由 {@code FeedController} 取，条数上限
+     *                  {@link #FOLLOWING_AUTHOR_CAP}（本方法不再二次截断，避免两处上限）
+     */
+    public PageResult<PostListItem> following(long viewerId, List<Long> authorIds, PageQuery query,
+                                              LocalDateTime now) {
+        if (authorIds == null || authorIds.isEmpty()) {
+            return PageResult.empty();
+        }
+        PageQuery page = (query == null ? new PageQuery() : query).normalize();
+        LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
+        applyFollowingFeed(wrapper, authorIds, now);
+        return pageResult(wrapper, viewerId, page, now);
+    }
+
+    /** 「广场判据 + 作者未注销 + 关键词命中」三段拼在一起，全文与 LIKE 两条通道只差最后一段。 */
+    private LambdaQueryWrapper<Post> keywordWrapper(long viewerId, String typeFilter, LocalDateTime now,
+                                                    String keyword, boolean fullText) {
+        LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
+        applyVisible(wrapper, viewerId, typeFilter, now);
+        applyAuthorActive(wrapper);
+        // 转义只在这里做一次：两条通道共用同一个话题 EXISTS，模式串必须完全一致
+        String pattern = LikePattern.contains(keyword);
+        if (fullText) {
+            applyFullText(wrapper, keyword, pattern);
+        } else {
+            applyLikeMatch(wrapper, pattern);
+        }
+        return wrapper;
+    }
+
+    /** 话题名命中的那段 EXISTS，LIKE 与全文两条通道共用一份（同一条判据不抄两遍）。 */
+    private static final String TOPIC_NAME_MATCH_SQL = "EXISTS (SELECT 1 FROM post_topic pt"
+            + " JOIN topic t ON t.id = pt.topic_id"
+            + " WHERE pt.post_id = post.id AND t.deleted = 0 AND t.name LIKE {0} ESCAPE '!')";
+
+    /**
+     * LIKE 命中：标题 / 正文 / 话题名，三选一。
+     *
+     * <p><b>话题用 EXISTS 而不是 JOIN</b>：一条帖最多挂 3 个话题，JOIN 会把同一条帖复制成
+     * 最多 3 行，而 {@link #pageResult} 的游标分支靠「多取一条」判 hasMore——重复行会直接把
+     * 那个判断算歪（一页里同一条帖出现两次，还提前宣布「还有更多」）。</p>
+     *
+     * <p>{@code t.deleted = 0} 在这里必须手写：这是裸 SQL，{@code Topic} 实体上的
+     * {@code @TableLogic} 管不到它；{@code post_topic} 本身没有删除列（{@code sql/04_community.sql}
+     * 里那张表只有 id / post_id / topic_id / created_at），所以「关联行存在」并不等于「话题未删」，
+     * 删除位只落在 topic 一侧。</p>
+     *
+     * <p>{@code ESCAPE '!'} 与 {@link LikePattern#contains} 逐字配对：转义符换了一边、这边没换，
+     * 用户输入一个 {@code !} 就成了悬空的转义符，MySQL 报 Incorrect arguments to ESCAPE。</p>
+     */
+    static void applyLikeMatch(LambdaQueryWrapper<Post> wrapper, String pattern) {
+        wrapper.and(hit -> hit.apply("title LIKE {0} ESCAPE '!'", pattern)
+                .or().apply("content LIKE {0} ESCAPE '!'", pattern)
+                .or().apply(TOPIC_NAME_MATCH_SQL, pattern));
+    }
+
+    /**
+     * 全文通道（{@code mindisle.search.fulltext=true} 时才走到这里）。
+     *
+     * <p><b>NATURAL LANGUAGE MODE 而不是 BOOLEAN MODE</b>：BOOLEAN MODE 会把
+     * {@code + - > < ( ) ~ * " @ } 当查询操作符解析，用户在搜索框里打 {@code a+b} 就不再是
+     * 「找 a+b 这个串」而是变成一条查询语法，遇到不合法的组合还会抛 1064。
+     * 自然语言模式没有这套语法可被注入，代价是拿不到 BOOLEAN 的强制包含与排除——本期不需要。</p>
+     *
+     * <p>话题名那一侧仍走 LIKE：{@code ft_title_content} 只建在 post 的两列上，
+     * topic.name 上没有全文索引，写 MATCH 就是换一个地方抛 1191。</p>
+     */
+    static void applyFullText(LambdaQueryWrapper<Post> wrapper, String keyword, String pattern) {
+        wrapper.and(hit -> hit
+                .apply("MATCH(title, content) AGAINST ({0} IN NATURAL LANGUAGE MODE)", keyword)
+                .or().apply(TOPIC_NAME_MATCH_SQL, pattern));
+    }
+
+    /**
+     * 作者状态收口在 SQL 里，不在应用层过滤（手册 §14 第 27 条原文：召回 SQL 加 status，
+     * 别把过滤留在应用层——那样 total 与游标都会和实际可见条数对不上）。
+     *
+     * <p>🔴 <b>诚实边界：这条谓词今天恒真</b>。账号注销链路属任务 4.21，开发库里所有
+     * {@code user} 行的 status 都是 ACTIVE、deleted 都是 0，所以它<b>不是冒烟能证明的东西</b>：
+     * 冒烟里搜得到 / 搜不到都与它无关。它是提前写在读侧的护栏，等 T4.21 真往 user 表写入
+     * DELETED 那天，已注销作者的帖不会在搜索结果与关注流里露出来。<b>恒真谓词不进证据链</b>，
+     * 「注销后搜不到 / 刷不到」的复验仍挂在任务 4.21 的验收里。</p>
+     *
+     * <p>{@code `user`} 必须带反引号——它是 MySQL 保留字，裸写 {@code FROM user u} 直接 1064。</p>
+     */
+    static void applyAuthorActive(LambdaQueryWrapper<Post> wrapper) {
+        wrapper.apply("EXISTS (SELECT 1 FROM `user` u WHERE u.id = post.user_id"
+                + " AND u.deleted = 0 AND u.status = {0})", AUTHOR_ACTIVE);
+    }
+
+    /** 与 user.status 的 ENUM 逐字一致（另一份定义在写入侧的 {@code AuthService}）。 */
+    static final String AUTHOR_ACTIVE = "ACTIVE";
+
+    /**
+     * 关注流条件：作者在我关注的那批人里 + 只取实名公开帖 + 未到期销毁。
+     *
+     * <p>{@code in} 的空集合防护在调用方 {@link #following} 做的，不在这里——
+     * 「一条 SQL 都不发」这件事只有在还没碰 wrapper 的时候才做得到。</p>
+     */
+    static void applyFollowingFeed(LambdaQueryWrapper<Post> wrapper, List<Long> authorIds,
+                                   LocalDateTime now) {
+        wrapper.in(Post::getUserId, authorIds);
+        applyPublicRealNameScope(wrapper);
+        applyAuthorActive(wrapper);
+        applyNotExpired(wrapper, now);
+    }
+
+    /**
+     * 「已发布 + 公开 + 实名 + 没挂马甲」这一段，公开主页与关注流共用。
+     *
+     * <p>抽出来只为了让「排除匿名」这条判据有一处定义。它的形状与抽函数之前逐字一致
+     * （参数占位顺序也没变），这一点由 {@code PostListSqlConditionTest} 里那条
+     * {@code publicProfileSqlExcludesAnonymousRows} 的安全用例钉住：它比的是整段 SQL 文本
+     * 与 paramNameValuePairs 的集合，改形状就红——这是故意的。</p>
+     */
+    static void applyPublicRealNameScope(LambdaQueryWrapper<Post> wrapper) {
+        wrapper.eq(Post::getStatus, PostService.STATUS_PUBLISHED)
+                .eq(Post::getVisibility, VISIBILITY_PUBLIC)
+                .and(real -> real.isNull(Post::getIsAnonymous).or().eq(Post::getIsAnonymous, 0))
+                .isNull(Post::getAliasId);
     }
 }

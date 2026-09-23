@@ -1381,6 +1381,296 @@ async function main() {
     info("18", "两名一次性账号没注册成功，本步整体跳过（根因在第 17 步同一段注册逻辑上）", "");
   }
 
+  // ---------- 19 站内搜索 + 20 关注流（任务 3.9 / 3.17 · 手册 §6.1 行 3.9、3.17）----------
+  // 单测只证明 WHERE 拼对了；「别人那条仅自己可见的帖到底进不进搜索结果」必须问真库。
+  // 夹具刻意分甲乙两组关键词、各带本轮时间戳。本步最初让甲乙共用同一个锚点，结果「第三人搜出
+  // 来几条」把第三人自己那两条公开帖也算了进去，n===2 当场挂——这不是断言太严，是夹具没把变量
+  // 分开：命中集必须只属于被检的那一方，否则「不该出现」这类否定断言随时能被翻页与污染糊过去。
+  const srchA = await regAccount("smoke_srch_a" + stamp, "冒烟检索甲");
+  const srchB = await regAccount("smoke_srch_b" + stamp, "冒烟检索乙");
+  const srchC = await regAccount("smoke_srch_c" + stamp, "冒烟检索丙");
+  check("19", "注册三名检索账号：甲、乙各发一批帖，丙既不发帖也不关注任何人（对照账号必须是新真人，"
+    + "不能拿前 18 步的夹具凑——那批账号的发帖配额与关注关系都已经被别的步骤动过了）",
+    !!srchA && !!srchB && !!srchC, "a=" + !!srchA + " b=" + !!srchB + " c=" + !!srchC);
+  if (srchA && srchB && srchC) {
+    r = await rlSafe(function () {
+      return send("GET", "/api/users/me", { headers: { Authorization: "Bearer " + srchA } });
+    });
+    const srchAId = bodyOf(r).id;
+    r = await rlSafe(function () {
+      return send("GET", "/api/users/me", { headers: { Authorization: "Bearer " + srchB } });
+    });
+    const srchBId = bodyOf(r).id;
+    const kwA = "检索锚甲" + stamp;
+    const kwB = "检索锚乙" + stamp;
+    // 四个取数器就是四种身份：甲（作者本人）、乙（另一个登录用户）、丙（与两边都无关的第三人）、匿名
+    const enc = encodeURIComponent;
+    const asA = function (path, qs) {
+      return rlSafe(function () {
+        return send("GET", path + (qs ? "?" + qs : ""), { headers: { Authorization: "Bearer " + srchA } });
+      });
+    };
+    const asB = function (path, qs) {
+      return rlSafe(function () {
+        return send("GET", path + (qs ? "?" + qs : ""), { headers: { Authorization: "Bearer " + srchB } });
+      });
+    };
+    const noToken = function (path, qs) {
+      return rlSafe(function () { return send("GET", path + (qs ? "?" + qs : ""), {}); });
+    };
+    const hitRows = function (rr) { return itemsOf(rr) || []; };
+    const hitIds = function (rr) { return hitRows(rr).map(function (x) { return x.id; }); };
+    const rowById = function (rr, id) {
+      const found = hitRows(rr).filter(function (x) { return x.id === id; });
+      return found.length ? found[0] : null;
+    };
+    const arrOf = function (rr) { return rr.json && Array.isArray(rr.json.data) ? rr.json.data : []; };
+    const putPost = function (token, postBody) {
+      return rlSafe(function () {
+        return send("POST", "/api/posts", asToken(token, jsonBody(postBody)));
+      });
+    };
+
+    r = await putPost(srchA, { title: kwA + "甲公开", content: "甲的公开帖，正文里也写着 " + kwA + "。" });
+    const aPublicId = bodyOf(r).id;
+    r = await putPost(srchA, { title: kwA + "甲私密", content: "仅自己可见的一条 " + kwA, visibility: "private" });
+    const aPrivateId = bodyOf(r).id;
+    const aPrivateVis = bodyOf(r).visibility;
+    r = await putPost(srchA, { title: kwA + "甲树洞", content: "匿名的一条 " + kwA, type: "hole" });
+    const aHoleRow = bodyOf(r);
+    const aHoleId = aHoleRow.id;
+    check("19", "甲的三条夹具落库且形态就是设计的样子：公开 public / 私密 private / 树洞匿名且已发马甲名"
+      + "（第 19、20 两步全吃这几条，任何一条变形都会让后面的「不该出现」变成假绿）",
+      !!aPublicId && !!aPrivateId && !!aHoleId && aPrivateVis === "private"
+      && aHoleRow.anonymous === true && String(aHoleRow.displayName).indexOf("匿名屿民·") === 0,
+      "pub=" + aPublicId + " priv=" + aPrivateId + "/" + aPrivateVis
+      + " hole=" + aHoleId + "/" + aHoleRow.displayName);
+
+    r = await putPost(srchB, { title: kwB + "转义靶", content: "正文里有字面量 100%_x 这五个字符 " + kwB });
+    const bEscId = bodyOf(r).id;
+    r = await putPost(srchB, { title: kwB + "对照靶", content: "正文里只有 100abcx 这七个字符 " + kwB });
+    const bCtlId = bodyOf(r).id;
+    r = await putPost(srchB, { title: kwB + "乙公开", content: "乙的公开实名帖 " + kwB });
+    const bPublicId = bodyOf(r).id;
+    r = await putPost(srchB, { title: kwB + "乙私密", content: "乙的私密帖 " + kwB, visibility: "private" });
+    const bPrivateId = bodyOf(r).id;
+    r = await putPost(srchB, { title: kwB + "乙树洞", content: "乙的匿名帖 " + kwB, type: "hole" });
+    const bHoleId = bodyOf(r).id;
+    check("19", "乙的五个靶子全部发出去：新注册 24 小时内每日 5 帖（BR5）是真闸门，本步一条都不许多发，"
+      + "第 6 条会直接 10010 把整步带崩",
+      !!bEscId && !!bCtlId && !!bPublicId && !!bPrivateId && !!bHoleId,
+      "esc=" + bEscId + " ctl=" + bCtlId + " pub=" + bPublicId + " priv=" + bPrivateId + " hole=" + bHoleId);
+
+    r = await noToken("/api/search/posts", "q=" + enc(kwA));
+    check("19", "未登录搜帖 → 401/10002：搜索是「按任意关键词扫全站正文」，不给免登录身份开这条口子"
+      + "（对照 /api/topics 是游客可读的话题墙，一个展示运营选好的内容、一个命中全站内容，口径不同是刻意的）",
+      r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+    r = await noToken("/api/search/topics", "q=" + enc("焦虑"));
+    const tGate = r.status === 401 && code(r) === "10002";
+    r = await noToken("/api/search/users", "q=" + enc("冒烟"));
+    check("19", "未登录搜话题、搜人同样 401/10002：三条路径的门槛不许各写一份，少一处兜底就是一条匿名扫库通道",
+      tGate && r.status === 401 && code(r) === "10002", "topics401=" + tGate + " users=" + r.status);
+    r = await asA("/api/search/posts", "q=%20%20");
+    const blankBad = r.status === 400 && code(r) === "10001";
+    r = await asA("/api/search/posts", "q=" + enc("焦虑".repeat(33)));
+    check("19", "空白与超长关键词都在发出 SQL 之前被拒（400/10001、文案带 64）：搜索框不许退化成分页列表，"
+      + "也不许拿一条没有上限的 LIKE 去扫 MEDIUMTEXT",
+      blankBad && r.status === 400 && code(r) === "10001" && isMsg(r, "64"),
+      "blank=" + r.status + " overlong=" + r.status + " msg=" + (r.json && r.json.msg));
+    r = await asA("/api/search/posts", "q=" + enc(kwA) + "&type=sticker");
+    check("19", "type 白名单外 → 400/10001 且文案回显三个合法值：搜索与广场共用同一份 normalizeTypeFilter，"
+      + "不在这里重写一遍入参契约",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "normal"), r.status + " msg=" + (r.json && r.json.msg));
+
+    r = await asB("/api/search/posts", "q=" + enc(kwA) + "&size=50");
+    check("19", "乙搜甲的锚点：只命中甲的公开帖与甲的树洞帖这两条，甲那条私密帖不在里面"
+      + "（「第三人看不到私密帖」是 FR4.3 的核心承诺，不是广场列表单独的专利）",
+      r.status === 200 && code(r) === "0" && hitIds(r).length === 2
+      && !!rowById(r, aPublicId) && !!rowById(r, aHoleId),
+      r.status + " ids=" + hitIds(r).join(","));
+    const srchHoleRow = rowById(r, aHoleId);
+    const srchRealRow = rowById(r, aPublicId);
+    check("19", "同一页里两条帖的作者口径相反：实名帖回 authorId=srchAId 与甲的昵称（这是正面控制，"
+      + "证明下一条的「没有」不是恒真），匿名帖 authorId 整个键缺席、展示名是马甲名、单行序列化后不含甲的昵称。"
+      + "注意响应体是 non_null 序列化，null 字段会被整个省掉，所以判「没给作者 id」必须判键在不在——"
+      + "判 === null 会因为键根本不存在而假绿",
+      !!srchRealRow && srchRealRow.authorId === srchAId && srchRealRow.anonymous === false
+      && !!srchHoleRow && !("authorId" in srchHoleRow) && srchHoleRow.anonymous === true
+      && String(srchHoleRow.displayName).indexOf("匿名屿民·") === 0
+      && JSON.stringify(srchHoleRow).indexOf("冒烟检索甲") < 0,
+      "实名行=" + nj(srchRealRow && { id: srchRealRow.id, authorId: srchRealRow.authorId })
+      + " 匿名行=" + nj(srchHoleRow));
+
+    r = await asA("/api/search/posts", "q=" + enc(kwA + "甲私密") + "&size=50");
+    check("19", "作者本人也搜不到自己那条私密已发布帖：广场判据里 private 走「我的帖子」，搜索照抄这条判据"
+      + "而不是给它开后门——多一个入口就多一份要各改一遍的 WHERE",
+      r.status === 200 && hitIds(r).length === 0, r.status + " ids=" + hitIds(r).join(","));
+    r = await asA("/api/users/me/posts", "size=50");
+    check("19", "同一条私密帖在「我的帖子」里读得回来：上一条的空结果来自可见性判据，不来自写入失败",
+      r.status === 200 && hitIds(r).indexOf(aPrivateId) >= 0,
+      r.status + " n=" + hitIds(r).length + " ids=" + hitIds(r).join(","));
+    r = await asA("/api/search/posts", "q=" + enc(kwA) + "&type=hole&size=50");
+    check("19", "type=hole 把结果收窄到树洞那一条：搜索与广场共用同一个 type 过滤，不是两个各写一半的开关",
+      hitIds(r).length === 1 && hitIds(r)[0] === aHoleId, hitIds(r).join(","));
+    r = await asA("/api/search/posts", "q=" + enc(kwB) + "&size=50");
+    check("19", "甲搜乙的锚点命中四条（转义靶 / 对照靶 / 公开 / 树洞），独缺乙那条私密帖：别人的私密帖"
+      + "对作者之外的读者同样不可见，这一条把「五减一」摆在同一批数据上算",
+      hitIds(r).length === 4 && !!rowById(r, bEscId) && !!rowById(r, bCtlId)
+      && !!rowById(r, bPublicId) && !!rowById(r, bHoleId) && hitIds(r).indexOf(bPrivateId) < 0,
+      "ids=" + hitIds(r).join(","));
+    r = await asA("/api/search/posts", "q=" + enc("100%_x") + "&size=50");
+    check("19", "搜 100%_x 只命中含这五个字符的那条，不命中只差一个通配符的 100abcx：LIKE 元字符进 SQL 前"
+      + "必须按 ! 转义，漏转时模式串 %100%_x% 会把对照靶一起捞出来",
+      r.status === 200 && !!rowById(r, bEscId) && !rowById(r, bCtlId),
+      "ids=" + hitIds(r).join(",") + " 靶=" + bEscId + " 对照=" + bCtlId);
+    r = await asA("/api/search/posts", "q=" + enc(kwB + "%") + "&size=50");
+    const wPctIds = hitIds(r);
+    r = await asA("/api/search/posts", "q=" + enc(kwB + "_") + "&size=50");
+    const wUndIds = hitIds(r);
+    check("19", "把关键词拼成「乙锚点+%」「乙锚点+_」两条都 0 命中：乙的标题形状正是「锚点后紧跟一个汉字」，"
+      + "转义一漏这两条就退化成搜「锚点%」「锚点_」＝乙的 5 条全捞（含那条私密之外的 4 条可见帖）。"
+      + "这条比单搜一个 % 更狠：它把「漏转义」与「本轮夹具」锁死在同一批数据上",
+      wPctIds.length === 0 && wUndIds.length === 0,
+      "pct=" + wPctIds.join(",") + " underscore=" + wUndIds.join(","));
+    r = await asA("/api/search/posts", "q=%25&size=50");
+    const pctIds = hitIds(r);
+    const srchFixtures = [aPublicId, aPrivateId, aHoleId, bEscId, bCtlId, bPublicId, bPrivateId, bHoleId];
+    const pctLeak = srchFixtures.filter(function (id) {
+      return id !== bEscId && pctIds.indexOf(id) >= 0;
+    });
+    check("19", "搜单个 % 不是「把全站列一遍」：命中的恰是含这个字符的那条（转义靶在列＝正面控制），"
+      + "其余七条夹具一条都不在结果里，且 total 是个小数字（未转义时它等于全站可见帖数，量级 130+）",
+      r.status === 200 && code(r) === "0" && !!rowById(r, bEscId) && pctLeak.length === 0
+      && Number(bodyOf(r).total) <= 5,
+      "total=" + bodyOf(r).total + " 命中夹具=" + pctIds.filter(function (id) {
+        return srchFixtures.indexOf(id) >= 0; }).join(",") + " 泄漏=" + pctLeak.join(","));
+    r = await asA("/api/search/posts", "q=" + enc("失眠夜") + "&size=50");
+    const topicPathRows = hitRows(r);
+    check("19", "话题名命中那条通路真的能用：搜「失眠夜」有结果，而每一条的标题与摘要都不含这三个字"
+      + "（root 核对：全库没有任何帖子的 title/content 含这个词）——命中只能来自 EXISTS(post_topic JOIN topic)。"
+      + "单测只能证明 SQL 文本里有这段，能不能真把挂了话题的帖搜出来要问数据",
+      r.status === 200 && topicPathRows.length > 0 && topicPathRows.every(function (x) {
+        return String(x.title || "").indexOf("失眠夜") < 0
+          && String(x.excerpt || "").indexOf("失眠夜") < 0; }),
+      "n=" + topicPathRows.length + " total=" + bodyOf(r).total);
+
+    r = await asA("/api/search/topics", "q=" + enc("焦虑") + "&limit=999");
+    const topicHits = arrOf(r);
+    check("19", "搜话题命中种子里含「焦虑」的已过审话题（秋招焦虑 / 体重焦虑），limit 越界被夹到 "
+      + "mindisle.search.max-profiles=20 而不是报错、更不是无上限",
+      r.status === 200 && code(r) === "0" && topicHits.length > 0 && topicHits.length <= 20,
+      r.status + " n=" + topicHits.length + " names=" + topicHits.map(function (x) { return x.name; }).join("/"));
+    check("19", "话题出参七个字段一字不差：cover / deleted / auditStatus 一个都不透出（封面是对象存储域名、"
+      + "删除位与审核状态属运营信息）",
+      topicHits.length > 0 && Object.keys(topicHits[0]).sort().join(",")
+      === "desc,followCnt,hotScore,id,isOfficial,name,postCnt",
+      topicHits.length ? Object.keys(topicHits[0]).sort().join(",") : "无结果");
+    r = await asA("/api/search/topics", "q=" + enc("不存在的话题" + stamp));
+    check("19", "搜不到话题时回空数组而不是 404：搜索框要为空态让路，前端不必为「没结果」多写一条异常分支",
+      r.status === 200 && code(r) === "0" && Array.isArray(r.json && r.json.data)
+      && r.json.data.length === 0, r.status + " " + short(r, 90));
+    r = await asA("/api/search/users", "q=" + enc("冒烟检索甲"));
+    const userHits = arrOf(r);
+    check("19", "按昵称搜人搜到甲本人，且出参只可能是 id / nickname / avatar 三个字段：email、role、status、"
+      + "密码哈希一律不给。avatar 为空时 non_null 会整个省掉这个键，所以判「是三个字段的子集且 id/nickname 俱在」，"
+      + "而不是判「恰好等于三个键」——后者会因为少一个可空字段而假挂",
+      r.status === 200 && userHits.some(function (x) { return x.id === srchAId; })
+      && userHits.every(function (x) {
+        return "id" in x && "nickname" in x && Object.keys(x).every(function (k) {
+          return k === "id" || k === "nickname" || k === "avatar"; }); }),
+      "n=" + userHits.length + " keys=" + (userHits.length ? Object.keys(userHits[0]).join(",") : "-"));
+    r = await asA("/api/search/users", "q=" + enc("smoke_srch_b" + stamp));
+    const userHits2 = arrOf(r);
+    check("19", "按登录名也搜得到乙：昵称可改，登录名是唯一的第二入口，两条 LIKE 收在同一组括号里"
+      + "（不与 status 之间留一个悬空 OR，那是 §14 第 26 条的原文事故）",
+      userHits2.some(function (x) { return x.id === srchBId; }), "n=" + userHits2.length);
+    r = await asA("/api/search/users", "q=%25");
+    const userPct = arrOf(r);
+    check("19", "搜人也逃不过转义：q=% 一条都不命中（未转义时它等于「把全站 ACTIVE 账号列一遍」，"
+      + "而库里现在有一百多个账号）",
+      r.status === 200 && userPct.length === 0, r.status + " n=" + userPct.length);
+
+    info("19", "SQL 取证（root 直连复核，别信脚本自证）：① 八条夹具的 status / visibility / is_anonymous /"
+      + " alias_id 逐行真值——这是「私密搜不到」那两条的正面控制，它们必须真在库里且真的是 private/匿名；"
+      + "② 全站含字面 % 的公开已发布帖条数，应等于上面上一步 q=% 返回的 total（本轮应为 1，就是那条转义靶）。"
+      + "跑完把两个数字回写手册 §6.1。",
+      "SELECT id,user_id,type,status,visibility,is_anonymous,alias_id,title FROM post WHERE id IN ("
+      + srchFixtures.join(",") + ") ORDER BY id; SELECT COUNT(*) AS pct_visible_posts FROM post WHERE deleted=0"
+      + " AND status='PUBLISHED' AND visibility='public'"
+      + " AND (title LIKE '%!%%' ESCAPE '!' OR content LIKE '%!%%' ESCAPE '!');");
+
+    // ---------- 20 关注流（任务 3.17 · 需求 FR4.6）----------
+    const feedGet = function (token, qs) {
+      return rlSafe(function () {
+        return send("GET", "/api/feed/following" + (qs ? "?" + qs : ""),
+          token ? { headers: { Authorization: "Bearer " + token } } : {});
+      });
+    };
+    r = await feedGet(null, "");
+    check("20", "未登录取关注流 → 401/10002，不退化成「那先给你看广场」：把 current 为 null 兜底成空列表，"
+      + "这条路径就成了广场的第二入口", r.status === 401 && code(r) === "10002",
+      r.status + " code=" + code(r));
+    r = await feedGet(srchC, "");
+    check("20", "谁都没关注的丙 → 200 + 空列表 + hasMore=false + total=0：MyBatis-Plus 的 in(空集合) 会拼出"
+      + " IN () 直接 500，而「刚注册、还没关注任何人」正是这条路径最常见的新人状态，必须短路在发 SQL 之前",
+      r.status === 200 && code(r) === "0" && hitRows(r).length === 0
+      && bodyOf(r).hasMore === false && Number(bodyOf(r).total) === 0,
+      r.status + " " + short(r, 120));
+    r = await nFollow(srchA, srchBId, "follow");
+    check("20", "甲关注乙 → changed=true：关系写进 user_follow，关注流的作者集合每次都是从这张表现取的（没有缓存）",
+      r.status === 200 && code(r) === "0" && bodyOf(r).changed === true, r.status + " " + nj(bodyOf(r)));
+    r = await feedGet(srchA, "size=50");
+    const feedRows = hitRows(r);
+    const feedIds = feedRows.map(function (x) { return x.id; });
+    check("20", "关注流里有乙的三条公开实名帖（两条转义靶也在里面，因为它们是同一条时间线的成员而不是另开一路检索），"
+      + "没有甲自己的任何一条：这条流回答的是「我关注的人更新了什么」，不是「全站有什么」",
+      feedIds.indexOf(bPublicId) >= 0 && feedIds.indexOf(bEscId) >= 0 && feedIds.indexOf(bCtlId) >= 0
+      && feedIds.indexOf(aPublicId) < 0 && feedIds.indexOf(aHoleId) < 0 && feedIds.indexOf(aPrivateId) < 0,
+      "ids=" + feedIds.join(","));
+    check("20", "乙的私密帖与乙的树洞帖都不进关注流：同一个人不能既是「我关注的冒烟检索乙」又是「匿名屿民·X」，"
+      + "放进来就是让关注关系自己把马甲脱了（FR1.4，与公开主页共用同一条判据）",
+      feedIds.indexOf(bPrivateId) < 0 && feedIds.indexOf(bHoleId) < 0,
+      "私密在列=" + (feedIds.indexOf(bPrivateId) >= 0) + " 树洞在列=" + (feedIds.indexOf(bHoleId) >= 0));
+    check("20", "整条流逐行不变式：作者恒为乙、anonymous 恒 false、visibility 恒 public、展示名恒为乙的昵称"
+      + "（是整页每行都判，不是抽查一条）",
+      feedRows.length > 0 && feedRows.every(function (x) {
+        return x.authorId === srchBId && x.anonymous === false && x.visibility === "public"
+          && x.displayName === "冒烟检索乙"; }),
+      "n=" + feedRows.length + " " + nj(feedRows.slice(0, 2).map(function (x) {
+        return { id: x.id, authorId: x.authorId, dn: x.displayName, v: x.visibility }; })));
+    r = await feedGet(srchA, "size=1");
+    const fpg1 = hitRows(r);
+    const fcur = bodyOf(r).nextCursor;
+    r = await feedGet(srchA, "size=1&beforeId=" + fcur);
+    const fpg2 = hitRows(r);
+    check("20", "游标翻页不重不漏：第一页一条、nextCursor 就是它的 id，第二页与第一页无交集且 id 严格更小"
+      + "（复用广场那一份 pageResult，排序键 published_at DESC + id DESC）",
+      fpg1.length === 1 && fpg2.length === 1 && fpg1[0].id !== fpg2[0].id && fpg2[0].id < fpg1[0].id
+      && fcur === fpg1[0].id && bodyOf(r).nextCursor === fpg2[0].id,
+      "p1=" + nj(fpg1.map(function (x) { return x.id; })) + " cursor=" + fcur
+      + " p2=" + nj(fpg2.map(function (x) { return x.id; })));
+    r = await nFollow(srchA, srchBId, "unfollow");
+    const unfollowed = bodyOf(r);
+    r = await feedGet(srchA, "size=50");
+    check("20", "取关之后乙的帖立刻从流里消失：这条路径每次现取 user_follow、没有缓存层，所以不存在"
+      + "「取关了还能刷到」的窗口（推荐流那条缓存路径要重新判这件事，是阶段 4 的事）",
+      unfollowed.changed === true && hitRows(r).length === 0,
+      "changed=" + unfollowed.changed + " n=" + hitRows(r).length);
+
+    info("20", "SQL 取证（root 直连复核，脚本自证不算）：① 甲对乙的关注关系行在取关后确实不在了（这条链路上"
+      + " user_follow 没有删除位，取关就是物理删）；② 乙这一批作者里「匿名或挂了马甲」的公开已发布帖条数应为 1"
+      + "（就是那条树洞）、③ 实名公开帖条数应为 3——② 是关注流该拒的、③ 是它该给的，两个数分别对上一步里"
+      + "「树洞不在列」和「三条都在列」，否则那两条断言只是恒真。",
+      "SELECT COUNT(*) AS follow_row_left FROM user_follow WHERE user_id=" + srchAId
+      + " AND follow_user_id=" + srchBId + "; SELECT COUNT(*) AS anon_rows_of_followee FROM post p WHERE p.deleted=0"
+      + " AND p.user_id=" + srchBId + " AND p.status='PUBLISHED' AND p.visibility='public'"
+      + " AND (p.is_anonymous = 1 OR p.alias_id IS NOT NULL); SELECT COUNT(*) AS realname_rows_of_followee"
+      + " FROM post p WHERE p.deleted=0 AND p.user_id=" + srchBId + " AND p.status='PUBLISHED'"
+      + " AND p.visibility='public' AND p.is_anonymous = 0 AND p.alias_id IS NULL;");
+  } else {
+    info("19", "三名检索账号没注册成功，第 19、20 步整体跳过（根因在第 18 步同一段注册逻辑上）", "");
+  }
+
   console.log("");
   console.log("冒烟汇总：" + rows.length + " 项，断言 " + (rows.filter(function (x) { return x.ok !== null; }).length)
     + " 条，失败 " + failures + " 条");

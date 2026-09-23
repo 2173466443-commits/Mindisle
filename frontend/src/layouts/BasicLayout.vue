@@ -8,6 +8,10 @@
       </div>
       <nav class="mi-nav">
         <router-link to="/feed">广场</router-link>
+        <!-- 站内搜索（任务 T3.9）：搜索要一个常驻入口，放在「广场」旁边是因为它俩都是「找内容」的起点；
+             不做成顶栏内嵌输入框是刻意的 —— 顶栏每个页面都挂着，一个内嵌框要么全站常驻一个搜索状态，
+             要么在每个页面各自实现一遍跳转。先要一条能用的路。 -->
+        <router-link to="/search">搜索</router-link>
         <router-link to="/publish">发布</router-link>
         <router-link to="/ai">屿灵</router-link>
         <router-link to="/emotion">情绪</router-link>

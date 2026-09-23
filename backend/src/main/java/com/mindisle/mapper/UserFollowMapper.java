@@ -1,5 +1,7 @@
 package com.mindisle.mapper;
 
+import java.util.List;
+
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.mindisle.entity.UserFollow;
 import org.apache.ibatis.annotations.Delete;
@@ -52,4 +54,22 @@ public interface UserFollowMapper extends BaseMapper<UserFollow> {
       + "ON DUPLICATE KEY UPDATE following_cnt = #{followingCnt}, follower_cnt = #{followerCnt}")
   int upsertFollowCounts(@Param("userId") long userId, @Param("followingCnt") long followingCnt,
       @Param("followerCnt") long followerCnt);
+  /**
+   * 关注流取数：我关注了谁（任务 3.17 · 需求 FR4.6）。
+   *
+   * <p><b>{@code ORDER BY id DESC} 是「最新关注的优先」</b>，不是随手写的排序：
+   * 调用方有一个条数上限（{@code PostQueryService.FOLLOWING_AUTHOR_CAP}），超限时必须丢一部分人，
+   * 按 id 倒序丢掉的正好是最久以前关注的那些。没有 ORDER BY 的 LIMIT 在 MySQL 里
+   * 返回哪一批是不保证的，同一个人刷新两次会看到两屏完全不同的关注流。</p>
+   *
+   * <p><b>走的是 uk_follow_pair 的 user_id 前缀</b>（{@code sql/01_account.sql}），
+   * 不需要 {@code idx_follow_user}——那条是给「谁关注了我」（粉丝列表）用的。</p>
+   *
+   * <p>{@code LIMIT #{limit}} 用占位符而不是拼接：这里的 limit 是服务端自己算出来的常量，
+   * 本来没有注入面，但 MyBatis 的 {@code LIMIT ?} 在 MySQL 预处理里是合法的，
+   * 没必要为了「反正安全」放弃一个参数化的习惯。</p>
+   */
+  @Select("SELECT follow_user_id FROM user_follow WHERE user_id = #{userId}"
+      + " ORDER BY id DESC LIMIT #{limit}")
+  List<Long> listFollowingIds(@Param("userId") long userId, @Param("limit") int limit);
 }

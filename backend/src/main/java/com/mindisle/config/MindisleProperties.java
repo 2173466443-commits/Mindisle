@@ -38,6 +38,8 @@ public class MindisleProperties {
     private Report report = new Report();
     /** 图形验证码（任务 T2.16 · §5.11 第 1~2 条）。 */
     private Captcha captcha = new Captcha();
+    /** 站内搜索（任务 T3.9 · 需求 FR4.8）。 */
+    private Search search = new Search();
 
     @Data
     public static class Cache {
@@ -215,5 +217,23 @@ public class MindisleProperties {
          * 最需要真实验证的链路会被永远挡在门外（阶段 2/3 的 200 响应体欠账即由此而来）。</p>
          */
         private boolean enabled = true;
+    }
+
+    @Data
+    public static class Search {
+        /** 关键词长度上限（字）。与 post.title 的 VARCHAR(100) 不在一个量级是故意的：没人用一句话去搜。 */
+        private int maxKeywordChars = 64;
+        /** 搜话题 / 搜人一次返回的条数上限，同时也是缺省值被夹住的上界。 */
+        private int maxProfiles = 20;
+        /**
+         * 全文通道总开关。
+         *
+         * <p><b>默认 false 是刻意的</b>：{@code MATCH(title, content)} 依赖
+         * {@code sql/10_index.sql} 里的 {@code ft_title_content}，而那个脚本至今没在开发库执行
+         * （任务 2.2 仍是 ◐）。开着它 = 每次搜索先抛一次 1191 再被读侧回落接住，
+         * 白付一次往返。读侧的回落逻辑一直都在（见 {@code PostQueryService#search}），
+         * 这里默认关是「别让默认配置走一条已知会抛异常的路」，而不是「全文没做」。</p>
+         */
+        private boolean fulltext = false;
     }
 }

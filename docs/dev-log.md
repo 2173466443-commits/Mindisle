@@ -945,3 +945,90 @@ D_表行数  user 43 / post 111 / post_like 16 / user_follow 0
 - **重赞会被幂等查重吞掉一条**（文案全等即跳过）、**取消赞不撤回通知** —— 两条都是缺 `actor_user_id` 列的直接后果，补列才能真正解决。
 - 真浏览器仍未测（jsdom 不含样式与布局），§6.4 第 4 条继续 ☐、T3.13 维持 ◐；`PUT /api/users/me/profile` 仍 90001；U1/U6、T3.8 话题、T3.9 搜索、T3.10 埋点、T3.15 编辑与销毁、T3.17 关注流未做；阶段 1B 论文材料按用户指令继续顺延。
 - **仍未打 tag**（Gate3 未过，最新 tag `stage-2-skeleton`）。
+
+## 2026-09-23 阶段 3（续 8）—— T3.9 站内搜索（三条路径）+ T3.17 关注流 + 前端 `/search` 与广场「关注」Tab
+
+### 本轮挑这件事的理由
+
+- 阶段 3 的欠项里只剩两条「用户一上手就摸得到」的入口：**找内容 / 找人的搜索框**，和**看我关注的人的时间线**。前七轮把写侧、互动、评论、举报、通知都打通了，但全站没有一处能回答「谁发过一条讲秋招焦虑的帖子」—— 广场只有「最新 / 热门」两种顺序，主页只有一个人的帖。这两条不补，§6.4 第 1 条的「发帖—列表—详情」闭环只能算半条。
+- 用户诉求仍是「先把程序做出来」：论文与开题材料（阶段 1B）继续顺延，本轮一行不写。
+
+### 交付物：后端（搜索 · T3.9）
+
+- 新增 `common/Keyword.java`(31) —— 关键词入口收口（trim、空串即「没搜」、超 `mindisle.search.max-keyword-chars`(64) 拒）。放 `common` 是因为 post 域与 search 域都要用，谁都不该抄第二份。
+- 新增 `common/LikePattern.java`(31) —— `contains()` 转义 `!` `%` `_` 再包两侧 `%`，SQL 侧一律 `ESCAPE '!'`。**转义符为什么选 `!` 不选反斜杠**：MySQL 字符串字面量里的 `\` 还有一层转义解释、该写几个反斜杠取决于 `NO_BACKSLASH_ESCAPES`，是个跨配置的坑；`!` 在 SQL 里是普通字符，在用户输入里几乎不出现，出现了也能被正确加倍。**不转义的后果**：用户在搜索框打一个 `%`，就等于发了一条没有 WHERE 的列表查询 —— 既是越权枚举通道，也是拖库入口（`smoke.mjs` 第 19 步专钉此条）。
+- 新增 `search/SearchService.java`(106) + `search/dto/TopicHit.java`(23) + `search/dto/UserHit.java`(22) + `web/SearchController.java`(110) —— 搜话题（只 `APPROVED`、`hot_score` 倒序、定长 ≤ 20）与搜人（只 `ACTIVE`、只匹配 `nickname` / `username`、出参三字段白名单）。**搜帖不在这个类里**：帖子检索必须与广场共用同一套可见性判据与游标翻页，抄一份 WHERE 就是给「列表里已经没了、搜索里还能搜到」制造第二个现场（§14 第 27 条）。
+- 改动 `post/PostQueryService.java` **658 → 869** —— 新增 `search` / `following` 两条读路径 + 四段 `static` 可单测条件片段（`applyLikeMatch` / `applyFullText` / `applyAuthorActive` / `applyFollowingFeed`）+ `applyPublicRealNameScope`（从公开主页那段抽出，**抽出前后 SQL 文本与参数占位顺序逐字一致**，由 `PostListSqlConditionTest` 的 `publicProfileSqlExcludesAnonymousRows` 钉住形状，改形状就红）。话题名命中用裸 `EXISTS` 且与帖子**共用同一个已转义 pattern**：两处各转一次就是二次转义，`%` 会变字面量、反而搜不到。**为什么 EXISTS 不 JOIN**：一条帖最多挂 3 个话题，JOIN 会把它复制成 3 行，而 `pageResult` 靠「多取一条」判 `hasMore` —— 重复行会直接把那个判断算歪。裸 SQL 里 `t.deleted = 0` 必须手写（`@TableLogic` 管不到 SQL 文本，`post_topic` 又没有删除列，「关联行存在」不等于「话题未删」）。
+- `config/MindisleProperties.java` 219 → **239** 新增 `mindisle.search`：`max-keyword-chars=64`、`max-profiles=20`、`fulltext=false`。**默认关是刻意的**：`MATCH(title, content)` 依赖 `sql/10_index.sql` 的 `ft_title_content`，那脚本至今没在开发库执行（T2.2 ◐），开着等于每次搜索先抛 1191 再被读侧回落接住、白付一次往返。读侧回落覆盖**两种**情况：抛异常 与 返回 0 命中 —— 后者也必须回落，因为 InnoDB `ngram_token_size` 默认 2，单字根本没进索引，此时「搜不到」是索引参数问题而不是内容问题，直接回空页等于把功能判死。全文用 `NATURAL LANGUAGE MODE` 而不是 `BOOLEAN MODE`：后者会把 `+ - > < ( ) ~ * " @` 当查询语法，用户打 `a+b` 就不再是「找 a+b 这个串」，还会撞 1064。
+- `config/OpenApiConfig.java` 82 → **94** 加 `09-search 站内搜索` 分组（**8 → 9 组**，`@Tag(name = "9 搜索")`）；`application.yml` 164 → **168**。
+- 🔴 **偏离需求 §9.1 写白**：那里是单接口 `GET /api/search`，实现拆成 `posts` / `topics` / `users` 三条。理由：三张表的出参形状（分页流 vs 两个定长数组）、分页语义（游标翻页 vs 无翻页）、排序口径（时间序 vs `hot_score`）互不相同，硬合并只能返回一个 `oneOf`，前端还要为「同一接口的三种形状」写分支，契约反而更弱。已同步记进手册 §6.1 与 §19 v1.2.2 行；`api/auth.js` 的「点了会没反应」清单里也写明「这条不存在从表里删旧行 —— 它一落地就是三条路径」。
+- **三条路径都要登录**：没进 `SecurityConfig` 的 permitAll 白名单，落到 `.anyRequest().authenticated()` → 未登录 401 / 10002。理由：「先搜一下看看是不是那个人」正是 FR1.4 要挡住的动作，搜索不能成为匿名枚举的旁路。而**前端路由 `/search` 只挂 `requiresAuth`、不挂 `requiresConsent`**（理由写进 `router/index.js` 注释：搜的是已对全体登录用户公开的内容，输入关键词这件事本身不涉及处理敏感个人信息；挂上就会把「没勾敏感授权的人」完全挡在站外，而他本来就该能搜帖）。
+
+### 交付物：后端（关注流 · T3.17 前半）
+
+- `web/FeedController.java` 73 → **120** 新增 `GET /api/feed/following`：本类只负责「我关注了谁」这条关系读数，取数与判据仍在 `PostQueryService`。放在这个类而不是 `PostController`，是因为路径前缀就是 `/api/feed`（Swagger 分组与「首页三条流」的归属都按前缀走），**真正的判据仍然只有一份**。
+- `mapper/UserFollowMapper.java` 55 → **75** 新增 `listFollowingIds`：`ORDER BY id DESC LIMIT #{limit}` —— 有上限就必须排序，否则 MySQL 返回哪一批不保证，同一个人刷新两次会看到两屏完全不同的关注流；按 id 倒序截断，丢掉的是「最久以前关注的人」。走 `uk_follow_pair` 的 `user_id` 前缀（`idx_follow_user` 是给「谁关注了我」用的）。`LIMIT #{limit}` 用占位符而不是拼接：这里的 limit 是服务端自己算的常量、本来没有注入面，但没必要为「反正安全」放弃参数化的习惯。
+- **三条硬口径**：① 未登录 **401，不退化成广场**（把 `current == null` 兜底成「没关注任何人」看似友好，实际是让这条路径变成广场的第二入口，而广场那条是明写要登录的）；② **空关注回 `PageResult.empty()`、一条 SQL 都不发**（MyBatis-Plus 的 `in(column, 空集合)` 会拼出 `IN ()` → MySQL 语法错 → 「刚注册还没关注任何人」这个最常见的新人状态变成 500，而它本该是一句空态文案；防护做在 `following()` 还没碰 wrapper 的时候，做进 `applyFollowingFeed` 就晚了）；③ **只给「已发布 + 公开 + 实名 + 没挂马甲」的帖**（同一个人不能既是「我关注的某某」又是「匿名屿民·晚风」，把匿名帖放进来等于让关注关系自己把马甲脱了 —— FR1.4，与公开主页同一条判据）。**无缓存**，每次现取 `user_follow`，取关之后下一条帖立刻从时间线消失，不存在「取关了还能刷到」的窗口。作者上限 `FOLLOWING_AUTHOR_CAP = 500`（500 个 id 拼进 `IN` 约 3KB，两端仍是范围扫描；不封顶则先撞 `max_allowed_packet`）。
+- 🔴 **诚实边界**：`applyAuthorActive` 这条谓词今天**恒真**（开发库所有 `user` 行 `status=ACTIVE`、`deleted=0`，写入 `DELETED` 的注销链路属 T4.21），所以它**不是冒烟能证明的东西** —— 冒烟里搜得到 / 搜不到都与它无关，恒真谓词不进证据链。
+
+### 交付物：前端
+
+- 新建 `views/search/SearchView.vue`(**337**) + `api/search.js`(**49**)：三栏单选「帖子 / 话题 / 屿友」**换栏不换词**；帖子栏复用广场那套翻页引擎 + 类型筛选（**空值不发送**，否则地址栏和请求里都会多出一个空 `type=`），话题与屿友定长 ≤ 20 不翻页；`?q=&m=&type=` 与地址栏双向同步（回车、切栏、改筛选、清空四种操作都写回；`type` 只在帖子栏且非空时出现）；三条常驻口径说明写在页面顶部，不靠 toast 一闪而过；401 / 10001 / 90002 各有单独话术；`type` 只在帖子栏出现。
+- `views/feed/FeedView.vue` **229 → 366**：`.mi-card.source` 一排「广场 / 关注」单选，**只切「读哪条流」不切类型 Tab**（`/api/feed/following` 入参没有 `type`，硬做客户端筛选会产出「一页 20 条、筛完剩 3 条、翻页又回 20 条」的假翻页）；两节各一份 `usePagedPosts` + 各自滚动哨兵，**整节 `v-show`**；关注卡 `:dismissable="false"`；三态齐（未登录提示 / `stage-notice` / 空态写明「刚注册的人在这里看到空白是正常的」）。
+- `api/feed.js` 8 → **21**（`followingFeed`，注释里写死「入参出参与广场同形，所以能直接交给 `usePagedPosts` 驱动」与「空关注回的是 empty，那是『空』不是『出错』」）；`api/auth.js` 41 → **44**（把 `GET /api/feed/following` 从「点了会没反应」清单里划掉）；`router/index.js` 46 → **50**（新增 `/search` 路由 + 为什么不挂 `requiresConsent`）；`layouts/BasicLayout.vue` 219 → **223**（顶栏「搜索」入口，放在「广场」旁边是因为两者都是「找内容」的起点；**不做成顶栏内嵌输入框是刻意的** —— 顶栏每页都挂着，内嵌框要么全站常驻一个搜索状态，要么每页各实现一遍跳转）；`probe/domprobe.mjs` 589 → **902**（第 12 组）。
+
+### 三个真问题（本轮最贵的三条）
+
+1. **`v-show` 而不是 `v-if`**：两节各带一个无限滚动哨兵，`v-if` 一销毁节点，IntersectionObserver 的观察对象就没了 → **切一次 Tab 之后无限滚动永久失效**，而且界面上完全看不出来（列表照样在、滚动照样顺）。第 12 组为此钉三条：`section.plaza` 数量 = 2、切过去时另一节 `style="display: none;"`、**切回广场时 `/api/posts` 请求计数为 0 且标题逐字不变** —— 「状态被保留」和「又抓了一遍数据」在界面上长得一模一样，只有数请求分得开。
+2. **`usePagedPosts` 返回的是「对象里装着 ref」**：Vue 模板只对**顶层**绑定自动 unwrap，`flow.items` 写进 `v-for` 会**一声不响什么都不画**，症状与「接口没数据」完全一样（排查方向天然指向后端，代价最高）→ 必须解构成 `items: folItems` 再进模板。
+3. **URL 同步类功能必须有一条断言读 `window.location.search`**：本轮探针抓出的真 bug 就是这里 —— `switchType()` 只调 `reload()` 不调 `run()`，于是类型筛选**生效**、地址栏**不更新**（停在 `?m=post&q=…`，没有 `type=hole`），用户「把当前这一屏发给同学」会发错一屏。改成 `run()`（`syncQuery` 才是这件事的正文）后新增三条断言：`?type=hole`、`?m=user`、清空时把 `q=` 一起掉；顺手补 `onClear()` 也调 `syncQuery()`（屏幕已「还没搜」、链接却还留着 `q=`，一刷新会凭空恢复用户刚清掉的结果）。**只读组件内部状态等于没测。**
+
+### 取证（每条都指到一次真实执行的输出）
+
+- **单测**：`mvn -o -B "-Dmaven.repo.local=E:/codex workspace/_cache/m2/repository" test` = **327 例 / 0 失败 / 1 跳过**（基线 296 → +31：`KeywordTest` + `LikePatternTest` + `PostSearchSqlConditionTest` + `SearchServiceTest`）。
+- **冒烟**：`node docs/smoke.mjs` = **220 项 / 断言 206 / 失败 0（20 步）**（基线 187 项 / 18 步 → 第 19 步搜索、第 20 步关注流）。脚本 1393 → **1683 行**。
+- **DOM**：`node probe/domprobe.mjs`（在 `frontend/` 下跑，约 11s，前置条件是 8080 与 5173 都在）= **93 项 / 0 失败（12 组，第 12 组 32 项）**。基线 61 项 / 11 组。**修 bug 前那次跑是 89 项 / 1 失败**（日志 `E:\codex workspace\_cache\mindisle-dbtmp\domprobe-run12.txt`），改完复跑 93 项全绿（`domprobe-run13.txt`）—— 这条差值就是「探针真的能挡事」的证据，不是自证。
+- **构建**：`npm run build` = **exit 0 / ✓ 1780 modules**（基线 1777，+3 = `SearchView.vue` + `api/search.js` + 新路由 chunk）。
+- **root SQL 四组真值**：`pct_visible_posts=1`（全站含字面 `%` 的公开已发布帖只有那条转义靶，与冒烟 `q=%` 返回的条数逐字对上）、`follow_row_left=0`（冒烟取消关注之后 `user_follow` 没留行）、`anon_rows_of_followee=1` / `realname_rows_of_followee=3`（被关注者的匿名帖恒不进关注流、实名公开帖恒进）。SQL 与调用式见 §「环境事实」。
+- **本轮起停的进程**：8080 后端（包装 `mvn.cmd spring-boot:run` pid **15552**，子 java **25536 / 23576**，23576 真正 LISTEN）与 5173 前端 dev（node/vite pid **13948**）都是本轮为跑 domprobe 起的，**验证完已关闭**；6379 Redis 未起（`MINDISLE_CACHE_MODE=local`，本轮不需要）。
+
+### 环境事实（下一轮照着跑，不用重新摸）
+
+- **root 直连 mysql 的可用姿势**（本轮所有取证 SQL 都是这一条）：`--defaults-extra-file=<cnf>` **必须是第一个参数**，路径整体加引号，cnf 放在**仓库外**（`E:\codex workspace\_cache\mindisle-dbtmp\rootpwd.cnf`，`[client]` + `user=root` + `password=***`）：
+  `$mysql='C:\Program Files\MySQL\MySQL Server 9.7\bin\mysql.exe'; (Get-Content "$d\q.sql" -Raw) | & $mysql --defaults-extra-file="$d\rootpwd.cnf" --default-character-set=utf8mb4 -t mindisle 2>&1`
+  `cmd /c` 那条路因为路径里有空格失败；含中文的 SQL 只能靠 `Get-Content -Raw | &` 或 `cmd <` 重定向喂进去。
+- **🔴 「`mysql -u root -p <口令>` 执行不成功」的真因**（本轮用户复现的那条）：`-p` 与口令之间**有空格**时，`-p` 是「不带值的口令开关」，接下来那个参数被当成**数据库名**，mysql 于是转去**等 TTY 输入口令** —— 在非交互环境里就是**永久挂起**，看起来像「命令没反应 / 执行不成功」，而不是认证失败。改成 `-p<口令>`（无空格）能连，但会打一条 `insecure warning` —— **warning ≠ 失败**。详见《全局复利与踩坑日志》009 第 10 轮。
+- **⚠ 探针与冒烟会继续写库**：`user` 里的一次性账号前缀 `smoke_*`、`probe_ntf_*`、`probe_src_*` 都会增长。本轮新增 user **126–135**（第 12 组跑了两次：铃铛 126/127/128 与 131/132/133；搜索读者 129、134 / 作者 130、135）、notify **189、190、192、193**、夹具帖 **241–248**（244/248 私密、243/247 树洞）；上一轮另有 123/124/125 与通知 187、188；`smoke.mjs` 每跑再新增一批 `smoke_srch_*`。
+- **清理 SQL（本轮未执行，留作阶段 3 收尾动作 —— 未经执行就不写「已清理」）**：
+
+  ```sql
+  -- 先看，别直接删
+  SELECT id, username, nickname FROM `user`
+    WHERE username LIKE 'smoke_%' OR username LIKE 'probe_%' ORDER BY id;
+  SELECT id, user_id, title FROM notify_message
+    WHERE user_id IN (SELECT id FROM `user` WHERE username LIKE 'smoke_%' OR username LIKE 'probe_%');
+  -- 全库无 FOREIGN KEY 约束（sql/ 目录 0 命中），删除顺序只为可读性
+  DELETE FROM notify_message WHERE user_id IN (SELECT id FROM `user` WHERE username LIKE 'smoke_%' OR username LIKE 'probe_%');
+  DELETE FROM post WHERE id BETWEEN 241 AND 248;
+  DELETE FROM `user` WHERE username LIKE 'smoke_%' OR username LIKE 'probe_%';
+  ```
+
+### 本轮写代码时踩到并当场改掉的三处
+
+- **`v-show` 与「对象里的 ref」是一对连环坑**：`usePagedPosts` 返回的是装着 ref 的对象，Vue 模板只对**顶层**绑定自动 unwrap，写 `flow.items` 进 `v-for` 会**一声不响什么都不画**（症状与「接口没数据」一模一样，排查方向天然指向后端）。本轮两节都用它，必须解构成 `items: folItems` 再进模板。
+- **`docs/smoke.mjs` 第 19 步的夹具关键词分甲乙两组**（`kwA=检索锚甲+stamp`、`kwB=检索锚乙+stamp`），三名账号各持一种身份（甲=作者、乙=另一登录用户、丙=与两边都无关的第三人）：**两组若共用一个词，「甲搜乙的锚点命中四条（五条减一条私密）」这类计数断言就算不出来** —— 计数断言的前提是命中集合能按人归组。另有两条负例把词拼成 `kwB + "%"` 与 `kwB + "_"`：乙的标题形状正是「锚点后紧跟一个汉字」，转义一漏这两条就会把乙的 4 条可见帖全捞出来 —— 比单搜一个 `%` 更狠，它把「漏转义」与「本轮夹具」锁死在同一批数据上。
+- **`frontend/probe/domprobe.mjs` 第 12 组刻意不测回车键**（L887 写了理由）：jsdom 下 `keyup` 与 Element Plus 输入框包装层的对应关系不保证成立，中文场景下真浏览器的回车是「上屏候选词」而不是提交 —— 这一条改点「搜索」按钮，键盘路径留给真浏览器。**探针在这里绿了反而是假的。**
+
+### 文档回写
+
+- 手册升 **v1.2.2**：`制作步骤文档.md` 1785 → **1802 行**（CRLF、无 BOM、无 Tab）——L1/L3 版本号、§6.1 行 3.9 转正并**新增 v1.2.2 实测回写 13 行**、§6.2 新增 U3-b 关注 Tab 与 `/search` 两行、§6.4 第 4 条下补 v1.2.2 实测、§6.5 T3.17 整行重写、§15 T3.9 ☐→**◐** 且 T3.17 ☐→**◐**、阶段 3 收工口径 **☑ 8 / ◐ 3 / ☐ 6 → ☑ 8 / ◐ 5 / ☐ 4**、§18 Gate3 整段重写（仍未过、不打 tag）、§19 新增 v1.2.2 行与「下一步」重写为 ⑫ 条。**任务总数、人日、追溯矩阵、Gate 行数均未变：117 / 144.30 / 101 / 10。**
+- README：单测 296 → **327**、冒烟 187 → **220 项 / 206 断言**、domprobe 61 → **93**、build 1777 → **1780 modules**，接口与页面清单补三条搜索路径 + 关注流 + `/search` 页 + 广场「关注」Tab。
+- 全局《复利与踩坑日志》补 009 **第 10 轮**（Jackson `non_null` 的假绿、仓库外 harness 干跑法、here-string 里 JS 字符串不能跨行、夹具关键词必须分组、`v-show`/`v-if` 与 IntersectionObserver 哨兵、composable 返回「对象里的 ref」不解构就静默画空、URL 同步必须有读 `location.search` 的断言、`exec_command` 漏 `shell` 掉进 cmd.exe、**以及用户点名的那条 mysql `-p` 空格挂起**）。
+
+### 仍未做（截至本轮，别自我感觉良好）
+
+- **搜索的三条欠账**：相关度排序（FR4.8 那半条，要做就得单独写一份 XML Mapper 取 `MATCH ... AGAINST` 分数，已排阶段 4）、全文通道（`sql/10_index.sql` 至今未执行 → **T2.2 维持 ◐**）、U8 搜索历史与热搜（等 T3.10 埋点）。搜索结果里的**话题卡点不动**（跳详情属 T3.8）。
+- **T3.17 的种子评论 ≥ 200 条**未做；举报宿主仍只有 `post`；评论点赞 / 删除 / 举报 / @通知界面仍未开放。
+- `notify_preference` 与 **U13 通知中心整页**（T3.16 ◐）；`HUMAN_REVIEW` 仍不进管理端处置队列（T6.1）；`alert_ticket.source_type` 仍缺 `comment` / `report` 两档；`auto_destroy_at` 仍只写不扫（T3.15）；`PushHook` 只有日志实现。
+- **真浏览器仍未测**（jsdom 不含样式与布局，`@keyup.enter` 也没在真键盘下走过），§6.4 第 4 条继续 ☐、T3.13 维持 ◐；U1 首页与 U6 话题圈未开工；`PUT /api/users/me/profile` 仍 90001；阶段 1B 论文与开题材料按用户指令继续顺延。
+- **仍未打 tag**（Gate3 未过，最新 tag `stage-2-skeleton`）。
