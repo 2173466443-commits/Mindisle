@@ -2,8 +2,14 @@
 //
 // 为什么要有这个文件：npm run build 只证明「能编译」，docs/smoke.mjs 只证明「接口对」。
 // 中间那段——「组件真的渲染出这些字段、点了 Tab 真的换了查询、匿名帖真的点不进作者」——
-// 一直是文档里的写白项。本机没有可用的真实浏览器，但 jsdom + 编译后的探针包能把这段补上：
-// 组件是真实的组件、请求是真实的 XHR、走的是真实的 Vite 代理，只是渲染目标不是浏览器而是 jsdom。
+// 一直是文档里的写白项。jsdom + 编译后的探针包能把这段补上：组件是真实的组件、请求是真实的
+// XHR、走的是真实的 Vite 代理，只是渲染目标不是浏览器而是 jsdom。
+//
+// 两条取证线的边界（2026-09-23 Gate3 那轮之后补，此前这里写的是「本机没有可用的真实浏览器」，已经不成立）：
+// 真浏览器那一半在 probe/shootgate.mjs（Playwright 驱动 Chrome 拍 21 张图 + 读控制台）。别拿一条的绿替另一条背书——
+// jsdom 不做 CSS 级联、不做真实字体度量、不滚动、不加载 favicon，所以「颜色错、对齐错、空态插画、501」这类
+// **结构存在但视觉错误**的问题只有 shootgate 抓得到；反过来「点了 Tab 请求参数真的变了」这种要读几十个字段
+// 的深水区断言，写在 jsdom 里比写在图里可维护。本轮把「卡片与评论区标题的『评论 N』必须同口径」两条各钉了一份。
 //
 // 跑法（两个前置都得在）：
 //   1) 后端 8080 已启动；
@@ -336,9 +342,22 @@ async function runProbe(bundleCode, accessToken) {
     secText('.comments article.thread .row .who'))
   // 这条不是「页面上没画 id」：authorId 为 null 时出参里连字段都没有（Jackson NON_NULL），
   // 所以前端就算想画也拿不到 —— 解匿面在响应体这一层，不在 CSS 这一层。
-  check('9', '翻到底之后不再给「查看更多」按钮，改出一行「共 19 条一级评论」',
+  check('9', '翻到底之后不再给「查看更多」按钮，改出一行「一级评论 19 条已全部加载」',
     w.document.querySelectorAll('.comments .more').length === 0
-    && docText().indexOf('共 19 条一级评论') >= 0, secText('.comments .pager'))
+    && docText().indexOf('一级评论 19 条已全部加载') >= 0, secText('.comments .pager'))
+  // 同一屏两处「评论 N」必须同口径：卡片那个数来自 post.comment_cnt（只数已发布、含楼中楼），
+  // 评论区标题以前用的是列表 total（可见的一级评论数，还把作者自己那条待审算进来），于是出现过
+  // 「卡片 19 / 标题 20」。这条是 Gate3 截图 06 那轮补的，jsdom 这边同步钉一份：
+  // 以后谁再改这两处的口径，至少会先在这里红一条，而不是等下一轮看图才发现。
+  const cardCmt = (function () {
+    const hit = Array.prototype.slice.call(w.document.querySelectorAll('.stat'))
+      .map(function (e) { return e.textContent.replace(/\s+/g, '') })
+      .filter(function (t) { return /^评论/.test(t) })[0]
+    return hit ? hit.replace(/^评论/, '') : ''
+  })()
+  const headCmt = secText('.comments .h .n').replace(/\s+/g, '')
+  check('9', '卡片「评论 N」与评论区标题「评论 N」是同一个数（两处必须同口径）',
+    cardCmt !== '' && cardCmt === headCmt, '卡片=' + cardCmt + ' / 标题=' + headCmt)
   check('9', '评论区加载全程没有弹全局消息条（读接口是 silent 的）',
     w.document.querySelectorAll('.el-message').length === 0)
   check('9', '发表框、字数计数、匿名勾选三样都在（没登录时才不画，这一版登录着）',

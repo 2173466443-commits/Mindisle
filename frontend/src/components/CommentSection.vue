@@ -1,8 +1,8 @@
 <template>
   <section class="mi-card comments">
     <header class="bar">
-      <h2 class="h">评论 <span class="n">{{ fmtCount(total) }}</span></h2>
-      <span class="rule">按一级评论计数，楼中楼的回复不在这个数字里。</span>
+      <h2 class="h">评论 <span class="n">{{ fmtCount(shownTotal) }}</span></h2>
+      <span class="rule">{{ countRule }}</span>
     </header>
 
     <crisis-card v-if="hotline" :hotline="hotline"
@@ -52,7 +52,7 @@
 
       <div class="pager">
         <el-button v-if="hasMore" class="more" size="small" :loading="loading" @click="loadMore">查看更多评论</el-button>
-        <span v-else-if="threads.length" class="end">共 {{ total }} 条一级评论，已经看到底了。</span>
+        <span v-else-if="threads.length" class="end">一级评论 {{ total }} 条已全部加载{{ pendingRoots ? '（含 ' + pendingRoots + ' 条审核中、仅你可见）' : '' }}。</span>
       </div>
 
       <footer class="composer">
@@ -119,7 +119,15 @@ import CrisisCard from '@/components/CrisisCard.vue'
  * REJECTED / DELETED 谁都不可见——这两种只留文案，列表里一个像素都不给。</p>
  */
 const props = defineProps({
-  postId: { type: [Number, String], required: true }
+  postId: { type: [Number, String], required: true },
+  /**
+   * 卡片/详情页页脚那个「评论 N」的值（= 后端 post.comment_cnt：只数 PUBLISHED，含楼中楼回复）。
+   * 评论区标题必须用**这一个数**，不能用列表的 total —— total 是「对当前查看者可见的一级评论数」，
+   * 既不含楼中楼、又把作者自己那条 PENDING 算进来，两个口径混在同一个屏幕上就会出现
+   * 「页脚写 19、评论区标题写 20」这种看起来像 bug 的对不上（Gate3 截图 06 实测到）。
+   * 不给这个 prop 时回退用 total，保证组件单独挂载时不炸。
+   */
+  publishedCount: { type: [Number, String], default: null }
 })
 // 一条已发布评论落库时告诉父级一次：详情页页脚那个「评论 N」就是靠它自增的，
 // 口径与后端 post.comment_cnt 完全一致（只数 PUBLISHED 且未删除的评论，含楼中楼回复）。
@@ -147,6 +155,27 @@ const tip = ref('')
 // 换帖时旧请求晚到会污染新帖子，所以每次发请求领一个号：回来时号不是最新的就整份丢掉。
 // 这条纪律是从 usePagedPosts.js 抄来的，同一个坑不该在两个列表里各踩一次。
 let seq = 0
+
+// 屏上「仅作者自己可见」的待审评论条数：一级评论里的那几条（回复层的另算，见 pendingAll）。
+const pendingRoots = computed(() => threads.value.filter(function (t) {
+  return t && t.root && t.root.status === 'PENDING'
+}).length)
+const pendingAll = computed(() => threads.value.reduce(function (n, t) {
+  if (!t) return n
+  if (t.root && t.root.status === 'PENDING') n += 1
+  return n + (Array.isArray(t.replies) ? t.replies.filter(function (r) { return r && r.status === 'PENDING' }).length : 0)
+}, 0))
+// 标题数字的唯一口径：父级给的「已发布评论数」，取不到才退回列表 total。
+const shownTotal = computed(() => {
+  const v = Number(props.publishedCount)
+  return Number.isFinite(v) && v >= 0 ? v : total.value
+})
+const countRule = computed(() => {
+  const base = '只数已发布评论，楼中楼回复也算在内，与卡片上的「评论」是同一个数。'
+  return pendingAll.value > 0
+    ? base + '本页另有 ' + pendingAll.value + ' 条审核中、仅你可见，所以下面会比这个数字多。'
+    : base
+})
 
 const len = computed(() => commentLength(draft.value))
 const overLimit = computed(() => len.value > COMMENT_MAX_CHARS)

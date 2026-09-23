@@ -88,7 +88,7 @@
 
     <!-- 评论区（任务 T3.7 · U4）：单独一张卡。未登录、加载失败、空列表三种状态由组件自己画，
          详情页不参与——同一句「看不到评论」在三种情况下的成因完全不同，混在父页面里判就容易判错。 -->
-    <comment-section v-if="post" :post-id="postId" @published="onCommentPublished" />
+    <comment-section v-if="post" :post-id="postId" :published-count="post.commentCnt" @published="onCommentPublished" />
 
     <!-- 举报弹层（T3.11）。用弹层而不是常驻表单：举报是填完就走的低频动作，
          挂在正文下面会让「看帖」这件事一直被一个空框子打断。 -->
@@ -192,6 +192,8 @@ const previewList = computed(() => (post.value?.images || []).map((x) => x.url))
 const postId = computed(() => Number(route.params.id) || 0)
 // 页脚的「评论 N」跟着回执走：口径与后端 post.comment_cnt 相同（只数已发布，含楼中楼回复），
 // 所以一条被机审转人工的评论不会让这个数变化——它确实还没进 comment_cnt。
+// 同一个数还通过 published-count 传给评论区当标题：屏幕上两处「评论 N」必须是同一个口径，
+// 待审那几条由组件自己在规则文案里单独说明（Gate3 截图 06 实测到「页脚 19 / 标题 20」对不上）。
 function onCommentPublished() {
   if (!post.value) return
   post.value.commentCnt = (Number(post.value.commentCnt) || 0) + 1

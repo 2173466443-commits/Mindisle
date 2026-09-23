@@ -220,7 +220,23 @@ const specs = [
   { file: '03b-U3广场-整页.png', url: '/feed', token: d.token, full: true, desc: 'U3 广场整页（含无限滚动已加载的全部内容，验证长页不破版）' },
   { file: '04-U3-b关注流.png', url: '/feed', token: d.token, desc: '切到「关注」来源：应换成关注流且地址栏带 ?type=follow', act: async (p) => { await p.locator('.mi-card.source .el-radio-button__inner', { hasText: '关注' }).first().click(); await p.waitForTimeout(900) } },
   { file: '05-U6话题详情.png', url: '/topic/' + d.topicId, token: d.token, desc: 'U6 话题圈：头图/发帖数/关注按钮 + 该话题的公开帖流', count: { selector: '.flow .mi-card.post', min: 1 } },
-  { file: '06-U4帖子详情-评论区.png', url: '/post/' + d.postId, token: d.token, desc: 'U4 详情：正文 + 评论树 + 互动条', count: { selector: '.comments .row', min: (d.commentCnt > 0 ? 1 : 0) } },
+  { file: '06-U4帖子详情-评论区.png', url: '/post/' + d.postId, token: d.token, desc: 'U4 详情：正文 + 评论树 + 互动条', count: { selector: '.comments .row', min: (d.commentCnt > 0 ? 1 : 0) },
+    // 同一屏两个「评论 N」必须是同一个数：卡片用 post.comment_cnt（只数已发布、含楼中楼），
+    // 评论区标题以前用的是列表 total（可见的一级评论数，还把作者自己那条待审算进来）——
+    // 于是出现「卡片 19 / 标题 20」，肉眼在这张图上看了三轮都没当回事，直到本轮逐张看图才发现。
+    // 这条判据的作用就是把「两处同名数字必须同口径」钉成机器可判的，不再依赖看图的人较真。
+    assert: async (p) => {
+      const got = await p.evaluate(() => {
+        const squeeze = (el) => (el ? String(el.textContent).replace(/\s+/g, '') : '')
+        const card = Array.from(document.querySelectorAll('.stat')).map(squeeze).find((t) => /^评论/.test(t)) || ''
+        return { card: card.replace(/^评论/, ''), head: squeeze(document.querySelector('.comments .h .n')) }
+      })
+      say('  .. 06 两处「评论」读数：卡片=' + got.card + ' / 评论区标题=' + got.head)
+      if (!got.card) return '卡片上的「评论 N」没取到，判据无法执行（选择器 .stat 变了？）'
+      if (!got.head) return '评论区标题的数字没取到（选择器 .comments .h .n 变了？）'
+      if (got.card !== got.head) return '同一屏两个「评论」数字对不上：卡片=' + got.card + ' / 评论区标题=' + got.head
+      return null
+    } },
   { file: '07-U4详情-举报弹层.png', url: '/post/' + d.postId, token: d.token, desc: '举报对话框（FR8.5 先审后发的用户侧入口），验弹层深色一致 + 理由单选左对齐', act: async (p) => { const b = p.locator('.acts .act-report').first(); if (await b.count()) { await b.click(); await p.waitForTimeout(700) } },
     assert: async (p) => {
       const box = await p.evaluate(() => {
