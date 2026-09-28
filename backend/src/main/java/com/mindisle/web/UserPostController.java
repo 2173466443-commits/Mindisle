@@ -42,8 +42,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
  *
  * <p><b>为什么路径要写数字约束</b>：一是让 {@code /me/posts} 与 {@code /{id}/posts} 的字面量与模板歧义
  * 靠声明消失，而不是依赖 PathPattern 比较器的优先级；二是非数字 id 由容器直接判不匹配、落到兜底 404，
- * 不会先进方法再把 long 解析失败抛成 500 —— GlobalExceptionHandler 里没有
- * MethodArgumentTypeMismatchException 的处理器，那种 500 会把「你参数写错了」伪装成服务端故障。
+ * 不会先进方法再把 long 解析失败抛成 500。GlobalExceptionHandler 现在虽然也兜住了
+ * MethodArgumentTypeMismatchException（回 10001/400，见阶段 4 补的那条），但「靠声明消除歧义」仍比
+ * 「靠异常兜底给出正确的错误码」更省事：路由不该匹配上来的请求，就不该走到解析参数那一步。
  *
  * <p>本前缀不在 SecurityConfig 的 permitAll 白名单里，未登录必 401/10002；
  * current == null 的兜底照抄 PostController：白名单被人改宽时，

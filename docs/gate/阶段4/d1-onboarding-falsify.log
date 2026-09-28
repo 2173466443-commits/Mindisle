@@ -1,0 +1,19 @@
+# 实例 = http://127.0.0.1:8080 · 账号 = d1_gate_nc ·（证伪模式：故意不授单独同意，用从未授权的马甲账号）
+PASS [0 · 后端实例在跑（/api/system/info 200）]   200 code=0 {"code":0,"data":{"app":"MindIsle 心屿","version":"0.0.1-SNAPSHOT","profiles":"dev…
+PASS [1 · 注册账号返 200（或 20002 重跑：撞唯一键本身就是「真落库」的证据）]   200 code=0
+PASS [1 · 登录拿到 accessToken（后面每一步的身份都只来自这一张票）]   200 code=0 uid=471
+SKIP [2] 证伪模式：跳过单独同意，下面的对话判据应当变红
+FAIL [3 · 首次对话 HTTP 200、帧序列 meta/delta/done、正文非空]   帧=error delta字数=0 error帧={"code":20005,"msg":"AI 陪伴会处理情绪与健康相关信息，需要你先在「隐私与同意」里单独授权。"}
+FAIL [3 · 🔴 判据 D2：TTFT < 2000ms，且这个首帧真的是 delta（真实上游 DeepSeek，不是离线实例）]   hasDelta=false 首帧=4ms 整轮=5ms
+FAIL [3 · meta 帧带回 conversationId（会话真的在服务端建了，不是前端空壳）]   conv=undefined
+FAIL [3 · meta 帧带回 emotion 与 riskLevel（这一句的情绪判定跟着帧一起回来；契约里 emotion 就是标签字符串）]   meta.emotion(词典初判)=undefined riskLevel=undefined
+FAIL [3 · 会话回读：用户那一句带 emotionLabel + emotionChannel（情绪标签钉在被说的那句话上，不是钉在回复上）]   条数=0 用户句 emotionLabel=- channel=- riskLevel=-
+FAIL [3 · 助手那一句带真实模型名与 promptVersion（回复真走了 DeepSeek；model 键缺席说明它压根没进模型）]   model=- promptVersion=- degraded=-
+FAIL [3 · 🔴 补标闭环的证据：库里用户句的 emotionChannel 已经变成 llm（异步补标会回写 chat_message，手册 T4.8 旧口径「不回改」据此订正）]   meta 帧当时=undefined（词典初判） 库里现在=-
+FAIL [4 · 🔴 判据 D1 的落点：只说了这一句话之后，档案页的点数已经 >= 1，且 trend / distribution / calendar 都有内容（情绪点是「对话」写进去的，不是打卡写进去的）]   200 recordCount=0 trend=0 distribution=[] sources=[{"key":"checkin","zh":"主动打卡","count":0,"ratio":0},{"key":"passive","zh":"被动识别","count":0,"ratio":0}]
+FAIL [4 · 情绪打卡 200（source=checkin 的记录落 emotion_record）]   403 code=20005 {"code":20005,"msg":"情绪记录属于敏感个人信息，需要你先在「隐私与同意」里单独授权。","success":false,"traceId":"5c93aa7e4b06460e"}
+FAIL [4 · 打卡之后档案点数不减少，且这一天的强度均值把打卡那一档也算进去了（同一个人两条来源汇成同一个点）]   基线=0 现在=0 trend[0]={}
+PASS [5 · 🔴 判据 D1：注册 → 同意 → 首次对话 → 档案出现情绪点，全程 < 180 秒]   实际用时=1.5s
+
+D1 闭环汇总：14 项判据，通过 4 条，失败 10 条 —— 失败项：3 · 首次对话 HTTP 200、帧序列 meta/delta/done、正文非空 | 3 · 🔴 判据 D2：TTFT < 2000ms，且这个首帧真的是 delta（真实上游 DeepSeek，不是离线实例） | 3 · meta 帧带回 conversationId（会话真的在服务端建了，不是前端空壳） | 3 · meta 帧带回 emotion 与 riskLevel（这一句的情绪判定跟着帧一起回来；契约里 emotion 就是标签字符串） | 3 · 会话回读：用户那一句带 emotionLabel + emotionChannel（情绪标签钉在被说的那句话上，不是钉在回复上） | 3 · 助手那一句带真实模型名与 promptVersion（回复真走了 DeepSeek；model 键缺席说明它压根没进模型） | 3 · 🔴 补标闭环的证据：库里用户句的 emotionChannel 已经变成 llm（异步补标会回写 chat_message，手册 T4.8 旧口径「不回改」据此订正） | 4 · 🔴 判据 D1 的落点：只说了这一句话之后，档案页的点数已经 >= 1，且 trend / distribution / calendar 都有内容（情绪点是「对话」写进去的，不是打卡写进去的） | 4 · 情绪打卡 200（source=checkin 的记录落 emotion_record） | 4 · 打卡之后档案点数不减少，且这一天的强度均值把打卡那一档也算进去了（同一个人两条来源汇成同一个点）
+# SQL 复核（root 直连）：SELECT id,username,created_at FROM user WHERE username="d1_gate_nc"; SELECT id,consent_type,created_at FROM user_consent WHERE user_id=471 ORDER BY id DESC LIMIT 3; SELECT id,role,emotion_label,model,degraded FROM chat_message WHERE conversation_id=-1 ORDER BY id; SELECT id,record_date,label,intensity,source FROM emotion_record WHERE user_id=471 ORDER BY id DESC LIMIT 3;

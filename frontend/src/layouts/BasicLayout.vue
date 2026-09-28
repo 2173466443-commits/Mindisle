@@ -13,9 +13,12 @@
              要么在每个页面各自实现一遍跳转。先要一条能用的路。 -->
         <router-link to="/search">搜索</router-link>
         <router-link to="/publish">发布</router-link>
-        <router-link to="/ai">屿灵</router-link>
+        <router-link to="/ai">屿屿</router-link>
         <router-link to="/emotion">情绪</router-link>
         <router-link to="/me">我的</router-link>
+        <!-- 隐私中心（任务 T4.21）放进入口，是因为「导出自己的数据 / 注销账号」这类权利，
+         藏在「我的」页面第三层按钮上就等于没提供。它是账号级退出与数据携带权的唯一通道，值得一个常驻位。 -->
+        <router-link to="/privacy">隐私</router-link>
         <router-link to="/help" class="mi-help">需要帮助？</router-link>
       </nav>
       <div class="mi-status">

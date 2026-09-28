@@ -32,8 +32,18 @@ public class RateLimitInterceptor implements HandlerInterceptor {
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitInterceptor.class);
 
-    /** AI 前缀单独限额：一次对话动辄上千 token，6 次/分是成本与体验的折中。 */
-    private static final String AI_PREFIX = "/api/ai/";
+    /**
+     * 需要按「AI 成本」限流的路径前缀。
+     *
+     * <p><b>为什么不是整条 {@code /api/ai/}</b>：NFR7 写「AI 接口 6 次/分」，紧挨着的半句是
+     * 「普通接口 60 次/分」，它要防的是「脚本刷模型造成成本雪崩」（FR6.7），不是限制用户看自己的会话。
+     * 若按前缀一刀切，一次 U7 页面加载就要吃掉配额：列表 1 次 + 每条历史消息各 1 次 +
+     * 每发言 1 次 + 每次赞踩 1 次，用户在演示里发第四句话就会莫名其妙收到 429 —— 而这与花钱无关。
+     * 所以严格限额只作用在真正调用大模型的 {@code /api/ai/chat/} 上，其余 AI 路径走 60 次/分。</p>
+     *
+     * <p>该口径偏离已作为「契约漂移」记入 docs/dev-log.md，答辩口径：按成本分级限流。</p>
+     */
+    private static final String[] COSTLY_AI_PREFIXES = { "/api/ai/chat/" };
 
     private static final String KEY_PREFIX = "rl:";
 
@@ -54,10 +64,18 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         String uri = request.getRequestURI();
         MindisleProperties.RateLimit config = properties.getRateLimit();
-        int limit = uri != null && uri.startsWith(AI_PREFIX) ? config.getAiPerMinute() : config.getUserPerMinute();
+        boolean costly = isCostlyAi(uri);
+        int limit = costly ? config.getAiPerMinute() : config.getUserPerMinute();
         String identity = resolveIdentity(request);
         long bucket = System.currentTimeMillis() / WINDOW_MILLIS;
-        long count = cacheService.incr(KEY_PREFIX + identity + ":" + bucket, WINDOW);
+        // 🔴 计数器必须按成本分级，否则上面那句「只有 chat 走 6 次/分」是假的。
+        // 原实现的 key 是 rl:<身份>:<窗口>，全站所有接口共用一个计数，只是「比较时用哪个上限」不同：
+        // 于是打开 /ai 页面要拉的会话列表、每条历史的回看、每次赞踩，全都被记进同一条计数里，
+        // 等用户真正发言时 count 早已 >6，第四五句话直接 429 —— 而这跟模型成本一点关系都没有。
+        // 2026-09-24 真链路实测：一分钟内 count 一路涨到 13，limit=6，被拒的 5 次全是普通读写。
+        // 把档位写进 key 之后，AI 严格配额只统计真正打模型的调用，普通调用回到它自己的 60 次/分桶里。
+        String countKey = KEY_PREFIX + (costly ? "ai:" : "") + identity + ":" + bucket;
+        long count = cacheService.incr(countKey, WINDOW);
 
         response.setHeader("X-RateLimit-Limit", String.valueOf(limit));
         response.setHeader("X-RateLimit-Remaining", String.valueOf(Math.max(0L, (long) limit - count)));
@@ -67,6 +85,19 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             throw new BizException(ErrorCode.RATE_LIMITED);
         }
         return true;
+    }
+
+    /** 只有会调用大模型的端点才吃严格配额。 */
+    private static boolean isCostlyAi(String uri) {
+        if (uri == null) {
+            return false;
+        }
+        for (String prefix : COSTLY_AI_PREFIXES) {
+            if (uri.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String resolveIdentity(HttpServletRequest request) {

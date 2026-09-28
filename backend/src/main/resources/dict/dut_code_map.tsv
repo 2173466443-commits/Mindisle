@@ -1,0 +1,25 @@
+# dut-4.0-mindisle-v1 · DUT 21 小类 -> 本项目落库口径 Plutchik 7 类 的对照表
+# 这张映射表是【本项目自定】，不是 DUT 原生结构；论文附录、dev-log、README 都必须写明这一点。
+# 五条偏离 DUT 大类的取舍（PB/PK/NK/NE/NL）理由见 note 列；界面中文标签见 frontend/src/components/EmotionPill.vue。
+# 列：dut_code	dut_code_name	dut_family	plutchik	deviates_from_family	primary_word_count	note
+PA	快乐	乐	joy	no	1359	直接对应：Plutchik joy 的核心就是快乐
+PE	安心	乐	neutral	no	608	安心=低唤醒正性平静；七类里没有 calm，落到界面标签「平静」比落到「喜悦」更贴语义
+PB	喜爱	好	joy	yes	1013	DUT 归「好」，但喜爱是趋近性正情绪，标成喜悦对用户更有用；信任留给评价他人的词
+PD	尊敬	好	trust	no	821	尊敬是信任的典型外显
+PH	赞扬	好	trust	no	8592	赞扬=认可与信任的表达（本类词数最多，派生后须复核它会不会盖过其他类）
+PG	相信	好	trust	no	468	字面即信任
+PK	祝愿	好	joy	yes	214	祝愿/渴望指向期待，七类无 anticipation，归入喜悦
+NA	愤怒	怒	anger	no	388	直接对应
+NK	妒忌	恶	anger	yes	38	DUT 归「恶」，但嫉妒的攻击性指向他人，落 anger 比落 disgust 更可用于陪伴话术
+NB	悲伤	哀	sadness	no	1501	直接对应
+NJ	失望	哀	sadness	no	449	失望是悲伤的下位
+NH	疚	哀	sadness	no	117	内疚在七类里没有独立位，属自我指向的负性低唤醒，归悲伤
+PF	思	哀	sadness	no	247	思念在需求 §1.5 的七类里没有独立位，其效价为负，归悲伤
+NE	烦闷	恶	sadness	yes	1019	DUT 归「恶」，但烦闷/郁闷带抑郁色彩；若照抄大类，「我好烦」会被标成厌恶，界面直接失真
+NC	恐惧	惧	fear	no	704	直接对应
+NI	慌	惧	fear	no	384	慌乱=高唤醒恐惧
+NG	羞	惧	fear	no	91	羞怯在七类里无独立位，其回避动机来自惧
+NL	怀疑	恶	fear	yes	132	DUT 归「恶」，但怀疑的核心是不安全感，fear 与 disgust 二选一时取前者
+ND	憎恶	恶	disgust	no	1510	直接对应
+NN	贬责	恶	disgust	no	7583	贬责含指责与脏话，接近 Plutchik contempt=disgust+anger，取 disgust
+PC	惊奇	惊	neutral	no	228	七类里没有 surprise；惊的效价中性，落 neutral 比硬塞进 fear 更诚实

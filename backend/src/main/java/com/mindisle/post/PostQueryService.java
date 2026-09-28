@@ -155,6 +155,14 @@ public class PostQueryService {
         String typeFilter = normalizeTypeFilter(type);
         LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
         applyVisible(wrapper, viewerId, typeFilter, now);
+        // 任务 T4.21：广场也要拦住注销者的历史帖。search 与关注流早就带了这条谓词
+        // （见 keywordWrapper 与 applyFollowingFeed），plaza 是唯一漏掉的一处 ——
+        // 手册 §7.5 的验收「注销后搜不到 / 刷不到」里，「搜不到」一直是对的，「刷不到」从今天起才是。
+        // 现查 user 表 321 行全部 ACTIVE、purge_at 全 NULL，所以这条谓词今天恒真、
+        // 不改变任何既有冒烟结果；它是为「有了注销之后」准备的。
+        // （偏差：手册 §7.5 的 SQL 写 u.status = 0，与 user.status 的 ENUM 取值不符，
+        //   实际谓词用 AUTHOR_ACTIVE = ACTIVE，见 applyAuthorActive，已记 dev-log。）
+        applyAuthorActive(wrapper);
 
         return pageResult(wrapper, viewerId, page, now);
     }
@@ -336,6 +344,30 @@ public class PostQueryService {
                 intValue(post.getCollectCnt()));
     }
 
+    /**
+     * 「这条停留该不该进埋点」——只回答这个问题，<b>不动 view_cnt</b>。
+     *
+     * <p>存在的理由只有一条：埋点必须复用 {@link #visibleTo} 这<b>同一份</b>可见性判据。
+     * 若 {@code POST /api/posts/{id}/read} 不校验就记分，任何人拿别人私密帖或已删帖的 id
+     * 连发 3 秒上报就能给一条「根本没人能看到的」内容攒出浏览分，
+     * 而阶段 7 的 CF 只看 weight 之和，看不出这些分是从哪来的。</p>
+     *
+     * <p><b>为什么不复用 {@link #detail}</b>：detail 会走 {@code viewCountService.recordView}
+     * 把 post.view_cnt 加一。停留上报是一次独立的上报动作，如果它顺手把浏览量也加了，
+     * 「打开详情页」这一件事就会被计成两次浏览（GET 一次 + 离开时 POST 一次）。
+     * 埋点读的是 user_action，浏览量读的是 post，两条计数各有唯一写入方，
+     * 这正是本项目从 T3.5 起一直保持的口径。</p>
+     *
+     * <p><b>作者自看返回 false</b>：与 {@link #detail} 里「作者打开自己的帖不计浏览」同一条理由
+     * （需求 BR4：自己的互动不该把自己推上广场）。这里不是漏判，是把同一条判断做成两处一致。</p>
+     */
+    public boolean dwellCountableFor(long viewerId, long postId, LocalDateTime now) {
+        Post post = postMapper.selectById(postId);
+        if (post == null || !visibleTo(post, viewerId, now)) {
+            return false;
+        }
+        return !isOwner(post, viewerId);
+    }
     // ================================================================ 纯逻辑（单测直调，不碰数据库）
 
     /**

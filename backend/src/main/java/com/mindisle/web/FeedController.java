@@ -20,6 +20,8 @@ import com.mindisle.mapper.UserFollowMapper;
 import com.mindisle.post.PostQueryService;
 import com.mindisle.post.dto.PostListItem;
 import com.mindisle.security.AuthUser;
+import com.mindisle.track.UserActionCatalog;
+import com.mindisle.track.UserActionRecorder;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -52,16 +54,18 @@ public class FeedController {
   private final TopicMapper topicMapper;
   private final UserFollowMapper userFollowMapper;
   private final PostQueryService postQueryService;
+  private final UserActionRecorder recorder;
 
   /**
    * 任务 3.17 起本类多两个依赖：user_follow 的读数与 post 的取数组装。
    * {@code recommend} 那个 90001 的桩仍然不碰它们——推荐属阶段 4，别为了「看起来能用」提前接。
    */
   public FeedController(TopicMapper topicMapper, UserFollowMapper userFollowMapper,
-      PostQueryService postQueryService) {
+      PostQueryService postQueryService, UserActionRecorder recorder) {
     this.topicMapper = topicMapper;
     this.userFollowMapper = userFollowMapper;
     this.postQueryService = postQueryService;
+    this.recorder = recorder;
   }
 
   @GetMapping("/api/topics")
@@ -93,7 +97,14 @@ public class FeedController {
     }
     List<Long> authorIds = userFollowMapper.listFollowingIds(current.id(),
         PostQueryService.FOLLOWING_AUTHOR_CAP);
-    return Result.ok(postQueryService.following(current.id(), authorIds, page, LocalDateTime.now()));
+    PageResult<PostListItem> result =
+        postQueryService.following(current.id(), authorIds, page, LocalDateTime.now());
+    // 关注流的曝光（任务 T3.10）。scene 用 following 而不是 feed，是为了阶段 7 能把
+    // 「社交关系带来的曝光」和「广场算法带来的曝光」分开算分母——两条流推的内容来源本就不同。
+    // 不挂在 /api/feed/recommend 上：那个端点至今仍是 90001 的桩，钩子上去就是死代码。
+    recorder.recordExposure(current.id(), result.getList().stream().map(PostListItem::id).toList(),
+        UserActionCatalog.SCENE_FOLLOWING, LocalDateTime.now());
+    return Result.ok(result);
   }
 
   @GetMapping("/api/feed/recommend")

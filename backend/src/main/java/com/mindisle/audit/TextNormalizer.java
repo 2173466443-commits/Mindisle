@@ -90,8 +90,16 @@ public final class TextNormalizer {
         return new Normalized(raw, folded.toString(), sourceIndex);
     }
 
-    /** 单码位折叠：全半角 → 小写 → 同形/异体字表。 */
-    private static int fold(int cp) {
+    /**
+     * 单码位折叠：全半角 → 小写 → 同形/异体字表。
+     *
+     * <p>公开给 {@code com.mindisle.emotion.DictEmotionEngine} 复用。之所以只开放这一个零件、
+     * 而不让情绪侧直接调 {@link #normalize(String)}：{@code normalize} 会把 emoji 和标点一并删掉，
+     * 而情绪识别需要的恰恰是「🙂」和「！」「？」这些信号（审核侧删它们是对的，绕过审核才要删）。
+     * 于是情绪侧自己分句、自己决定哪些码位留、哪些丢，只借用这一层码位折叠，两条通道共用同一套
+     * 全半角/繁简口径，不会出现「同一个字在两个模块里算两个样」。</p>
+     */
+    public static int fold(int cp) {
         int folded = cp;
         if (folded >= 0xFF01 && folded <= 0xFF5E) {
             // 全角 ASCII 与半角相差固定 0xFEE0，一次减法就够，不必查表。

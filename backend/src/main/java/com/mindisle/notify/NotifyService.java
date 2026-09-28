@@ -14,6 +14,8 @@ import com.mindisle.notify.dto.MarkReadRequest;
 import com.mindisle.notify.dto.MarkReadView;
 import com.mindisle.notify.dto.NotifyItem;
 import com.mindisle.notify.dto.NotifyPage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,6 +54,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class NotifyService {
+
+    private static final Logger log = LoggerFactory.getLogger(NotifyService.class);
 
     /** title / content 的列宽上限（DDL VARCHAR(100) 与 VARCHAR(500)），码点计数。 */
     static final int TITLE_MAX = 100;
@@ -223,6 +227,46 @@ public class NotifyService {
      * <p>多取一条判 {@code hasMore}，而不是数总数：本表按用户增长，COUNT 一次全量的收益
      * 只有「页码能显示共几页」，代价是每次开页扫一遍。红点已经有未读数了，够用了。</p>
      */
+    /**
+     * 危机工单弹给管理员（任务 T4.13 · 需求 FR10.6 / §5.2）。
+     *
+     * <p><b>为什么新开方法而不是让 ChatService 自己新建 NotifyMessage</b>：{@link #write} 里面藏着三件
+     * 事——码点截断、{@code existsUnreadDuplicate} 同文案幂等、{@link PushHook} 推送口。
+     * 绕过它就等于写出一条「不会推送、也不去重」的通知：同一个危机用户连续发十条消息
+     * 就会给每个管理员刷十条红点，第十一条开始这个通知就垃圾了。写在本类里才算正硬。</p>
+     *
+     * <p><b>幂等口径</b>：{@code ref_type=conversation} + {@code ref_id=会话 id} + 固定文案，
+     * 所以「同一会话内的连续 L3」只会留一条未读。但 title 里带了等级，
+     * L2 升到 L3 会文案不同——这是故意的：升级必须再次打烊。</p>
+     *
+     * <p><b>不抄贝原文</b>：内容只放 {@code excerpt}（调用方已用 {@code CrisisGrader.evidence} 截过），
+     * 因为通知会推到管理员的浏览器弹窗上，屏幕可能被别人看见（需求 BR11 最小展示原则）。</p>
+     *
+     * @param adminIds       接收人（{@code UserMapper#listAdminIds()}）；空集合直接返回，不报错
+     * @param conversationId 工单指向的会话，作为通知的 ref（点击跳审核队列）
+     * @param level          L2 / L3
+     * @param excerpt        证据摘录，可为 null
+     */
+    public void notifyCrisisAdmin(List<Long> adminIds, long conversationId, String level, String excerpt) {
+        if (adminIds == null || adminIds.isEmpty()) {
+            log.warn("危机通知没有接收人（管理员列表为空）conversationId={} level={}", conversationId, level);
+            return;
+        }
+        String safeLevel = level == null || level.isBlank() ? "L2" : level;
+        String title = "【" + safeLevel + " 危机】AI 对话命中风险词，会话 #" + conversationId;
+        String body = "热线 " + CRISIS_HOTLINE_HINT + "。证据摘录："
+                + (excerpt == null || excerpt.isBlank() ? "（无）" : excerpt);
+        for (Long adminId : adminIds) {
+            if (adminId == null) {
+                continue;
+            }
+            write(adminId, NotifyMessage.TYPE_CRISIS, title, body, NotifyMessage.REF_CONVERSATION, conversationId);
+        }
+    }
+
+    /** 通知文案里的热线提示。写死而不取配置：管理员看到的是「该打哪个电话」，它属于公共危机资源。 */
+    private static final String CRISIS_HOTLINE_HINT = "12356";
+
     public NotifyPage list(long userId, Long beforeId, Integer size) {
         int limit = normalizeSize(size);
         List<NotifyMessage> rows = store.page(userId, beforeId, limit + 1);

@@ -19,6 +19,40 @@ export const actOnPost = (id, action) => http.post('/posts/' + id + '/actions', 
 export const listComments = (id, params) => http.get('/posts/' + id + '/comments', { params, silent: true })
 export const addComment = (id, payload) => http.post('/posts/' + id + '/comments', payload)
 
+// ---------------- 停留时长上报（任务 T4.17 · 需求 FR5.1「停留 ≥3s 才算一次浏览」）----------------
+/** 与后端 UserActionCatalog.VIEW_MIN_DURATION_MS 同值：界面上那句「还差几秒」用它算，阈值本身仍在服务端。 */
+export const VIEW_MIN_DURATION_MS = 3000
+
+/**
+ * 上报「这条帖我看了多久、有没有滚到底」，对应 POST /api/posts/{id}/read。
+ *
+ * 为什么这一条不走 axios：它主要是在 pagehide / visibilitychange(hidden) 那一刻发出的，
+ * 那时页面正在被卸载，XHR 的回调没有机会回来，浏览器也会掐掉在途请求 ——
+ * 于是「读完最后一段就关标签页」这一整个场景的数据全丢，而那恰恰是停留时长最需要的一笔。
+ * 只有 fetch(..., { keepalive: true }) 与 navigator.sendBeacon 带「离开后仍送达」的语义。
+ * 没选 sendBeacon 是它为 POST 只能带 FormData/Blob 且设不了自定义头，而这条接口按
+ * Authorization 认人：匿名的停留后端不记分，发出去也只是发出去。
+ *
+ * 失败一律吞掉返回 null：埋点是旁路，旁路的抖动不该在界面上惊动任何人。
+ */
+export function reportReadProgress(id, durationMs, completed) {
+  const token = localStorage.getItem('mindisle_token')
+  if (!token) return Promise.resolve(null)
+  const ms = Math.max(0, Math.round(Number(durationMs) || 0))
+  const body = JSON.stringify({ durationMs: ms, completed: completed === true })
+  return fetch('/api/posts/' + encodeURIComponent(String(id)) + '/read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: body,
+    keepalive: true
+  })
+    .then((res) => {
+      if (!res || !res.ok) return null
+      return res.json().catch(() => null)
+    })
+    .catch(() => null)
+}
+
 /** 评论字数上限：与后端 mindisle.post.max-comment-chars（默认 1000）和 DDL 的 VARCHAR(1000) 同源。 */
 export const COMMENT_MAX_CHARS = 1000
 

@@ -1,0 +1,16 @@
+# 心屿 MindIsle · prompts/audit_review_v1.txt
+# 版本：audit_review_v1（写进 chat_message.prompt_version 与 ai_call_log.prompt_version）
+# 审核复核 prompt（需求 §18.2 第三套）。阶段 4 先落模板与调用能力，管理端复核队列在阶段 6（T6.1）接入。
+# 占位符一律用双花括号，由 PromptTemplate#render 做字面替换；缺失的占位符替换为「（无）」，不做正则魔法。
+# 省钱的写法（需求 §12 第②招）：本文件【上半段是固定前缀】，全部 {{占位符}} 都排在最后一段。
+#   DeepSeek 的前缀缓存按「从头开始的相同 token」命中，所以可变内容往前挪一个字，缓存就全废。
+# 固定前缀与可变区分界线见下面的 PROMPT-BREAK 标记（PromptTemplate 会把它连同注释一起剥掉）。
+# ------------------------------------------------------------------ 固定前缀
+你是社区内容安全复核器，给待人工复核的内容打预标签，降低管理员的阅读量。
+
+只输出一个 JSON 对象：{"label":"pass|porn|violence|abuse|selfharm|privacy|ad|political","risk":0,"need_human":false,"reason":"..."}
+口径：自伤/自杀表述一律 label=selfharm 且 need_human=true —— 这一类【不许删除内容】，删除等于把人推回沉默，处置是转介而不是屏蔽（需求 §18.3 关键设计）。
+reason 不超过 30 字，说明判定依据，不出现原文照抄。
+
+--- PROMPT-BREAK --- 可变区
+待复核内容：{{text}}

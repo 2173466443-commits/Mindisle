@@ -54,6 +54,10 @@
           创建于 {{ fmtDateTime(post.createdAt) }}
         </span>
       </footer>
+      <!-- 停留计时（任务 T4.17 · FR5.1）：一次「浏览」到底算不算，全靠这个数，而埋点恰恰是最容易
+           「代码在、数据不在」的一类功能。把这行读数摆在正文下面，是为了让它自己能被当场验收 ——
+           滚到底、停在 3 秒以上、再切走，界面上的话会跟着变，user_action 里也就跟着多一行。 -->
+      <p class="dwell dim">{{ dwellLine }}</p>
 
       <!-- 点赞/收藏已经接上真接口（T3.6），这条互动条就是它的落点：
            详情页是「一个人反复进出同一帖」的地方，所以按钮态一律用后端回执初始化，不做本地记忆。
@@ -139,10 +143,12 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   postDetail,
+  reportReadProgress,
+  VIEW_MIN_DURATION_MS,
   reportPost,
   POST_REPORT_REASONS,
   REPORT_DESC_MAX,
@@ -209,6 +215,7 @@ async function load() {
     return
   }
   loading.value = true
+  resetDwell()
   // 上一条帖的举报回执不能跟着人跑到下一条帖下面：换帖即清（含弹层，防止带着旧 id 提交）
   reportTip.value = ''
   reportHotline.value = ''
@@ -217,6 +224,7 @@ async function load() {
   errorCode.value = null
   try {
     post.value = await postDetail(id)
+    beginDwell()
   } catch (e) {
     post.value = null
     if (Number(e.code) === CODE.POST_NOT_FOUND) notFound.value = true
@@ -227,6 +235,130 @@ async function load() {
 }
 
 // ---------------- 举报（任务 T3.11 · FR4.7、FR4.4、BR6、手册 §6.2 U4） ----------------
+// ---------------- 停留时长上报（任务 T4.17 · 需求 FR5.1「阅读停留 ≥3s 才是一次 view」）----------------
+// 三条口径，都是为了让「一次浏览」这件事别被污染：
+// ① 起点不是组件 created，而是 load() 拿到内容那一刻 —— 从广场点进来、正文还在 fetch 的那两百毫秒不是阅读；
+// ② 只累计「页面真的可见」的时间，切去别的标签页挂着两小时不是看了两小时，所以每次 hidden 结算一段、
+//    回到 visible 重新起表（后端那条接口按人认，匿名的停留压根不发）；
+// ③ 完读判据是滚到底，但不足一屏的帖子打开就是全部，那种情况不强求滚动 —— 否则短帖永远读不完。
+// 界面上这行读数是刻意留的：埋点是最容易「代码在、数据不在」的一类功能，
+// 让它当场可见，才有人能在答辩现场指着它说这条链路是通的。
+let dwellSegStart = 0
+let dwellAccumMs = 0
+let dwellCompleted = false
+let dwellLastFlushMs = -1
+let dwellPostId = 0
+let dwellTimer = null
+const dwellTick = ref(0)
+
+function settledDwellMs() {
+  return dwellSegStart > 0 ? dwellAccumMs + (Date.now() - dwellSegStart) : dwellAccumMs
+}
+
+function resetDwell() {
+  dwellSegStart = 0
+  dwellAccumMs = 0
+  dwellLastFlushMs = -1
+  dwellCompleted = false
+  dwellPostId = Number(route.params.id) || 0
+}
+
+// 🔴 这一次「判到底」绝不能同步跑在赋值的那一刻（Gate4 r2 在真浏览器里量到的产品 bug）。
+// beginDwell() 是被 load() 紧挨着 post.value = await postDetail(id) 调用的，那一刻 Vue 还
+// 没把正文排版上去，document.documentElement.scrollHeight 量到的是**加载骨架**的高度：
+// 一千六百像素的长帖会被判成「不足一屏 ⇒ 打开即读到底」，页面刚出来 1 毫秒就发出
+// completed=true，而后端 readThroughRecorded 照单收 —— 点开就退出的人拿满 2 分正样本，
+// FR5.1 那条「完读」权重就此作废，阶段 7 的隐式召回也跟着被污染。
+// 正解：等一次真正的布局完成（nextTick 出队 + 连续两帧 rAF）之后再判第一次。
+function beginDwell() {
+  dwellSegStart = Date.now()
+  nextTick(function () {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(markReadCompleted)
+    })
+  })
+}
+
+function checkReadBottom() {
+  const de = document.documentElement
+  // gap <= 24px 才算到底：留一点滚动惯性，也让「已经到底但差一两像素」不被判成没读完。
+  // 内容不足一屏时 scrollHeight - innerHeight 为负，同样进这里 —— 短帖打开即读完。
+  return de.scrollHeight - window.innerHeight - window.scrollY <= 24
+}
+
+// 到达底部是「一次性」事件：第一次到底就补报一条 completed=true（这一条之后就不再重复发，
+// 免得每滚一下打一次接口），然后重新起表继续累计停留。
+function markReadCompleted() {
+  if (dwellCompleted || !checkReadBottom()) return
+  dwellCompleted = true
+  flushDwell()
+  if (post.value) dwellSegStart = Date.now()
+}
+
+function settleDwell() {
+  if (dwellSegStart > 0) {
+    dwellAccumMs += Date.now() - dwellSegStart
+    dwellSegStart = 0
+  }
+  return dwellAccumMs
+}
+
+// 每一次结算都发一条：同一个人同一天对同一条帖重复上报，后端 user_action.upsert 会合并成一行、
+// 只把 duration_ms 取更长的这次（见 UserActionMapper#upsert），所以重复上报不会变成重复浏览。
+// 阈值判据在服务端，这里只是「够不够」都不自己下结论 —— 前端不拿回执做加分动画。
+function flushDwell() {
+  const ms = settleDwell()
+  if (!dwellPostId || ms <= 0 || ms === dwellLastFlushMs) return
+  dwellLastFlushMs = ms
+  reportReadProgress(dwellPostId, ms, dwellCompleted)
+}
+
+function onDwellScroll() {
+  markReadCompleted()
+}
+
+// 短帖「打开就是全部」，那一刻的累计停留只有几十毫秒，完读那 2 分不该发给一次都没读够的打开；
+// 所以到到底之后如果上一次上报还没跨过 3 秒，就在「刚跨过阈值」那一拍补报一次（只补这一次，
+// 之后 dwellLastFlushMs 已 >= 阈值，条件自己关闭，不会变成每秒一条请求）。口径与后端
+// /api/posts/{id}/read 一致：completed 也要先满 VIEW_MIN_DURATION_MS 才计 read_through。
+function onDwellTick() {
+  dwellTick.value += 1
+  if (!dwellCompleted || dwellLastFlushMs >= VIEW_MIN_DURATION_MS) return
+  if (settledDwellMs() >= VIEW_MIN_DURATION_MS) flushDwell()
+}
+
+function onDwellVisibility() {
+  if (document.hidden) {
+    flushDwell()
+  } else if (post.value) {
+    dwellSegStart = Date.now()
+  }
+}
+
+const dwellLine = computed(() => {
+  if (!post.value || !dwellPostId) return ''
+  dwellTick.value
+  const ms = settledDwellMs()
+  const s = Math.floor(ms / 1000)
+  const enough = ms >= VIEW_MIN_DURATION_MS
+  const need = Math.ceil((VIEW_MIN_DURATION_MS - ms) / 1000)
+  return '本页已读 ' + s + ' 秒 · ' + (enough ? '够一次浏览' : '还差 ' + need + ' 秒才算一次浏览') + ' · ' +
+    (dwellCompleted ? '已读到底（完读计 2 分）' : '未读到底')
+})
+
+// 事件挂 window/document 而不是这个 div：滚动是文档级的，页面卸载是浏览器级的，
+// 在组件根节点上监听 scroll 只会收到「这个元素自己滚了」，而它根本没滚。
+onMounted(function () {
+  window.addEventListener('pagehide', flushDwell)
+  window.addEventListener('scroll', onDwellScroll, { passive: true })
+  document.addEventListener('visibilitychange', onDwellVisibility)
+  // 1s 心跳刷那行读数，并在「完读态 + 刚跨过 3 秒」那一拍补报一次；其余上报时机在 hidden / pagehide / 滚到底。
+  dwellTimer = setInterval(onDwellTick, 1000)
+})
+
+// SPA 内部换页也走这里：组件卸载不会触发 pagehide，而「看完这条又点进下一条」是站里最常见的动线。
+onBeforeUnmount(flushDwell)
+
 const reportOpen = ref(false)
 const reporting = ref(false)
 const reportReason = ref('')
@@ -362,6 +494,8 @@ async function submitReport() {
 .topics { display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
 .topic { font-size: 13px; color: var(--mi-mist); }
 .tip { margin-bottom: 10px; }
+/* 与页脚那行统计同一块，但隔开一点：它是「我」的数据，不是「这条帖」的数据。 */
+.dwell { margin: 12px 0 0; padding-top: 8px; border-top: 1px dashed var(--mi-border); }
 .meta { display: flex; gap: 16px; align-items: center; margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--mi-border); font-size: 12px; color: var(--mi-text-dim); flex-wrap: wrap; }
 .meta .dim { color: var(--mi-text-dim); opacity: 0.8; }
 .acts { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }

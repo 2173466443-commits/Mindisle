@@ -90,6 +90,22 @@ public class UserService {
       throw new BizException(ErrorCode.PARAM_INVALID, "授权事项不在允许范围内");
     }
     authService.requireUser(userId);
+    // 任务 T4.21 · 手册 §7.5「TERMS 与 PRIVACY 不可单独撤回」的实现点。
+    //
+    // <p>为什么不是「随便一个前端约定」：TERMS 与 PRIVACY 是「能不能使用本产品」的前提，
+    // 允许一个开关把它们关掉，会得到一个「已撤回隐私政策但仍继续被收集数据」的账号 ——
+    // 那是最严重的合规事故形态（需求 §8.2 风险 R7），而且比「当初就不同意」更难举证。
+    // 合法的出口只有一个：注销账号（{@code PrivacyAccountService#deactivate}），
+    // 走冷静期 → 物理清除那条完整链路，并把整条授权流水留在导出包里交给本人。
+    //
+    // <p>现查全站调用：前端只有 ProfileView.vue 用过 WITHDRAW，且只用于 EMOTION_SHARE
+    // 与 SENSITIVE_INFO 两项，所以这道闸不会打断任何现有界面。</p>
+    if ("WITHDRAW".equals(req.action())
+        && ("TERMS".equals(req.consentType()) || "PRIVACY".equals(req.consentType()))) {
+      throw new BizException(ErrorCode.PARAM_INVALID,
+          "服务条款与隐私政策不支持单独撤回；如需停止我们对你的数据处理，请使用注销账号");
+    }
+
     boolean grant = "GRANT".equals(req.action());
 
     UserConsent row = new UserConsent();

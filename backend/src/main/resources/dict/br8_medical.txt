@@ -1,0 +1,39 @@
+# 心屿 · BR8 医疗越界输出黑名单（T4.18 · AI 回复专用第二道闸）
+#version=br8-v1.0
+# 列（TAB 分隔）：类别 	 词条 	 处置(REWRITE)
+# 为什么单开一份而不并进 sensitive_words_v0.1：阶段 3 词库快照的 139 条口径已被 Gate3 证据与
+# 单测钉住（wordCount 断言），而需求 BR8 点名的裸病名（抑郁症 / PTSD / 药物治疗）在 v0.1 的 ai 侧
+# 只有「抑郁症确诊」「开药」这类组合词，漏判「你这是抑郁症」。这里补的是**输出侧**专用表，
+# 不参与发帖机审，因此不会改变阶段 3 任何一条判定。
+# 命中后 SafetyGuard 不删回复，而是把整条回复换成「建议求助专业渠道」的非诊断表述（BR8 原文要求）。
+# 刻意不收裸「抑郁」二字：陪伴话术里「你说的这种抑郁的感觉」是正常表达，收了会让改写天天触发，
+# 反而破坏需求 §5.2「对话继续但不留白」。裸病名（抑郁症 / 焦虑症 / PTSD）才是诊断用语。
+医疗诊断用语	抑郁症	REWRITE
+医疗诊断用语	抑郁发作	REWRITE
+医疗诊断用语	重度抑郁	REWRITE
+医疗诊断用语	焦虑症	REWRITE
+医疗诊断用语	焦虑障碍	REWRITE
+医疗诊断用语	双相情感障碍	REWRITE
+医疗诊断用语	躁郁症	REWRITE
+医疗诊断用语	创伤后应激障碍	REWRITE
+医疗诊断用语	PTSD	REWRITE
+医疗诊断用语	强迫症	REWRITE
+医疗诊断用语	惊恐发作	REWRITE
+医疗诊断用语	躯体化	REWRITE
+医疗诊断用语	精神分裂	REWRITE
+医疗诊断用语	边缘型人格	REWRITE
+医疗诊断用语	解离症	REWRITE
+医疗用药表述	药物治疗	REWRITE
+医疗用药表述	药物治疗方案	REWRITE
+医疗用药表述	抗抑郁药	REWRITE
+医疗用药表述	抗焦虑药	REWRITE
+医疗用药表述	镇静催眠	REWRITE
+医疗用药表述	用药方案	REWRITE
+医疗用药表述	用药剂量	REWRITE
+医疗用药表述	精神类药物	REWRITE
+医疗判断表述	确诊	REWRITE
+医疗判断表述	诊断为	REWRITE
+医疗判断表述	你患有	REWRITE
+医疗判断表述	你得了	REWRITE
+医疗判断表述	你这是病	REWRITE
+医疗判断表述	临床诊断	REWRITE

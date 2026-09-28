@@ -1,0 +1,23 @@
+# 离线实例 = http://127.0.0.1:8081（上游刻意指向不可达地址）
+[PASS] 0 · 离线实例 /actuator/health 返 UP（否则下面所有结论都来自一个没起来的进程）  → {"groups":["liveness","readiness"],"status":"UP"}
+[PASS] 1 · 注册一次性探针账号（200 或 20002 重跑都算通过：不写库就不会撞唯一键）  → 409 code=20002
+[PASS] 1 · 登录取到 accessToken（后续每一帧都要带它，作者身份只来自 JWT）  → 200 code=0 uid=428
+[PASS] 1 · 授予 SENSITIVE_INFO 单独同意（不授权的话 chat 会在进模型之前就被 20005 挡掉，那样测的是同意闸不是降级）  → 200 code=0
+# [1] HTTP=200 帧=3 delta字数=37 首帧=646ms 总=693ms
+# [2] HTTP=200 帧=3 delta字数=38 首帧=654ms 总=684ms
+# [3] HTTP=200 帧=3 delta字数=27 首帧=674ms 总=727ms
+# [4] HTTP=200 帧=3 delta字数=40 首帧=695ms 总=740ms
+[PASS] 2 · 每一轮都是 HTTP 200 + text/event-stream（上游挂了不等于请求该失败：503/0 帧是 v1.2.6 之前那个真症状）  → 200/200/200/200
+[PASS] 2 · 每一轮都收到了 delta 帧且正文非空（离线话术真的一字一字上了屏，而不是只写了库）  → 37/38/27/40
+[PASS] 2 · 帧序列只出现 meta/delta/done 三类，没有 error 帧（error 帧意味着用户看到的是红色失败条，不是兜底话术）  → meta,delta,done
+[PASS] 2 · 🔴 判据：从发出请求到首帧上屏 < 10s（§7.4 断网演示的硬指标；框架层重试没收敛时这里是 30s 超时然后 0 帧）  → 各轮首帧ms=646/654/674/695
+[PASS] 2 · done 帧自己承认降级（degraded=true + reason 非空）：界面右下角那句「当前网络不稳定，屿屿先用了离线话术」读的就是这一位  → {"messageId":252,"emotion":"neutral","degraded":true,"degradeReason":"模型这一次没有应答（连接不上模型服务），这条回复来自离线陪伴话术库。","latencyMs":1,"firstTokenMs":1,"tokensIn":0,"tokensOut":0,"safetyRewritten":false,"interrupted":false,"hotline":"1
+[PASS] 3 · 会话消息回读 200 且助手消息条数 = 轮数（每轮真落了一条，不是只在 SSE 里演了一遍）  → 200 助手条数=4 期望=4
+[PASS] 3 · 🔴 每一条助手消息 degraded=true（chat_message.degraded 这一列此前全表 0 行，是「降级链路从未跑通过」的直接证据）  → degraded!=true 的 id=无
+[PASS] 3 · 🔴 每一条助手消息 model=offline-empathy-bank，且没有一条冒充真实模型名（v1.2.6 那个「recordDegraded 无条件写 offline」的老坑反过来也会让「用户按停止」被记成离线；现在两路分开）  → model 取值=offline-empathy-bank 期望=offline-empathy-bank
+[PASS] 3 · 离线话术不是同一条复读（EmpathyBank.pick 按情绪标签取样，连续四轮全说同一句会显得机器在敷衍）  → 去重后条数=4 样例=["听起来还行。有没有哪件小事，其实你还没消化完？","如果你想整理一下思路，我可以帮你把几件事分开摆。"]
+[PASS] 4 · 熔断打开之后的那一轮首帧不比第一轮慢（circuit-fail-threshold=3，第 4 轮起应直接短路走离线，不再花一次连接超时）  → 第1轮=646ms 第4轮=695ms
+[PASS] 5 · 收尾删掉探针会话（软删；话术与调用账留在库里供 SQL 复核，不让取证脚本把演示库越跑越脏）  → 200 code=0
+[INFO] 5 · SQL 取证（root 直连复核，脚本自证不算）：① 这个用户这一天的 ai_call_log 里 model 恒为 offline-empathy-bank 且 success=0、error 带 degrade 原因；② chat_message 里这几行 degraded=1；③ 对照 8080 常规实例：同一时段它的 ai_call_log.model 是真实模型名、degraded=0 —— 两个实例的唯一差别就是上游可达性。  → SELECT id,scene,model,success,error,tokens_in,tokens_out,created_at FROM ai_call_log WHERE user_id=428 ORDER BY id DESC LIMIT 6; SELECT id,role,LEFT(content,20) AS c,model,degraded,risk_level,prompt_version FROM chat_message WHERE conversation_id=121 ORDER BY id;
+
+断网演示汇总：15 项判据，通过 15 条，失败 0 条

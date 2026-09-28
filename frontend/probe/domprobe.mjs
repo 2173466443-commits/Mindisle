@@ -17,6 +17,7 @@
 //   node probe/domprobe.mjs
 // 产物落在 E 盘缓存目录，不进仓库。
 import fs from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -67,6 +68,25 @@ await vite.build({
 const bundlePath = path.join(OUT, 'probe.js')
 const bundle = fs.readFileSync(bundlePath, 'utf8')
 notes.push('bundle: ' + bundle.length + 'B / 编译 ' + (Date.now() - started) + 'ms / ' + bundlePath)
+
+// ---------- 1.5 刷新演示夹具：树洞到期销毁会把「写死编号」的取证夹具自己带走 ----------
+// 这一条不是装饰。T3.15 的 auto_destroy_at 是发帖时算好的**绝对时间**，读侧按「不晚于
+// NOW 就当这条不存在」过滤。2026-09-28 那天 post 42 与 post 141 自然到期，domprobe 当场
+// 红 10 条而产品逻辑一行都没错——所以探针前必须先跑一次幂等 seed（库里没有过期树洞时它
+// ROW_COUNT()=0，空跑一趟），这样「红」才只剩「真红」这一种解释。
+const ROOT = path.resolve(FE, '..')
+const seedScript = path.join(ROOT, 'docs', 'seed-demo.mjs')
+const seedRes = spawnSync('node', [seedScript, '--quiet'], { encoding: 'utf8' })
+const seedLine = String(seedRes.stdout || '').replace(/\r/g, '').trim().split('\n').filter(Boolean).pop() || '(seed 一行都没输出)'
+if (seedRes.error) {
+  notes.push('seed: ERROR 起进程就失败：' + seedRes.error.message + ' —— 夹具没被刷新，本轮红先按这条查')
+} else if (seedRes.status === 2) {
+  notes.push('seed: SKIP(exit 2) ' + seedLine + ' —— 环境不齐（多半是仓库外那份 root 凭据不在），不是产品问题')
+} else if (seedRes.status !== 0) {
+  notes.push('seed: FAIL(exit ' + seedRes.status + ') ' + seedLine + ' —— 夹具状态不可信，本轮红先按这条查')
+} else {
+  notes.push('seed: OK(exit 0) ' + seedLine)
+}
 
 // ---------- 2 真登录拿真 token（只为注入 localStorage；页面里的请求由 jsdom 经 5173 代理发） ----------
 const loginResp = await fetch(BASE + '/api/auth/login', {

@@ -293,13 +293,27 @@ INSERT IGNORE INTO `user_consent` (`id`,`user_id`,`consent_type`,`action`,`conte
 INSERT IGNORE INTO `user_consent` (`id`,`user_id`,`consent_type`,`action`,`content_version`,`source_page`,`ip`,`user_agent`) VALUES
   (13,2,'EMOTION_SHARE','GRANT','v1.0','emotion_share_modal',NULL,'seed/09_seed.sql');
 
+-- 🔴 演示账号必须补 SENSITIVE_INFO，否则 /ai 一发言就吃 20005（2026-09-24 真链路实测踩到）。
+--   ChatService.doTurn() 第一道闸就是 consentMapper.isGranted(userId,'SENSITIVE_INFO')，
+--   没过这道闸时「一个字都不进模型、一行都不落库」（NFR8），而前端路由守卫只查 PRIVACY，
+--   于是症状是「页面能进、话说出去没反应、只弹一条红条」——看起来像 AI 没做好，其实是数据没种对。
+--   这里给 admin 与 5 个演示账号全部授予，是为了答辩时换任何一个号都能当场演示危机分级链路；
+--   真实注册用户仍必须在「隐私与同意」里自己勾（FR1.10），本段只影响 dev/演示数据集。
+INSERT IGNORE INTO `user_consent` (`id`,`user_id`,`consent_type`,`action`,`content_version`,`source_page`,`ip`,`user_agent`) VALUES
+  (14,1,'SENSITIVE_INFO','GRANT','v1.0','seed_demo_preauth',NULL,'seed/09_seed.sql'),
+  (15,2,'SENSITIVE_INFO','GRANT','v1.0','seed_demo_preauth',NULL,'seed/09_seed.sql'),
+  (16,3,'SENSITIVE_INFO','GRANT','v1.0','seed_demo_preauth',NULL,'seed/09_seed.sql'),
+  (17,4,'SENSITIVE_INFO','GRANT','v1.0','seed_demo_preauth',NULL,'seed/09_seed.sql'),
+  (18,5,'SENSITIVE_INFO','GRANT','v1.0','seed_demo_preauth',NULL,'seed/09_seed.sql'),
+  (19,6,'SENSITIVE_INFO','GRANT','v1.0','seed_demo_preauth',NULL,'seed/09_seed.sql');
+
 -- -----------------------------------------------------------------------------
 -- 自检（手工执行，勿放入自动流程）：
 -- SELECT (SELECT COUNT(*) FROM sys_config) cfg, (SELECT COUNT(*) FROM sensitive_word_group) grp,
 --        (SELECT COUNT(*) FROM sensitive_word) word, (SELECT COUNT(*) FROM topic) topic,
 --        (SELECT COUNT(*) FROM `user`) usr, (SELECT COUNT(*) FROM user_profile) prof,
 --        (SELECT COUNT(*) FROM user_consent) consent;
--- 期望 21 / 7 / 139 / 20 / 6 / 6 / 13；并核对 word_cnt 与分组实收：
+-- 期望 21 / 7 / 139 / 20 / 6 / 6 / 19（含 SENSITIVE_INFO 6 条）；并核对 word_cnt 与分组实收：
 -- SELECT g.id, g.name, g.word_cnt, COUNT(w.id) real_cnt FROM sensitive_word_group g
 --   LEFT JOIN sensitive_word w ON w.group_id = g.id GROUP BY g.id HAVING g.word_cnt <> COUNT(w.id);
 -- 该查询应返回空集。

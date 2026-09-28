@@ -18,6 +18,8 @@ import com.mindisle.user.RelationshipService;
 import com.mindisle.user.dto.FollowRequest;
 import com.mindisle.user.dto.FollowView;
 import com.mindisle.user.dto.UserHomepage;
+import com.mindisle.track.UserActionCatalog;
+import com.mindisle.track.UserActionRecorder;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -41,9 +43,12 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 public class RelationshipController {
 
   private final RelationshipService relationshipService;
+  private final UserActionRecorder recorder;
 
-  public RelationshipController(RelationshipService relationshipService) {
+  public RelationshipController(RelationshipService relationshipService,
+      UserActionRecorder recorder) {
     this.relationshipService = relationshipService;
+    this.recorder = recorder;
   }
 
   /**
@@ -60,8 +65,23 @@ public class RelationshipController {
     if (current == null) {
       throw new BizException(ErrorCode.UNAUTHORIZED);
     }
-    return Result.ok(relationshipService.follow(current.id(), id,
-        request == null ? null : request.action()));
+    FollowView view = relationshipService.follow(current.id(), id,
+        request == null ? null : request.action());
+    // 关注埋点读回执里的 following，不读请求里的 action（任务 T3.10，与 PostController#act 同一口径）：
+    // 并发取关、重复点关注时，action 说的是「用户想干什么」，following 才是「现在到底关没关」。
+    // user_action 里有活动行 ⟔ user_follow 里有关系行，阶段 7 读哪张表算出的社交正样本都一致。
+    // 权重 +5 是全站最高的正向行为之一（需求 FR5.1），所以这个方向判错一次，
+    // 协同过滤就会替一个已经取关的人继续给他加分——这正是埋点必须读回执的理由。
+    if (view.following()) {
+      // scene 给 feed：关注按钮在他人主页，而主页的入口有广场/搜索/评论三种，
+      // 这一条埋点在场景维度上分不出来源，就用 Catalog 对「认不出」的那个中性值。
+      recorder.record(current.id(), UserActionCatalog.ACTION_FOLLOW,
+          UserActionCatalog.TARGET_USER, id, UserActionCatalog.SCENE_FEED, LocalDateTime.now());
+    } else {
+      recorder.cancel(current.id(), UserActionCatalog.ACTION_FOLLOW,
+          UserActionCatalog.TARGET_USER, id);
+    }
+    return Result.ok(view);
   }
 
   /**

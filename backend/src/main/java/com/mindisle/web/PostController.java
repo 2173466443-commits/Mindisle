@@ -1,5 +1,6 @@
 package com.mindisle.web;
 
+import com.mindisle.entity.Comment;
 import java.time.LocalDateTime;
 
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -31,7 +32,11 @@ import com.mindisle.post.dto.PostDetailView;
 import com.mindisle.post.dto.PostListItem;
 import com.mindisle.post.dto.PostView;
 import com.mindisle.post.dto.ReportRequest;
+import com.mindisle.post.dto.ReadProgressRequest;
+import com.mindisle.post.dto.ReadProgressView;
 import com.mindisle.post.dto.ReportView;
+import com.mindisle.track.UserActionCatalog;
+import com.mindisle.track.UserActionRecorder;
 import com.mindisle.security.AuthUser;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -77,15 +82,18 @@ public class PostController {
   private final PostInteractionService postInteractionService;
   private final CommentService commentService;
   private final ReportService reportService;
+  private final UserActionRecorder recorder;
 
   public PostController(PostService postService, PostQueryService postQueryService,
                         PostInteractionService postInteractionService,
-                        CommentService commentService, ReportService reportService) {
+                        CommentService commentService, ReportService reportService,
+                        UserActionRecorder recorder) {
     this.postService = postService;
     this.postQueryService = postQueryService;
     this.postInteractionService = postInteractionService;
     this.commentService = commentService;
     this.reportService = reportService;
+    this.recorder = recorder;
   }
 
   @PostMapping
@@ -108,7 +116,13 @@ public class PostController {
     if (current == null) {
       throw new BizException(ErrorCode.UNAUTHORIZED);
     }
-    return Result.ok(postQueryService.list(current.id(), type, page, LocalDateTime.now()));
+    PageResult<PostListItem> result =
+        postQueryService.list(current.id(), type, page, LocalDateTime.now());
+    // 曝光埋点挂在这里，不挂在 /api/feed/recommend（任务 T3.10 · 手册 §6.1 行 3.10）。
+    // 那个推荐流端点至今是 90001 的桩，钩子上去就是死代码；广场与关注流才是现在真在跑的
+    // 两条「服务端把一批帖子交给用户」的路径，阶段 7 推荐流落地时复用同一次 recordExposure 即可。
+    recordExpose(current.id(), result, UserActionCatalog.SCENE_PLAZA);
+    return Result.ok(result);
   }
 
   @GetMapping("/{id}")
@@ -119,6 +133,59 @@ public class PostController {
       throw new BizException(ErrorCode.UNAUTHORIZED);
     }
     return Result.ok(postQueryService.detail(current.id(), id, LocalDateTime.now()));
+  }
+
+  /**
+   * 上报一次停留（任务 T3.10 · 需求 FR5.1「停留时长 ≥3s 计 1 分、完读 2 分」）。
+   *
+   * <p><b>这条端点是需求 §9.1 接口清单里没有的</b>，属契约漂移，已记进 dev-log 与手册 §19。
+   * 加它的唯一理由：FR5.1 的判据是「停留」，而停留只有浏览器量得到。
+   * {@link #detail} 不写 user_action（那里只加 view_cnt），否则「打开一次详情页」
+   * 会被记成一次 3 秒以上的浏览——列表页的自动预加载、点开就退出的秒退，
+   * 全都会变成正样本，阶段 7 的召回质量就是这么被埋点口径毁掉的。</p>
+   *
+   * <p><b>完读同样要先满阈值</b>（{@code completed} 且停留 {@code >= 3s} 才记 read_through）：前端的
+   * 「到底」判据量的是 {@code scrollHeight - innerHeight - scrollY}，内容不足一屏时它天生为真，
+   * 短帖「打开就是全部」；上一版对 {@code completed} 没有任何时长下限，于是前端在正文排版完成之前
+   * 误判到底、报出一条 {@code durationMs=1}，服务端照样把完读那 2 分记进 user_action ——
+   * 上面那句「点开就退出的秒退全都会变成正样本」就是这么被绕过去的。阈值这条线在<b>服务端</b>
+   * 再守一次：客户端怎么改都不该能把「一秒没读」刷成完读，这既是防刷，也是阶段 7 样本质量的下限。</p>
+   *
+   * <p><b>不够阈值也回 200</b>，且 data.viewRecorded=false 把「为什么没记」说清楚：
+   * 这是一次完全成功的上报。回 4xx 会让前端在 pagehide 里收到一个无法处理的错误，
+   * 而「你只看了 1.2 秒」既不是错误也不值得给用户弹提示。</p>
+   *
+   * <p><b>不可见的帖子静默收下不上报</b>（不记埋点，但仍回 200）：这里刻意不复用 30001/404，
+   * 因为这条接口是前端在离开页面时打的，回 404 只会让人去查「为什么详情页能打开、
+   * 上报却 404」。埋点是旁路，旁路的拒绝不该变成用户可见的错误。</p>
+   */
+  @PostMapping("/{id:\\d+}/read")
+  @Operation(summary = "上报停留时长与是否读完（≥3s 计 view；completed 且≥3s 才计完读；不足阈值也回 200）")
+  public Result<ReadProgressView> read(@PathVariable("id") long id,
+      @RequestBody(required = false) ReadProgressRequest request,
+      @AuthenticationPrincipal AuthUser current) {
+    if (current == null) {
+      throw new BizException(ErrorCode.UNAUTHORIZED);
+    }
+    LocalDateTime now = LocalDateTime.now();
+    Integer durationMs = request == null ? null : request.durationMs();
+    boolean completed = request != null && Boolean.TRUE.equals(request.completed());
+    boolean enough = UserActionCatalog.isEnoughDwell(durationMs);
+    if (!postQueryService.dwellCountableFor(current.id(), id, now)) {
+      return Result.ok(new ReadProgressView(id, UserActionCatalog.VIEW_MIN_DURATION_MS,
+          false, false));
+    }
+    if (enough) {
+      recorder.recordWithDwell(current.id(), UserActionCatalog.ACTION_VIEW, id,
+          UserActionCatalog.SCENE_DETAIL, durationMs, now);
+    }
+    boolean readThrough = completed && enough;
+    if (readThrough) {
+      recorder.recordWithDwell(current.id(), UserActionCatalog.ACTION_READ_THROUGH, id,
+          UserActionCatalog.SCENE_DETAIL, durationMs, now);
+    }
+    return Result.ok(new ReadProgressView(id, UserActionCatalog.VIEW_MIN_DURATION_MS,
+        enough, readThrough));
   }
 
   /**
@@ -151,8 +218,17 @@ public class PostController {
     if (current == null) {
       throw new BizException(ErrorCode.UNAUTHORIZED);
     }
-    return Result.ok(postInteractionService.act(current.id(), id,
-        request == null ? null : request.action(), LocalDateTime.now()));
+    PostActionView view = postInteractionService.act(current.id(), id,
+        request == null ? null : request.action(), LocalDateTime.now());
+    // 埋点读的是<b>回执里的状态</b>，不是请求里那个 action（任务 T3.10）。
+    // 差别在两处：① 前端连点两次 like，第二次 view.liked 仍是 true，记一次幂等 upsert，
+    // 而按请求记会出现「用户其实没改变任何东西、行为表里却多了一条新读数」；
+    // ② unlike 之后必须把活动行软删，否则取消赞的人仍然在给这条内容加分。
+    // 以状态为准的好处是：user_action 里「有没有 like 这行」与 post_like 的真值同构，
+    // 阶段 7 无论读哪张表算出的正样本集合都一致。
+    trackSwitch(current.id(), id, UserActionCatalog.ACTION_LIKE, view.liked());
+    trackSwitch(current.id(), id, UserActionCatalog.ACTION_COLLECT, view.collected());
+    return Result.ok(view);
   }
 
   /**
@@ -176,7 +252,15 @@ public class PostController {
     if (current == null) {
       throw new BizException(ErrorCode.UNAUTHORIZED);
     }
-    return Result.ok(commentService.comment(current.id(), id, request, LocalDateTime.now()));
+    CommentCreateView view = commentService.comment(current.id(), id, request, LocalDateTime.now());
+    // 只有真发出去的评论才记 comment 分（任务 T3.10）。PENDING 不记：它可能在一轮人审之后
+    // 变成 REJECTED，那时这条内容根本不会出现在任何人的时间线上，
+    // 而行为表里已经留下一条 +4 的正样本——CF 学不到「被驳回的评论也是互动」，只会学到噪声。
+    if (view.comment() != null && Comment.STATUS_PUBLISHED.equals(view.comment().status())) {
+      recorder.record(current.id(), UserActionCatalog.ACTION_COMMENT,
+          UserActionCatalog.TARGET_POST, id, UserActionCatalog.SCENE_DETAIL, LocalDateTime.now());
+    }
+    return Result.ok(view);
   }
 
   /**
@@ -228,6 +312,43 @@ public class PostController {
     if (current == null) {
       throw new BizException(ErrorCode.UNAUTHORIZED);
     }
-    return Result.ok(reportService.report(current.id(), id, request, LocalDateTime.now()));
+    ReportView view = reportService.report(current.id(), id, request, LocalDateTime.now());
+    // duplicated=true 也记：upsert 命中的是同一条 uk，重复举报不会多出一行，
+    // 而「这个人举报过」这个事实第一次落库时就已经进去了
+    recorder.record(current.id(), UserActionCatalog.ACTION_REPORT,
+        UserActionCatalog.TARGET_POST, id, UserActionCatalog.SCENE_DETAIL, LocalDateTime.now());
+    return Result.ok(view);
+  }
+
+  /**
+   * 开关型行为（点赞、收藏）落埋点的唯一入口。
+   *
+   * <p>{@code on == true} 记一行、{@code false} 软删这个目标上的全部活动行。
+   * 收成一个小函数是因为「两个动作 × 两个方向」一共四次判断，写开就会有第五处漏改。</p>
+   */
+  /**
+   * 把这一页返回的帖子记成曝光（需求 FR5.1 的 30% 采样与 BR3 的日级去重都在
+   * {@link UserActionRecorder#recordExposure} 里判，这里不重复一遍）。
+   *
+   * <p><b>「返回给用户」不等于「用户看见了」</b>：真正的可见性只有前端量得到，
+   * 这里记的是「服务端把这条内容交给了他的屏幕」，权重因此取 0.10 而不是浏览的 1.00
+   * （需求 §8.2.1）。前端将来接 IntersectionObserver 做真曝光时，改的是这一行的调用时机，
+   * 不是权重。</p>
+   */
+  private void recordExpose(long userId, PageResult<PostListItem> result, String scene) {
+    if (result == null || result.getList() == null) {
+      return;
+    }
+    recorder.recordExposure(userId, result.getList().stream().map(PostListItem::id).toList(),
+        scene, LocalDateTime.now());
+  }
+
+  private void trackSwitch(long userId, long postId, String actionType, boolean on) {
+    if (on) {
+      recorder.record(userId, actionType, UserActionCatalog.TARGET_POST, postId,
+          UserActionCatalog.SCENE_DETAIL, LocalDateTime.now());
+    } else {
+      recorder.cancel(userId, actionType, UserActionCatalog.TARGET_POST, postId);
+    }
   }
 }

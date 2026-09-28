@@ -1,0 +1,142 @@
+# emotion_record 快照 —— T4.15「通道占比 + 词典↔LLM/人工一致率」的唯一数据来源（EmotionChannelAgreementTest 读它）
+# 口径红线：本文件是从**真库导出的现状**，不是新造的标注集。列序 = id\tchannel\tlabel\tconfidence\tsource\tsnip\tmodel_version\trecord_date\tdeleted
+# 导出 SQL = SELECT id,channel,label,confidence,source,REPLACE(REPLACE(REPLACE(text_snippet,0x0A," "),0x0D," "),0x09," ") AS snip,model_version,record_date,deleted FROM emotion_record ORDER BY id;
+# 导出时间 = 2026-09-28 18:24（Asia/Shanghai）；连接 = root 直连 mindisle 库，mysql --default-character-set=utf8mb4 -B（制表符分隔）
+# 文本清洗只做了三件事：CR / LF / TAB 各替换成一个空格（不洗掉就会把 TSV 的行与列打断）。其余字符逐字保留，包含用户自己打的标点与 emoji。
+# 已知体量：135 行，其中 snip 为空 62 行（打卡只选了情绪、没写文本 —— 一致率的分母因此只有 73 行，这条必须写在产物里，不然分母看着像 135）
+# ⚠ 这不是 §7.3 要的「自建 300 条人工标注集」：没有第二人独立标注，就没有 Cohen's Kappa，也就没有 macro-F1。本文件支撑的是「线上三条通道各占多少、词典与 LLM/人工各差多远」。
+1	llm	sadness	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+2	llm	sadness	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+3	llm	sadness	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+4	llm	fear	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+5	llm	sadness	0.900	chat	失眠，没意思	deepseek-flash/emotion_fallback_	2026-09-24	0
+6	llm	sadness	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+7	llm	neutral	0.500	chat	真实，真实，哈哈	deepseek-flash/emotion_fallback_	2026-09-24	0
+8	llm	fear	0.600	chat	恶心	deepseek-flash/emotion_fallback_	2026-09-24	0
+9	llm	fear	0.700	chat	恶心	deepseek-flash/emotion_fallback_	2026-09-24	0
+10	llm	fear	0.750	chat	安全	deepseek-flash/emotion_fallback_	2026-09-24	0
+11	llm	fear	0.600	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+12	manual	joy	1.000	checkin	今天下午跑完了八百米，风吹着挺舒服	checkin-v1	2026-09-24	0
+13	manual	sadness	1.000	checkin	晚上改论文改到崩溃	checkin-v1	2026-09-24	0
+14	manual	anger	1.000	checkin	再补一条看追加	checkin-v1	2026-09-24	0
+15	manual	sadness	1.000	checkin	昨天答辩预演被老师问住了，回宿舍一路很低	checkin-v1	2026-09-23	0
+16	manual	joy	1.000	checkin	前天和室友吃了火锅，笑到肚子疼	checkin-v1	2026-09-22	0
+17	dict	sadness	0.598	chat	精神，没意思	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+18	llm	sadness	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+19	dict	sadness	0.694	chat	失眠，精神，低落	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+20	dict	sadness	0.694	chat	失眠，精神，低落	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+21	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+22	llm	neutral	0.200	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+23	dict	sadness	0.694	chat	失眠，精神，低落	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+24	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+25	dict	sadness	0.694	chat	失眠，精神，低落	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+26	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+27	dict	sadness	0.694	chat	失眠，精神，低落	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+28	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+29	dict	sadness	0.694	chat	失眠，精神，低落	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+30	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+31	dict	sadness	0.694	chat	失眠，精神，低落	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+32	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+33	dict	sadness	0.694	chat	失眠，精神，低落	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+34	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+35	dict	sadness	0.694	chat	失眠，精神，低落	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+36	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+37	dict	sadness	0.694	chat	失眠，精神，低落	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+38	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+39	dict	sadness	0.694	chat	失眠，精神，低落	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+40	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+41	dict	sadness	0.694	chat	失眠，精神，低落	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+42	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+43	dict	sadness	0.694	chat	失眠，精神，低落	dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+44	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-24	0
+45	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+46	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+47	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+48	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-24	0
+49	llm	fear	0.720	chat	失眠	deepseek-flash/emotion_fallback_	2026-09-28	0
+50	llm	neutral	0.800	chat	缓解，失眠	deepseek-flash/emotion_fallback_	2026-09-28	0
+51	llm	fear	0.850	chat	发慌	deepseek-flash/emotion_fallback_	2026-09-28	0
+52	llm	fear	0.900	chat	发慌，必须，安慰	deepseek-flash/emotion_fallback_	2026-09-28	0
+53	llm	fear	0.900	chat	发慌，必须，安慰	deepseek-flash/emotion_fallback_	2026-09-28	0
+54	llm	fear	0.900	chat	发慌	deepseek-flash/emotion_fallback_	2026-09-28	0
+55	llm	fear	0.900	chat	发慌	deepseek-flash/emotion_fallback_	2026-09-28	0
+56	llm	fear	0.900	chat	发慌	deepseek-flash/emotion_fallback_	2026-09-28	0
+57	llm	fear	0.900	chat	发慌	deepseek-flash/emotion_fallback_	2026-09-28	0
+58	llm	fear	0.900	chat	发慌	deepseek-flash/emotion_fallback_	2026-09-28	0
+59	llm	fear	0.900	chat	发慌	deepseek-flash/emotion_fallback_	2026-09-28	0
+60	llm	fear	0.900	chat	发慌	deepseek-flash/emotion_fallback_	2026-09-28	0
+61	llm	sadness	0.900	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+62	llm	sadness	0.700	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+63	llm	neutral	0.200	chat	忽略	deepseek-flash/emotion_fallback_	2026-09-28	0
+64	llm	neutral	0.200	chat	无视，遵守，安全	deepseek-flash/emotion_fallback_	2026-09-28	0
+65	llm	neutral	0.200	chat	遵守	deepseek-flash/emotion_fallback_	2026-09-28	0
+66	llm	neutral	0.600	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+67	llm	neutral	0.200	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+68	llm	neutral	0.900	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+69	llm	neutral	0.200	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+70	llm	neutral	0.200	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+71	llm	neutral	0.200	chat	背后	deepseek-flash/emotion_fallback_	2026-09-28	0
+72	llm	neutral	0.200	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+73	llm	neutral	0.200	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+74	llm	neutral	0.200	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+75	llm	sadness	0.700	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+76	llm	neutral	0.600	chat	不是	deepseek-flash/emotion_fallback_	2026-09-28	0
+77	llm	anger	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+78	dict	sadness	0.721	chat	住院，担心	dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+79	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+80	llm	neutral	0.200	chat	忽略	deepseek-flash/emotion_fallback_	2026-09-28	0
+81	llm	neutral	0.200	chat	忽略，安全	deepseek-flash/emotion_fallback_	2026-09-28	0
+82	llm	neutral	0.200	chat	无视	deepseek-flash/emotion_fallback_	2026-09-28	0
+83	dict	sadness	0.600	chat	忽略，消息	dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+84	dict	sadness	0.621	chat	忽略，对不起	dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+85	llm	neutral	0.600	chat	喜欢，忽略	deepseek-flash/emotion_fallback_	2026-09-28	0
+86	llm	neutral	0.400	chat	无视	deepseek-flash/emotion_fallback_	2026-09-28	0
+87	llm	anger	0.600	chat	无视	deepseek-flash/emotion_fallback_	2026-09-28	0
+88	llm	fear	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+89	llm	neutral	0.200	chat	忽略	deepseek-flash/emotion_fallback_	2026-09-28	0
+90	llm	neutral	0.200	chat	忽略	deepseek-flash/emotion_fallback_	2026-09-28	0
+91	llm	neutral	0.200	chat	无视，遵守，安全	deepseek-flash/emotion_fallback_	2026-09-28	0
+92	llm	neutral	0.200	chat	遵守	deepseek-flash/emotion_fallback_	2026-09-28	0
+93	llm	neutral	0.600	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+94	llm	neutral	0.200	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+95	llm	neutral	0.900	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+96	llm	neutral	0.200	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+97	llm	neutral	0.200	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+98	llm	neutral	0.200	chat	背后	deepseek-flash/emotion_fallback_	2026-09-28	0
+99	llm	neutral	0.200	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+100	llm	neutral	0.200	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+101	llm	neutral	0.900	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+102	llm	sadness	0.700	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+103	llm	neutral	0.600	chat	不是	deepseek-flash/emotion_fallback_	2026-09-28	0
+104	llm	anger	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+105	dict	sadness	0.721	chat	住院，担心	dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+106	llm	neutral	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+107	llm	neutral	0.200	chat	忽略	deepseek-flash/emotion_fallback_	2026-09-28	0
+108	llm	neutral	0.200	chat	忽略，安全	deepseek-flash/emotion_fallback_	2026-09-28	0
+109	llm	neutral	0.200	chat	无视	deepseek-flash/emotion_fallback_	2026-09-28	0
+110	dict	sadness	0.600	chat	忽略，消息	dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+111	dict	sadness	0.621	chat	忽略，对不起	dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+112	llm	neutral	0.700	chat	喜欢，忽略	deepseek-flash/emotion_fallback_	2026-09-28	0
+113	llm	neutral	0.400	chat	无视	deepseek-flash/emotion_fallback_	2026-09-28	0
+114	llm	anger	0.600	chat	无视	deepseek-flash/emotion_fallback_	2026-09-28	0
+115	llm	fear	0.850	chat		deepseek-flash/emotion_fallback_	2026-09-28	0
+116	manual	joy	1.000	checkin	冒烟哨兵20260928094514	checkin-v1	2026-09-21	0
+117	manual	sadness	1.000	checkin	周末有点累	checkin-v1	2026-09-22	0
+118	manual	joy	1.000	checkin	冒烟哨兵20260928095000	checkin-v1	2026-09-21	0
+119	manual	sadness	1.000	checkin	周末有点累	checkin-v1	2026-09-22	0
+120	manual	joy	1.000	checkin	冒烟哨兵20260928095159	checkin-v1	2026-09-21	0
+121	manual	sadness	1.000	checkin	周末有点累	checkin-v1	2026-09-22	0
+122	manual	joy	1.000	checkin	冒烟哨兵20260928095501	checkin-v1	2026-09-21	0
+123	manual	sadness	1.000	checkin	周末有点累	checkin-v1	2026-09-22	0
+124	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+125	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+126	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+127	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+128	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+129	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+130	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+131	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+132	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+133	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+134	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0
+135	dict	neutral	0.000	chat		dut-4.0-mindisle-v1+prior-v1.0	2026-09-28	0

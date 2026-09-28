@@ -15,6 +15,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -61,6 +62,24 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<Void>> handleUnreadable(HttpMessageNotReadableException e) {
         log.warn("请求体无法解析 path={}：{}", currentPath(), e.getMessage());
         return toBiz(ErrorCode.PARAM_INVALID, ErrorCode.PARAM_INVALID.getMsg() + "：请求体不是合法 JSON");
+    }
+
+    /**
+     * 路径参数 / 查询参数的类型不匹配（本轮补的洞）。
+     *
+     * <p>起因是一条真实取证：探针把「我的帖子」写成了 {@code GET /api/posts/mine}，
+     * 命中的却是 {@code /api/posts/{id}} 这条模板，{@code long id} 解析 "mine" 失败抛
+     * MethodArgumentTypeMismatchException。它既不是 BizException 也不是 DataAccessException，
+     * 于是掉进下面的 Exception 兜底，用户拿到 <b>90004 + 500</b>：一句「服务开小差了，请报障」。
+     * 参数写错是<b>客户端错误</b>，把它伪装成服务端故障，会让人按 5xx 去重试、让我们按 90004 去查栈，
+     * 两头都浪费时间。归到 PARAM_INVALID（10001 + 400），响应体只带参数名，
+     * 绝不回显整段 URL 与原始值（NFR7：错误响应不泄露内部细节）。</p>
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Result<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        log.warn("参数类型不匹配 path={} name={} valueChars={}", currentPath(), e.getName(),
+                e.getValue() == null ? 0 : String.valueOf(e.getValue()).length());
+        return toBiz(ErrorCode.PARAM_INVALID, ErrorCode.PARAM_INVALID.getMsg() + "：" + e.getName() + " 的取值不合法");
     }
 
     /**

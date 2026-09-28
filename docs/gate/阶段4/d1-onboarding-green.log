@@ -1,0 +1,19 @@
+# 实例 = http://127.0.0.1:8080 · 账号 = d1_gate
+PASS [0 · 后端实例在跑（/api/system/info 200）]   200 code=0 {"code":0,"data":{"app":"MindIsle 心屿","version":"0.0.1-SNAPSHOT","profiles":"dev…
+PASS [1 · 注册账号返 200（或 20002 重跑：撞唯一键本身就是「真落库」的证据）]   409 code=20002
+PASS [1 · 登录拿到 accessToken（后面每一步的身份都只来自这一张票）]   200 code=0 uid=470
+PASS [2 · 授予 SENSITIVE_INFO 单独同意（20005 就是没同意，AI 线该被挡在进模型之前）]   200 code=0 {"code":0,"data":{"action":"GRANT","consentType":"SENSITIVE_INFO","contentVersion":"v1.0",…
+PASS [3 · 首次对话 HTTP 200、帧序列 meta/delta/done、正文非空]   帧=meta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,delta,done delta字数=885
+PASS [3 · 🔴 判据 D2：TTFT < 2000ms，且这个首帧真的是 delta（真实上游 DeepSeek，不是离线实例）]   hasDelta=true 首帧=864ms 整轮=1802ms
+PASS [3 · meta 帧带回 conversationId（会话真的在服务端建了，不是前端空壳）]   conv=120
+PASS [3 · meta 帧带回 emotion 与 riskLevel（这一句的情绪判定跟着帧一起回来；契约里 emotion 就是标签字符串）]   meta.emotion(词典初判)=neutral riskLevel=0
+PASS [3 · 会话回读：用户那一句带 emotionLabel + emotionChannel（情绪标签钉在被说的那句话上，不是钉在回复上）]   条数=2 用户句 emotionLabel=fear channel=llm riskLevel=L0
+PASS [3 · 助手那一句带真实模型名与 promptVersion（回复真走了 DeepSeek；model 键缺席说明它压根没进模型）]   model=deepseek-flash promptVersion=chat_default_v1 degraded=false
+PASS [3 · 库里用户句的 emotionChannel 是可信通道名（dict / llm / manual 三选一，缺席说明这一行根本没被情绪通道写过）]   meta 帧当时=neutral（词典初判） 库里现在=fear/llm 分数=undefined
+PASS [4 · 🔴 判据 D1 的落点：只说了这一句话之后，档案页的点数已经 >= 1，且 trend / distribution / calendar 都有内容（情绪点是「对话」写进去的，不是打卡写进去的）]   200 recordCount=5 trend=1 distribution=[{"key":"fear","zh":"恐惧","count":5,"ratio":1}] sources=[{"key":"checkin","zh":"主动打卡","count":2,"ratio":0.4},{"key":"passive","zh":"被动识别","count":3,"ratio":0.6}]
+PASS [4 · 情绪打卡 200（source=checkin 的记录落 emotion_record）]   200 code=0 {"code":0,"data":{"id":143,"recordDate":"2026-09-28","emotion":"fear","emotionZh":"恐惧","intensity":3,"valence":-1,"sleepBucket":2,…
+PASS [4 · 打卡之后档案点数不减少，且这一天的强度均值把打卡那一档也算进去了（同一个人两条来源汇成同一个点）]   基线=5 现在=6 trend[0]={"date":"2026-09-28","label":"fear","labelZh":"恐惧","avgIntensity":3,"valence":-1,"recordCount":6,"confidentCount":6,"uncertainCount":0}
+PASS [5 · 🔴 判据 D1：注册 → 同意 → 首次对话 → 档案出现情绪点，全程 < 180 秒]   实际用时=3.2s
+
+D1 闭环汇总：15 项判据，通过 15 条，失败 0 条
+# SQL 复核（root 直连）：SELECT id,username,created_at FROM user WHERE username="d1_gate"; SELECT id,consent_type,created_at FROM user_consent WHERE user_id=470 ORDER BY id DESC LIMIT 3; SELECT id,role,emotion_label,model,degraded FROM chat_message WHERE conversation_id=120 ORDER BY id; SELECT id,record_date,label,intensity,source FROM emotion_record WHERE user_id=470 ORDER BY id DESC LIMIT 3;

@@ -31,7 +31,11 @@ const routes = [
       // 路径参数用数字 id 而不是话题名：后端 TopicController 限的是 \d+，而名字要参与重名判定与折叠空白，
       // 拿它当路由参数就得再引一层「按名寻址」的接口，那条接口正是还没有的那条。
       { path: 'topic/:id', name: 'topic-detail', component: () => import('@/views/topic/TopicDetailView.vue'), meta: { requiresAuth: true } },
-      { path: 'search', name: 'search', component: () => import('@/views/search/SearchView.vue'), meta: { requiresAuth: true } }
+      { path: 'search', name: 'search', component: () => import('@/views/search/SearchView.vue'), meta: { requiresAuth: true } },
+      // 隐私中心（任务 T4.21 · 需求 FR2.10 与个保法第 45/47 条）。只要登录，不加 requiresConsent：
+      // 这一页是「查自己的数据、导出、注销、撤回授权」的地方，没勾敏感同意的人恰恰最需要走进来 ——
+      // 给他加一道同意闸，等于把撤回授权的入口锁在授权之后。
+      { path: 'privacy', name: 'privacy', component: () => import('@/views/privacy/PrivacyView.vue'), meta: { requiresAuth: true } }
     ]
   },
   { path: '/:pathMatch(.*)*', name: 'notfound', component: () => import('@/views/NotFound.vue'), meta: { public: true } }

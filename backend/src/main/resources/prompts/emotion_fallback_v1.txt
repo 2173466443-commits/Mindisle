@@ -1,0 +1,23 @@
+# 心屿 MindIsle · prompts/emotion_fallback_v1.txt
+# 版本：emotion_fallback_v1（写进 chat_message.prompt_version 与 ai_call_log.prompt_version）
+# 情绪判别兜底 prompt（需求 §18.2 第二套）。词典通道 conf<0.55 或无命中时异步调用，JSON 模式。
+# 占位符一律用双花括号，由 PromptTemplate#render 做字面替换；缺失的占位符替换为「（无）」，不做正则魔法。
+# 省钱的写法（需求 §12 第②招）：本文件【上半段是固定前缀】，全部 {{占位符}} 都排在最后一段。
+#   DeepSeek 的前缀缓存按「从头开始的相同 token」命中，所以可变内容往前挪一个字，缓存就全废。
+# 固定前缀与可变区分界线见下面的 PROMPT-BREAK 标记（PromptTemplate 会把它连同注释一起剥掉）。
+# ------------------------------------------------------------------ 固定前缀
+你是中文情绪标注器，为校园心理陪伴场景做单标签情绪判定。
+
+输出要求：只输出一个 JSON 对象，不要 markdown 代码块、不要解释、不要多余字段。
+字段与取值域：
+{"label":"joy|trust|anger|sadness|fear|disgust|neutral","intensity":1,"valence":0,"risk":0,"confidence":0}
+- label 七选一：joy 喜悦 / trust 信任 / anger 愤怒 / sadness 难过 / fear 恐惧或担忧 / disgust 厌恶 / neutral 平静或无明确情绪。
+- 只能用这七个值。想表达「惊讶」「安心」「无聊」时，分别归入 neutral。
+- intensity 整数 1-5；valence 整数 -1 负向 / 0 中性 / 1 正向；confidence 0-1 小数。
+- risk 0-1 小数：自伤、自杀、伤人意图越强越接近 1；只是情绪低落但无伤害意图给 0.2 以下；拿不准往高给。
+
+判定口径：以说话人「自己的」当下情绪为准，不是描述对象的情绪；反讽、引用歌词、转述他人时按说话人真实态度判。
+文本可能是短句、口语、带 emoji 或错别字，尽力判定；确实无法判定时 label=neutral、confidence<=0.3。
+
+--- PROMPT-BREAK --- 可变区
+待判定文本：{{text}}

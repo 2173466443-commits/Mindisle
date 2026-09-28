@@ -540,6 +540,14 @@ async function main() {
     check("12", "白名单外的 type → 400/10001（读接口与写接口同口径，不猜「你想看全部」）", r.status === 400 && code(r) === "10001", r.status + " code=" + code(r));
     r = await listGet(null, "");
     check("12", "未登录打列表 → 401/10002（广场也是登录后可见，游客只给话题墙）", r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+    // 阶段 4 补的洞：探针把详情路径写成 /api/posts/mine 时，命中的是 /{id} 这条模板，
+    // long 解析失败原本会掉进 Exception 兜底 → 90004/500，把「我路径写错了」伪装成「服务挂了」。
+    r = await detailGet(accessToken, "mine");
+    check("12", "路径参数非数字 → 400/10001（不是 500/90004：客户端错误不许冒充服务端故障）",
+      r.status === 400 && code(r) === "10001", r.status + " code=" + code(r) + " msg=" + ((r.json && r.json.msg) || ""));
+    r = await detailGet(accessToken, "99999999999999999999999");
+    check("12", "数字但溢出 long 也是 400/10001（同一处理器，别指望容器替你夹范围）",
+      r.status === 400 && code(r) === "10001", r.status + " code=" + code(r) + " msg=" + ((r.json && r.json.msg) || ""));
 
     const anonItem = others.find(function (x) { return x.anonymous === true; });
     check("12", "列表里的匿名帖不回 authorId（抓包反查不到作者），展示名是马甲",
@@ -1387,9 +1395,15 @@ async function main() {
   // 夹具刻意分甲乙两组关键词、各带本轮时间戳。本步最初让甲乙共用同一个锚点，结果「第三人搜出
   // 来几条」把第三人自己那两条公开帖也算了进去，n===2 当场挂——这不是断言太严，是夹具没把变量
   // 分开：命中集必须只属于被检的那一方，否则「不该出现」这类否定断言随时能被翻页与污染糊过去。
-  const srchA = await regAccount("smoke_srch_a" + stamp, "冒烟检索甲");
-  const srchB = await regAccount("smoke_srch_b" + stamp, "冒烟检索乙");
-  const srchC = await regAccount("smoke_srch_c" + stamp, "冒烟检索丙");
+  // 🔴 昵称必须带上本次运行的 stamp（本轮踩坑）：上一版昵称是固定的「冒烟检索甲」，于是每跑一次就多一个同名账号，
+  // 第 19 步那条「按昵称搜人」的断言在跑到第 N 次时被结果分页（size=10）挤出去 —— 搜得到「甲」，但搜不到「这一个甲」。
+  // 判据：夹具的每一项标识（用户名、昵称、关键词）都要带本次运行的唯一后缀，否则脚本自己会把上一次的数据变成噪声。
+  const srchANick = "冒烟检索甲" + stamp;
+  const srchBNick = "冒烟检索乙" + stamp;
+  const srchCNick = "冒烟检索丙" + stamp;
+  const srchA = await regAccount("smoke_srch_a" + stamp, srchANick);
+  const srchB = await regAccount("smoke_srch_b" + stamp, srchBNick);
+  const srchC = await regAccount("smoke_srch_c" + stamp, srchCNick);
   check("19", "注册三名检索账号：甲、乙各发一批帖，丙既不发帖也不关注任何人（对照账号必须是新真人，"
     + "不能拿前 18 步的夹具凑——那批账号的发帖配额与关注关系都已经被别的步骤动过了）",
     !!srchA && !!srchB && !!srchC, "a=" + !!srchA + " b=" + !!srchB + " c=" + !!srchC);
@@ -1498,7 +1512,7 @@ async function main() {
       !!srchRealRow && srchRealRow.authorId === srchAId && srchRealRow.anonymous === false
       && !!srchHoleRow && !("authorId" in srchHoleRow) && srchHoleRow.anonymous === true
       && String(srchHoleRow.displayName).indexOf("匿名屿民·") === 0
-      && JSON.stringify(srchHoleRow).indexOf("冒烟检索甲") < 0,
+      && JSON.stringify(srchHoleRow).indexOf(srchANick) < 0,
       "实名行=" + nj(srchRealRow && { id: srchRealRow.id, authorId: srchRealRow.authorId })
       + " 匿名行=" + nj(srchHoleRow));
 
@@ -1533,17 +1547,31 @@ async function main() {
       + "这条比单搜一个 % 更狠：它把「漏转义」与「本轮夹具」锁死在同一批数据上",
       wPctIds.length === 0 && wUndIds.length === 0,
       "pct=" + wPctIds.join(",") + " underscore=" + wUndIds.join(","));
+    // 「total 是个小数字（写死 <=5）」这条上限在 2026-09-24 被自己涨爆了：每跑一轮冒烟就留下
+    // 一条含字面 % 的转义靶，第六轮 total 就是 6。判据换成两条与历史夹具无关的硬事实：
+    //   ① 返回的每一行，标题或摘要里真的含 %（正面证明按字面量匹配，而不是靠「条数少」反证）；
+    //   ② total 严格小于全站可见帖数（未转义时 LIKE '%%%' 会把全站列一遍，两个数必然相等）。
+    const rSiteAll = await asA("/api/posts", "size=1");
+    const pctSiteTotal = Number(bodyOf(rSiteAll).total || 0);
     r = await asA("/api/search/posts", "q=%25&size=50");
     const pctIds = hitIds(r);
+    const pctRows = hitRows(r);
+    const pctNoSign = pctRows.filter(function (x) {
+      return String(x.title || "").indexOf("%") < 0 && String(x.excerpt || "").indexOf("%") < 0;
+    }).map(function (x) { return x.id; });
     const srchFixtures = [aPublicId, aPrivateId, aHoleId, bEscId, bCtlId, bPublicId, bPrivateId, bHoleId];
     const pctLeak = srchFixtures.filter(function (id) {
       return id !== bEscId && pctIds.indexOf(id) >= 0;
     });
-    check("19", "搜单个 % 不是「把全站列一遍」：命中的恰是含这个字符的那条（转义靶在列＝正面控制），"
-      + "其余七条夹具一条都不在结果里，且 total 是个小数字（未转义时它等于全站可见帖数，量级 130+）",
+    check("19", "搜单个 % 不是「把全站列一遍」：命中的每一条标题或摘要里真的含这个字符（正面控制），"
+      + "转义靶在列、其余七条夹具一条都不在结果里，且 total 严格小于全站可见帖数（未转义时 LIKE '%%%' "
+      + "返回全站，两个数必然相等）。上限刻意不写死：每轮冒烟都留下一条含 % 的靶子，上一版写死的 <=5 "
+      + "在第六轮被自己涨红 —— 依赖「库里只有几条夹具」的断言不是判据，是运气",
       r.status === 200 && code(r) === "0" && !!rowById(r, bEscId) && pctLeak.length === 0
-      && Number(bodyOf(r).total) <= 5,
-      "total=" + bodyOf(r).total + " 命中夹具=" + pctIds.filter(function (id) {
+      && pctRows.length > 0 && pctNoSign.length === 0
+      && pctSiteTotal > 0 && Number(bodyOf(r).total) < pctSiteTotal,
+      "total=" + bodyOf(r).total + " 全站可见=" + pctSiteTotal + " 行数=" + pctRows.length
+      + " 不含%的行=" + pctNoSign.join(",") + " 命中夹具=" + pctIds.filter(function (id) {
         return srchFixtures.indexOf(id) >= 0; }).join(",") + " 泄漏=" + pctLeak.join(","));
     r = await asA("/api/search/posts", "q=" + enc("失眠夜") + "&size=50");
     const topicPathRows = hitRows(r);
@@ -1570,11 +1598,12 @@ async function main() {
     check("19", "搜不到话题时回空数组而不是 404：搜索框要为空态让路，前端不必为「没结果」多写一条异常分支",
       r.status === 200 && code(r) === "0" && Array.isArray(r.json && r.json.data)
       && r.json.data.length === 0, r.status + " " + short(r, 90));
-    r = await asA("/api/search/users", "q=" + enc("冒烟检索甲"));
+    r = await asA("/api/search/users", "q=" + enc(srchANick));
     const userHits = arrOf(r);
     check("19", "按昵称搜人搜到甲本人，且出参只可能是 id / nickname / avatar 三个字段：email、role、status、"
       + "密码哈希一律不给。avatar 为空时 non_null 会整个省掉这个键，所以判「是三个字段的子集且 id/nickname 俱在」，"
-      + "而不是判「恰好等于三个键」——后者会因为少一个可空字段而假挂",
+      + "而不是判「恰好等于三个键」。q 用带 stamp 的唯一昵称：固定的「冒烟检索甲」每跑一次就多一个同名号，"
+      + "第二次起就会被结果分页挤出前十（本轮就是这么第一次红的）",
       r.status === 200 && userHits.some(function (x) { return x.id === srchAId; })
       && userHits.every(function (x) {
         return "id" in x && "nickname" in x && Object.keys(x).every(function (k) {
@@ -1636,7 +1665,7 @@ async function main() {
       + "（是整页每行都判，不是抽查一条）",
       feedRows.length > 0 && feedRows.every(function (x) {
         return x.authorId === srchBId && x.anonymous === false && x.visibility === "public"
-          && x.displayName === "冒烟检索乙"; }),
+          && x.displayName === srchBNick; }),
       "n=" + feedRows.length + " " + nj(feedRows.slice(0, 2).map(function (x) {
         return { id: x.id, authorId: x.authorId, dn: x.displayName, v: x.visibility }; })));
     r = await feedGet(srchA, "size=1");
@@ -1700,6 +1729,33 @@ async function main() {
       };
       const tpKeys = function (v) { return Object.keys(v || {}); };
       const msgOf = function (rr) { return (rr.json && rr.json.msg) || ""; };
+
+      // 话题帖流必须「翻到底再判」。这条线上一版栽在两件同时发生的事上：
+      //   · common/PageQuery 把 size 硬夹在 MAX_SIZE=50（30–31 行），请求 size=50 也只会拿 50 条；
+      //   · 话题 1 挂着历轮冒烟的夹具，可见帖数早已 >50 ⇒「这一页 hasMore=false」物理上不可能满足。
+      // 而它保护的正是下面几条「不在列」的否定断言 —— 首页截断会让「不在列」变成恒真。
+      // 所以正解不是放宽判据（那等于把 §14 第 27 条又犯一遍），而是把判据升级成「整条流翻完都不含」，
+      // 严格强于原式，且与库里历史数据量解耦。游标翻页用 nextCursor（与广场、关注流同一个 PageResult）。
+      const tpFeedAll = async function (token, id, maxPages) {
+        const ids = [];
+        const seen = new Set();
+        let pages = 0;
+        let ended = false;
+        let cursor = null;
+        for (let i = 0; i < (maxPages || 20); i += 1) {
+          const rr = await tpGet(token, "/api/topics/" + id + "/posts",
+            "size=50" + (cursor ? "&beforeId=" + cursor : ""));
+          const rows = hitRows(rr);
+          rows.forEach(function (x) { if (!seen.has(x.id)) { seen.add(x.id); ids.push(x.id); } });
+          pages += 1;
+          const data = bodyOf(rr);
+          ended = data.hasMore !== true;
+          if (ended || !rows.length) { break; }
+          cursor = data.nextCursor;
+          if (!cursor) { ended = false; break; }   // 还说有更多却拿不到游标：这是缺陷，不许当成翻到底
+        }
+        return { ids: ids, pages: pages, ended: ended };
+      };
 
       // 拿一条「真的有帖」的已过审话题当靶子：库里只有 1 号话题挂着种子帖，但运行期不许写死 id。
       r = await tpGet(null, "/api/topics", "limit=50");
@@ -1813,29 +1869,29 @@ async function main() {
         + "而 Redis 缺席时降级 Caffeine 的失败语义还不一样，不该给计数造第二个真相",
         Number(bodyOf(r).postCnt) === basePostCnt + 1,
         "base=" + basePostCnt + " now=" + bodyOf(r).postCnt);
-      r = await tpGet(tpcB, "/api/topics/" + tId + "/posts", "size=50");
-      const tpFeedIds = hitIds(r);
-      check("21", "刚发的帖出现在话题页帖流里（FR4.5 聚合页的最小闭环），且这一页 hasMore=false —— "
-        + "下面几条判的都是「不在列」，被翻页截断会让否定断言恒真",
-        tpFeedIds.indexOf(tpPublicId) >= 0 && bodyOf(r).hasMore === false,
-        "n=" + tpFeedIds.length + " 新帖在列=" + (tpFeedIds.indexOf(tpPublicId) >= 0)
-        + " hasMore=" + bodyOf(r).hasMore);
+      const tpFeed1 = await tpFeedAll(tpcB, tId);
+      check("21", "刚发的帖出现在话题页帖流里（FR4.5 聚合页的最小闭环），且这一条是**把整条流翻完**"
+        + "得出的：只看首页时 size 被 common/PageQuery 硬夹在 50，话题 1 已挂着历轮冒烟夹具（本轮现查"
+        + "可见 56+ 条），「这一页 hasMore=false」物理上不可能满足；而它护的正是下面几条「不在列」的"
+        + "否定断言 —— 首页截断会让「不在列」恒真。判据升级成翻到底，严格强于原式",
+        tpFeed1.ended === true && tpFeed1.ids.indexOf(tpPublicId) >= 0,
+        "n=" + tpFeed1.ids.length + " 页=" + tpFeed1.pages + " 翻到底=" + tpFeed1.ended
+        + " 新帖在列=" + (tpFeed1.ids.indexOf(tpPublicId) >= 0));
 
       r = await putPost(tpcA, { title: "话题冒烟·私密" + stamp,
         content: "仅自己可见但挂了话题 " + stamp, visibility: "private", topicIds: [tId] });
       const tpPrivateId = bodyOf(r).id;
-      r = await tpGet(tpcA, "/api/topics/" + tId + "/posts", "size=50");
-      const tpOwnFeed = hitIds(r);
-      const tpOwnMore = bodyOf(r).hasMore;
-      r = await tpGet(tpcB, "/api/topics/" + tId + "/posts", "size=50");
-      const tpPeerFeed = hitIds(r);
-      check("21", "作者自己的私密帖挂进话题也不进话题流，甲、乙两个身份都读不到它：applyVisible 只把"
-        + "「自己的待审帖」回给作者，private 不在那一支里。话题页照抄广场那一条判据而不是另开一版 —— "
-        + "多一个入口就多一份要各改一遍的 WHERE（手册 §14 第 27 条禁的正是这个）",
-        tpOwnMore === false && tpOwnFeed.indexOf(tpPrivateId) < 0
-        && tpPeerFeed.indexOf(tpPrivateId) < 0,
-        "作者视角 n=" + tpOwnFeed.length + " 含私密=" + (tpOwnFeed.indexOf(tpPrivateId) >= 0)
-        + " 他人视角 n=" + tpPeerFeed.length);
+      const tpOwnAll = await tpFeedAll(tpcA, tId);
+      const tpPeerAll = await tpFeedAll(tpcB, tId);
+      check("21", "作者自己的私密帖挂进话题也不进话题流，甲、乙两个身份**各自把整条流翻完**都读不到它："
+        + "applyVisible 只把「自己的待审帖」回给作者，private 不在那一支里。话题页照抄广场那一条判据而不是"
+        + "另开一版 —— 多一个入口就多一份要各改一遍的 WHERE（手册 §14 第 27 条禁的正是这个）",
+        tpOwnAll.ended === true && tpPeerAll.ended === true
+        && tpOwnAll.ids.indexOf(tpPrivateId) < 0 && tpPeerAll.ids.indexOf(tpPrivateId) < 0,
+        "作者视角 n=" + tpOwnAll.ids.length + " 页=" + tpOwnAll.pages
+        + " 含私密=" + (tpOwnAll.ids.indexOf(tpPrivateId) >= 0)
+        + " 他人视角 n=" + tpPeerAll.ids.length + " 页=" + tpPeerAll.pages
+        + " 含私密=" + (tpPeerAll.ids.indexOf(tpPrivateId) >= 0));
       r = await tpGet(tpcA, "/api/users/me/posts", "size=50");
       check("21", "同一条私密帖在「我的帖子」里读得回来：上面那个「读不到」来自可见性判据，不是写入失败"
         + "（applyOwned 与 applyVisible 是两条不同的收窄，前者才给作者回看自己的私密）",
@@ -1953,6 +2009,568 @@ async function main() {
     }
   } else {
     info("19", "三名检索账号没注册成功，第 19、20 步整体跳过（根因在第 18 步同一段注册逻辑上）", "");
+  }
+
+  // ---------- 22 隐私中心（任务 T4.21 · 需求 FR1.5、FR1.6、NFR8 · 手册 §7.5）----------
+  // 这一步覆盖的是「一个人能不能把自己的数据带走、能不能退得出去」这条合规主线。
+  // 单测里 PrivacyExportService 打的是内存版 store，而「下载口令 + JWT 双重校验」
+  // 「Result 包装之外全站唯一那条裸字节响应」「zip 的头两字节」只有真接口才证得到。
+  const pvSleep = function (ms) {
+    return new Promise(function (res) { setTimeout(res, ms); });
+  };
+  // 这一段自造 pvReq：第 21 步那批 tpGet/tpPost 是 if 块里的块作用域常量，在这里够不着。
+  const pvReq = function (method, token, p, qs, reqBody) {
+    const headers = {};
+    if (token) { headers.Authorization = "Bearer " + token; }
+    if (reqBody !== undefined && reqBody !== null) {
+      headers["Content-Type"] = "application/json";
+      headers["Content-Length"] = Buffer.byteLength(reqBody);
+    }
+    return rlSafe(function () {
+      return send(method, p + (qs ? "?" + qs : ""), { headers: headers, body: reqBody });
+    });
+  };
+  const pvDl = function (token, fullPath) {
+    return rlSafe(function () {
+      return send("GET", fullPath, { headers: { Authorization: "Bearer " + token } });
+    });
+  };
+  // PENDING → RUNNING → SUCCESS/FAILED 是后台线程跑的，前端只能轮询。上限 40 次 × 1.5s：
+  // 超了判「等不到」而不是死等，冒烟脚本卡住比断言失败更难查。
+  const pvWait = async function (token) {
+    let last = {};
+    for (let i = 0; i < 40; i++) {
+      const rr = await pvReq("GET", token, "/api/privacy/export/latest");
+      last = bodyOf(rr);
+      if (last.status === "SUCCESS" || last.status === "FAILED") { break; }
+      await pvSleep(1500);
+    }
+    return last;
+  };
+  const pvName = "smoke_pv_" + stamp;
+  r = await pvReq("GET", null, "/api/privacy/summary");
+  check("22", "未登录打 GET /api/privacy/summary → 401/10002：九条端点全要登录，连那条带口令的下载也是。"
+    + "需求原文允许「凭链接下载」，本项目没有这么做——口令一旦出现在浏览器历史、代理日志或答辩截图里，"
+    + "那个包就是任何人的了；补上 JWT + 归属校验之后，口令泄露最多让人看到一条 404，拿不到字节",
+    r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+
+  const pvToken = await regAccount(pvName, "冒烟隐私甲");
+  check("22", "注册隐私专用账号 " + pvName + "（注销会真改账号态并作废会话，不能拿别人的号试）",
+    !!pvToken, "token=" + (pvToken ? "拿到" : "没拿到"));
+
+  if (pvToken) {
+    r = await pvReq("GET", pvToken, "/api/privacy/summary");
+    const pvS = bodyOf(r);
+    const pvDom = Array.isArray(pvS.domains) ? pvS.domains : [];
+    const pvAcct = pvS.account || {};
+    const pvAcctKeys = Object.keys(pvS.account || {});
+    let pvRowSum = 0;
+    pvDom.forEach(function (d) { pvRowSum += Number(d.rows) || 0; });
+    const pvWhole = r.json ? JSON.stringify(r.json) : "";
+    check("22", "GET /api/privacy/summary → 200 且 account 是白名单字段：username/role 在、password 不作为键出现。"
+      + "判据是「键形态」而不是「整串里没有 password 这个词」——NOTICE 原文就写着「password 列不在任何导出内容中」，"
+      + "按后者断言会把一句正确的说明文案判成泄露",
+      r.status === 200 && pvAcctKeys.length >= 8 && pvAcctKeys.indexOf("password") < 0
+      && pvWhole.indexOf('"password":') < 0 && pvAcct.username === pvName
+      && pvWhole.indexOf("$2a$") < 0 && pvWhole.indexOf("$2b$") < 0,
+      r.status + " account键数=" + pvAcctKeys.length + " role=" + pvAcct.role);
+    check("22", "注册表驱动逐域计数：34 项登记里 25 项进导出包（user 主行单列为 account，其余 8 项是运营侧留痕或全局配置，"
+      + "note 里各写理由），每一域都带回 table/rows/truncated 三个读数",
+      pvDom.length === 25 && pvDom.every(function (d) {
+        return typeof d.table === "string" && typeof d.rows === "number" && typeof d.truncated === "boolean";
+      }), "domains=" + pvDom.length + " 首域=" + (pvDom[0] ? pvDom[0].table : "-"));
+    check("22", "D11 条数可对账：逐域 rows 之和 === totalRows。概览页与导出包共用同一条归属谓词（端口把两条路钉在同一个 where 上），"
+      + "否则就会出现「界面说 128 条、包里有 120 条」这种在答辩现场对不上的账；前端 reconDiff 用的就是这条判据",
+      typeof pvS.totalRows === "number" && pvRowSum === pvS.totalRows,
+      "逐域之和=" + pvRowSum + " totalRows=" + pvS.totalRows);
+    check("22", "新建账号的概览态是 ACTIVE 且不在冷静期（cooling=false 且 remainDays=0，没有 deactivateAt/purgeAt 时判假而不是抛错）",
+      pvS.accountStatus === "ACTIVE" && pvS.cooling === false && pvS.coolingDays === 30
+      && pvS.coolingRemainDays === 0,
+      "status=" + pvS.accountStatus + " cooling=" + pvS.cooling + " coolingDays=" + pvS.coolingDays);
+
+    r = await pvReq("GET", pvToken, "/api/privacy/export", "format=xml");
+    check("22", "format=xml → 400/10001 且文案把两个合法值整串列出：不「猜一个默认格式」，"
+      + "否则前端拼错的参数会静默变成另一种格式的文件，用户拿到手才发现打不开",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "json") && isMsg(r, "csv"),
+      r.status + " code=" + code(r) + " msg=" + (r.json && r.json.msg));
+
+    r = await pvReq("GET", pvToken, "/api/privacy/export", "format=json");
+    const pvT1 = bodyOf(r);
+    check("22", "提交 json 导出当场只回任务视图：status 是未完成态、downloadReady=false、downloadPath 为空——"
+      + "产物还没落盘就发链接，那是假链接；口令只在 markSuccess 那一刻写入",
+      r.status === 200 && (pvT1.status === "PENDING" || pvT1.status === "RUNNING")
+      && pvT1.downloadReady === false && (pvT1.downloadPath === undefined || pvT1.downloadPath === null),
+      r.status + " status=" + pvT1.status + " ready=" + pvT1.downloadReady);
+    const pvTask1 = pvT1.id;
+
+    r = await pvReq("GET", pvToken, "/api/privacy/export", "format=json");
+    const pvT2 = bodyOf(r);
+    check("22", "连点两次只排一份：第二次返回的是同一个任务 id，不插新行——响应里永远只描述一个任务，"
+      + "前端不必处理「我提交了 3 次，现在有 3 个进行中的」",
+      r.status === 200 && pvT2.id === pvTask1 && pvT2.format === "json",
+      "第一次 id=" + pvTask1 + " 第二次 id=" + pvT2.id);
+
+    const pvJ = await pvWait(pvToken);
+    check("22", "轮询 GET /api/privacy/export/latest 到 SUCCESS：成功态才出现 downloadReady 与带口令链接，"
+      + "且链接的字面量就是 /api/privacy/export/file?token=（前端不必自己拼，两处拼法必然漂移）",
+      pvJ.status === "SUCCESS" && pvJ.downloadReady === true
+      && String(pvJ.downloadPath || "").indexOf("/api/privacy/export/file?token=") === 0
+      && Number(pvJ.fileBytes) > 0 && !!pvJ.expireAt && !!pvJ.rowCountSummary,
+      "status=" + pvJ.status + " bytes=" + pvJ.fileBytes + " 对账=" + String(pvJ.rowCountSummary).slice(0, 60));
+
+    r = await pvDl(pvToken, pvJ.downloadPath);
+    const pvCt = String(r.headers["content-type"] || "");
+    const pvDisp = String(r.headers["content-disposition"] || "");
+    const pvPkg = r.body.toString("utf8");
+    check("22", "按口令下载 → 200 + Content-Disposition: attachment + 裸文件字节：这是全站唯一一处不套 Result<T> 的响应。"
+      + "一个 JSON 外壳包二进制不是「兼容」，是把包变成 base64 让体积涨三分之一、而浏览器再也认不出它是什么文件",
+      r.status === 200 && pvDisp.indexOf("attachment") === 0 && /filename=/.test(pvDisp)
+      && pvCt.indexOf("json") >= 0 && r.body.length > 0
+      && !(r.json && r.json.code !== undefined)
+      && String(r.headers["cache-control"] || "").indexOf("no-store") >= 0
+      && r.headers["x-content-type-options"] === "nosniff",
+      "ct=" + pvCt + " bytes=" + r.body.length + " disp=" + pvDisp.slice(0, 60));
+    check("22", "包体结构自查：顶层顺序刻意是「先说明、再账号、再各域」，generatedAt/requestedByUserId/notice/summary.rowCounts/data 五处齐；"
+      + "文件名里不带口令（名字本身不该成为第二个秘密）",
+      pvPkg.indexOf('"generatedAt"') >= 0 && pvPkg.indexOf('"requestedByUserId"') >= 0
+      && pvPkg.indexOf('"notice"') >= 0 && pvPkg.indexOf('"rowCounts"') >= 0
+      && pvPkg.indexOf('"data"') >= 0 && pvPkg.indexOf("token=") < 0,
+      "包长=" + pvPkg.length + " 五处齐=" + (pvPkg.indexOf('"data"') >= 0));
+    check("22", "包里没有凭据：password 不作为键出现、不含任何 bcrypt 摘要前缀（AccountFacts 那一行映射是全站唯一执行点，加字段要显式改记录）",
+      pvPkg.indexOf('"password":') < 0 && pvPkg.indexOf("$2a$") < 0 && pvPkg.indexOf("$2y$") < 0,
+      "命中 password 键=" + (pvPkg.indexOf('"password":') >= 0));
+
+    r = await pvDl(pvToken, pvJ.downloadPath + "0");
+    check("22", "口令差一位 → 404/90006，且文案与「口令不存在 / 是别人的 / 任务没成功 / 已过期」四种情况完全一样："
+      + "四种失败在响应上不可区分，探测者拿不到「这串口令是真的但过期了」这种可用的部分信息",
+      r.status === 404 && code(r) === "90006" && isMsg(r, "下载链接"),
+      r.status + " code=" + code(r) + " msg=" + (r.json && r.json.msg));
+
+    r = await pvReq("GET", pvToken, "/api/privacy/export", "format=csv");
+    const pvC0 = bodyOf(r);
+    const pvC = pvC0.status === "SUCCESS" ? pvC0 : await pvWait(pvToken);
+    check("22", "csv 导出跑到 SUCCESS 且 format 回显是 csv（json 那份已经完成，这次没有复用未完成的任务）",
+      pvC.status === "SUCCESS" && pvC.format === "csv" && !!pvC.downloadPath,
+      "status=" + pvC.status + " format=" + pvC.format + " bytes=" + pvC.fileBytes);
+    r = await pvDl(pvToken, pvC.downloadPath);
+    const pvZipCt = String(r.headers["content-type"] || "");
+    check("22", "csv 产物是 zip（一份 _README.txt + 一域一个 csv，空表不出文件但对账记 0）：头两字节 50 4B 即 PK，"
+      + "content-type 是 application/zip，浏览器才会当文件收而不是当文本渲染",
+      r.status === 200 && r.body.length > 2 && r.body[0] === 80 && r.body[1] === 75
+      && pvZipCt.indexOf("zip") >= 0,
+      "头两字节=" + r.body[0] + "," + r.body[1] + " ct=" + pvZipCt + " bytes=" + r.body.length);
+
+    r = await pvReq("GET", pvToken, "/api/privacy/export/history", "limit=5");
+    const pvH = Array.isArray(r.json && r.json.data) ? r.json.data : [];
+    check("22", "history 新的在前、至少两条（json 与 csv 各一次），且每一行都不带 filePath 与 token："
+      + "磁盘绝对路径出现在任何响应里都是白送的情报（NFR7），口令也只该活在那一条链接上",
+      r.status === 200 && pvH.length >= 2 && pvH[0].id > pvH[1].id
+      && pvH.every(function (x) { return x.filePath === undefined && x.token === undefined; }),
+      "条数=" + pvH.length + " ids=" + pvH.map(function (x) { return x.id; }).join(",")
+      + " 键=" + (pvH[0] ? Object.keys(pvH[0]).length : 0));
+
+    r = await pvReq("DELETE", pvToken, "/api/privacy/consent/PRIVACY");
+    check("22", "撤回 PRIVACY 总授权 → 400/10001 且文案指向「请使用注销账号」：这两项是「用这个产品」的前提，"
+      + "做成可撤回的开关就等于在产品里留一个「不同意但仍在被收集数据」的状态",
+      r.status === 400 && code(r) === "10001" && isMsg(r, "注销"),
+      r.status + " code=" + code(r) + " msg=" + (r.json && r.json.msg));
+
+    r = await pvReq("DELETE", pvToken, "/api/privacy/consent/EMOTION_SHARE");
+    const pvCw = bodyOf(r);
+    check("22", "撤回情绪分享授权 → 200 + 追加一行 action=WITHDRAW 而不是 UPDATE 历史行："
+      + "举证要的正是完整时间线，而这一行的 sourcePage 记下是从隐私中心点的",
+      r.status === 200 && pvCw.action === "WITHDRAW" && pvCw.consentType === "EMOTION_SHARE"
+      && pvCw.sourcePage === "privacy-center" && !!pvCw.id,
+      r.status + " action=" + pvCw.action + " type=" + pvCw.consentType + " 键数=" + Object.keys(pvCw).length);
+
+    r = await pvReq("DELETE", pvToken, "/api/privacy/consent/NOT_A_TYPE");
+    check("22", "授权事项不在五类白名单 → 400/10001：闸门在写库之前，不给「撤回一个不存在的事项」留下流水",
+      r.status === 400 && code(r) === "10001", r.status + " code=" + code(r) + " msg=" + (r.json && r.json.msg));
+
+    r = await pvReq("POST", pvToken, "/api/privacy/retention/run");
+    check("22", "普通账号打 POST /api/privacy/retention/run → 403/10003：这条端点会真删数据，"
+      + "角色闸写在方法里而不是靠路径前缀（前缀挡不住哪天有人把这条挂到别的 mapping 上）",
+      r.status === 403 && code(r) === "10003", r.status + " code=" + code(r));
+
+    r = await pvReq("POST", pvToken, "/api/privacy/deactivate");
+    const pvDv = bodyOf(r);
+    check("22", "提交注销 → 200 + status=DELETED + cooling=true + purgeAt 已排期（=提交时刻+30 天）："
+      + "只打冷静期标记，一行数据都不删——误操作注销是这类产品最常见的用户事故",
+      r.status === 200 && pvDv.status === "DELETED" && pvDv.cooling === true
+      && pvDv.coolingDays === 30 && pvDv.coolingRemainDays >= 29 && !!pvDv.purgeAt
+      && !!pvDv.message && String(pvDv.message).indexOf("30") >= 0,
+      "status=" + pvDv.status + " purgeAt=" + pvDv.purgeAt + " 剩余天=" + pvDv.coolingRemainDays);
+
+    r = await pvReq("GET", pvToken, "/api/privacy/summary");
+    check("22", "🔴 注销提交成功后旧令牌立刻失效（401/10002）：会话不作废的话，「我已经注销了」与"
+      + "「系统还在记我的动作（浏览埋点、AI 调用日志）」会同时为真，这在合规叙述里站不住。"
+      + "这里回的是 10002 而不是 10005，而且是故意的：JwtAuthFilter 把 TOKEN_INVALID 吞掉、请求继续以匿名身份走链，"
+      + "最终由 requireLogin 抛 10002——不给探测者区分「令牌坏了」和「没带令牌」的信号，这正是 NFR7 要的形状。"
+      + "（本轮踩坑自首：这条原本按源码注释写成 10005，实测打不出来。错误码断言必须来自真跑，"
+      + "因为 Service 抛的码与响应里的码之间还隔着 Filter 与 ExceptionHandler 两层改写）",
+      r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+
+    r = await rlSafe(function () {
+      return send("POST", "/api/auth/login", jsonBody({
+        username: pvName, password: "Smoke#2026x",
+        captchaId: captchaId || "00000000000000000000000000000000", captchaCode: "ZZZZ"
+      }));
+    });
+    const pvToken2 = r.json && r.json.data ? r.json.data.accessToken : null;
+    check("22", "冷静期内重新登录 → 200 并自动撤回注销：需求把注销定义成 30 天可反悔窗口，"
+      + "而「反悔」在真实产品里唯一的入口就是把账号登进来；要求先点按钮撤回会做出「注销了的人永远回不来」",
+      r.status === 200 && !!pvToken2, r.status + " code=" + code(r) + " token=" + (pvToken2 ? "拿到" : "无"));
+
+    if (pvToken2) {
+      r = await pvReq("GET", pvToken2, "/api/privacy/summary");
+      const pvS2 = bodyOf(r);
+      check("22", "登录撤回后概览真的回落：status=ACTIVE、cooling=false、deactivateAt/purgeAt 都被写回空。"
+        + "这两列必须由显式 @Update 写回（MyBatis-Plus 默认 NOT_NULL 策略会把 null 静默跳过，"
+        + "内存改了、库里没改、接口照样回 200——这是本轮最贵的一颗坑）",
+        r.status === 200 && pvS2.accountStatus === "ACTIVE" && pvS2.cooling === false
+        && (pvS2.deactivateAt === undefined || pvS2.deactivateAt === null)
+        && (pvS2.purgeAt === undefined || pvS2.purgeAt === null),
+        "status=" + pvS2.accountStatus + " cooling=" + pvS2.cooling
+        + " deactivateAt=" + nj(pvS2.deactivateAt) + " purgeAt=" + nj(pvS2.purgeAt));
+
+      r = await pvReq("POST", pvToken2, "/api/privacy/restore");
+      check("22", "不在冷静期打 POST /api/privacy/restore → 400/10001：撤回注销只对着「还在期内」这件事，"
+        + "不给一个已经恢复的账号再点亮一次。happy path 由 PrivacyAccountServiceTest 钉住——"
+        + "HTTP 侧到不了那里，因为提交注销的那一刻会话就被作废，而重新登录会自动撤回（上面两条就是这条链路的两端）",
+        r.status === 400 && code(r) === "10001", r.status + " code=" + code(r) + " msg=" + (r.json && r.json.msg));
+    }
+
+    info("22", "SQL 取证（root 直连复核，脚本自证不算）：① 注销只改一行 user 的三个字段，"
+      + "导出任务的成功态行数与 history 读数一致；② user_consent 里这个账号必须留下 GRANT 与 WITHDRAW 两条流水，"
+      + "而不是同一行被改过；③ 隐私产物目录里应有 .json 与 .zip 各一份且文件名不含口令。",
+      "SELECT id,username,status,deactivate_at,purge_at FROM user WHERE username='" + pvName + "';"
+      + " SELECT id,user_id,fmt,status,file_bytes,expire_at,LEFT(file_path,40) AS fp FROM export_task"
+      + " WHERE user_id=(SELECT id FROM user WHERE username='" + pvName + "') ORDER BY id;"
+      + " SELECT id,consent_type,action,content_version,source_page FROM user_consent"
+      + " WHERE user_id=(SELECT id FROM user WHERE username='" + pvName + "') ORDER BY id;");
+  } else {
+    info("22", "隐私账号没注册成功，本步整体跳过（根因在上面那条注册断言）", "");
+  }
+
+  // ---------- 23 详情页停留上报（任务 T3.10 收口 + T4.17 前端接线 · 需求 FR5.1「≥3s 计 1 分、完读 2 分」）----------
+  // FR5.1 的判据是「停留」，而停留只有浏览器量得到，所以这条端点是需求 §9.1 清单里没有的契约漂移。
+  // GET /api/posts/{id} 不写 user_action（只加 view_cnt），否则「点开就退出的秒退」全变成正样本。
+  const dwPost = function (token, id, rawBody) {
+    return rlSafe(function () {
+      return send("POST", "/api/posts/" + id + "/read",
+        token ? asToken(token, rawBody === null || rawBody === undefined
+          ? { headers: {} } : jsonBody(rawBody)) : { headers: {} });
+    });
+  };
+  // 🔴 本步自带夹具（本轮踩坑自首）：这一版最初直接复用第 12 步的 publicId 做正向断言，3.2s 与 8s 两条全 FAIL。
+  // 不是接口坏了——第 17 步已经把那条帖举报满 3 人转成 HUMAN_REVIEW，第三人自然看不见，dwellCountableFor
+  // 返回 false 是正确行为；而更早那三条「不足阈值」的 PASS 同样是假绿（本来就该 false，只是理由是「不可见」
+  // 而不是「不够久」）。判据：复用前序步骤的夹具做新断言，等于把上游的副作用算成下游的 bug。
+  const dwAuthor = await regAccount("smoke_dw_" + stamp, "冒烟停留作者");
+  let dwPubId = null, dwPrivId = null;
+  const dwBody = function (token, body) {
+    return rlSafe(function () { return send("POST", "/api/posts", asToken(token, jsonBody(body))); });
+  };
+
+  r = await dwBody(dwAuthor, { title: "冒烟·停留计时", content: "这是一条专门用来验停留上报的公开帖，正文干净无敏感词。" });
+  const dwPub = bodyOf(r);
+  dwPubId = dwPub && dwPub.id ? dwPub.id : null;
+  check("23", "自造夹具·作者发一条公开帖并确认真的是 PUBLISHED（正向断言必须打在刚造的这条上）",
+    r.status === 200 && !!dwPubId && dwPub.status === "PUBLISHED",
+    r.status + " id=" + dwPubId + " status=" + dwPub.status);
+
+  r = await dwBody(dwAuthor, { title: "冒烟·停留私密", content: "这条设为仅自己可见，用来验不可见就不记分。", visibility: "private" });
+  const dwSeed2 = bodyOf(r);
+  dwPrivId = dwSeed2 && dwSeed2.id ? dwSeed2.id : null;
+  check("23", "自造夹具·同一个作者再发一条私密帖（第三人拿它的 id 上报应当不记分）",
+    r.status === 200 && !!dwPrivId && dwSeed2.visibility === "private",
+    r.status + " id=" + dwPrivId + " visibility=" + dwSeed2.visibility);
+
+  if (dwAuthor && dwPubId && dwPrivId && accessToken && publicId) {
+    r = await dwPost(null, dwPubId, { durationMs: 5000, completed: true });
+    check("23", "未登录上报停留 → 401/10002：埋点的「谁在读」只来自 JWT，请求体里没有 user_id 这种字段",
+      r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+
+    r = await dwPost(accessToken, dwPubId, { durationMs: 1200 });
+    const dwShort = bodyOf(r);
+    check("23", "第三人只读 1.2 秒 → 200 且 viewRecorded=false、readThroughRecorded=false，thresholdMs 回显 3000："
+      + "不够阈值是一次完全成功的上报，回 4xx 会让前端在 pagehide 里收到一个无法处理的错误，"
+      + "而「你看了 1.2 秒」既不是错误也不值得弹提示（这条现在是真绿：它打在一条刚确认可见的帖上）",
+      r.status === 200 && dwShort.postId === dwPubId && dwShort.thresholdMs === 3000
+      && dwShort.viewRecorded === false && dwShort.readThroughRecorded === false,
+      r.status + " " + nj(dwShort));
+
+    r = await dwPost(accessToken, dwPubId, null);
+    const dwNone = bodyOf(r);
+    check("23", "空请求体（连 body 都没有的 pagehide）→ 200 + viewRecorded=false：@RequestBody(required=false) "
+      + "加「null 判不足阈值」，浏览器在离开页面那一刻发什么是它说了算，不是我们说了算",
+      r.status === 200 && dwNone.viewRecorded === false, r.status + " " + nj(dwNone));
+
+    r = await dwPost(accessToken, dwPubId, { durationMs: -5 });
+    const dwNeg = bodyOf(r);
+    check("23", "负数时长 → 200 + viewRecorded=false 而不是 400：这条请求体刻意不加 @Min/@Positive，"
+      + "因为一个时钟回拨或脚本乱填的负数只是「无意义的数」，为它返 400 换来的只是前端在卸载阶段多一个错误分支",
+      r.status === 200 && dwNeg.viewRecorded === false, r.status + " " + nj(dwNeg));
+
+    r = await dwPost(accessToken, dwPubId, { durationMs: 3200 });
+    const dwOk = bodyOf(r);
+    check("23", "第三人读满 3.2 秒 → viewRecorded=true（FR5.1 那条 3 秒线，weight=1.00）："
+      + "阈值由后端回显、前端只做展示，两处不是各写一份规则",
+      r.status === 200 && dwOk.viewRecorded === true && dwOk.readThroughRecorded === false,
+      r.status + " " + nj(dwOk));
+
+    r = await dwPost(accessToken, dwPubId, { durationMs: 8000, completed: true });
+    const dwFull = bodyOf(r);
+    check("23", "读满 8 秒并滚到底 → viewRecorded=true + readThroughRecorded=true（完读单独记 read_through、weight=2.00）："
+      + "两个动作各写一行埋点而不是把 view 的分加倍，阶段 7 的召回要把「读完」当独立信号",
+      r.status === 200 && dwFull.viewRecorded === true && dwFull.readThroughRecorded === true,
+      r.status + " " + nj(dwFull));
+
+    r = await dwPost(dwAuthor, dwPubId, { durationMs: 9000, completed: true });
+    const dwOwner = bodyOf(r);
+    check("23", "作者本人读自己那条帖 → 200 但两条都不记：与 GET 详情里「作者不计浏览」是同一条 BR4"
+      + "（自己的互动不该把自己推上广场），判据复用 visibleTo 而不是另写一份",
+      r.status === 200 && dwOwner.viewRecorded === false && dwOwner.readThroughRecorded === false,
+      r.status + " " + nj(dwOwner));
+
+    r = await dwPost(accessToken, dwPrivId, { durationMs: 9000, completed: true });
+    const dwPriv = bodyOf(r);
+    check("23", "第三人拿别人私密帖的 id 上报 → 200 + 两条 false 且不返 30001/404：不可见的东西不给攒分，"
+      + "但这条接口是前端在离开页面时打的，旁路的拒绝不该变成用户可见的错误",
+      r.status === 200 && dwPriv.viewRecorded === false && dwPriv.readThroughRecorded === false,
+      r.status + " " + nj(dwPriv));
+
+    // 把本轮那颗坑钉成正面断言：第 17 步举报满 3 人转人工的那条帖，读多久都不该攒分。
+    r = await dwPost(accessToken, publicId, { durationMs: 5000, completed: true });
+    const dwFlagged = bodyOf(r);
+    check("23", "🔴 第三人读满 5 秒的是第 17 步被举报转人工的那条帖（id=" + publicId + "）→ 两条仍是 false："
+      + "被处置的帖不再产生隐式正样本，停留上报跟着审核态走。本轮它踩成 FAIL，改成正面断言之后 forever 护住这条口径",
+      r.status === 200 && dwFlagged.postId === publicId && dwFlagged.viewRecorded === false
+      && dwFlagged.readThroughRecorded === false,
+      r.status + " " + nj(dwFlagged));
+
+
+    r = await dwPost(accessToken, "abc", { durationMs: 9000 });
+    check("23", "id 不是数字 → 404/90006：路径带 id 必须是数字这一约束（PostController 那条 @PostMapping 上的正则），不加就会在 long 转换处炸成 500，"
+      + "那是「服务端有 bug」的假象而不是「资源不存在」",
+      r.status === 404 && code(r) === "90006", r.status + " code=" + code(r) + " msg=" + (r.json && r.json.msg));
+
+    let feMin = "";
+    try {
+      feMin = String((fs.readFileSync(path.join(ROOT, "frontend", "src", "api", "post.js"), "utf8")
+        .match(/VIEW_MIN_DURATION_MS = ([0-9]+)/) || [])[1] || "");
+    } catch (e) { feMin = ""; }
+    check("23", "🔴 前后端阈值同源核对：前端 api/post.js 里那个字面量必须等于后端回显的 thresholdMs。"
+      + "它是两份文件里各写一次的同一条线（JS 拿不到 Java 常量），改一处忘另一处就会变成"
+      + "「界面显示已读满 3 秒、埋点却没记分」，而且没有任何一处会报错",
+      feMin === "3000" && dwFull.thresholdMs === 3000,
+      "前端=" + (feMin || "没读到") + " 后端=" + dwFull.thresholdMs);
+
+    info("23", "SQL 取证：user_action 里第三人（smoke_runner）对刚造的公开帖 " + dwPubId + " 应当只有 view 与 read_through 两行"
+      + "（同一天重复上报由 UserActionMapper#upsert 合并、duration_ms 取更长的那次），"
+      + "而私密帖 " + dwPrivId + "、作者自看那一次、以及被举报转人工的 " + publicId + " 都不该有行。",
+      "SELECT id,action_type,target_id,scene,weight,duration_ms,created_at FROM user_action"
+      + " WHERE user_id=(SELECT id FROM user WHERE username=\"smoke_runner\") AND target_type=\"post\""
+      + " AND target_id IN (" + dwPubId + "," + dwPrivId + "," + publicId + ") ORDER BY id;");
+  } else {
+    info("23", "停留夹具（dwAuthor/dwPubId/dwPrivId/accessToken/publicId）有缺，本步断言整体跳过", "");
+  }
+
+  // ---------- 24 情绪周报去标识分享（任务 T4.20 ③ · 手册 §7.5 第 3 条 · 需求 FR3.5、BR13、NFR8）----------
+  // 这是阶段 4 在冒烟里的第一条 /api/emotions 链路，一次走通：写侧同意闸 → 补卡 → 周报 →
+  // 分享 → 幂等 → 越权 → 第三方实际读到的那条例文。单测（WeeklyReportShareServiceTest 17 例）
+  // 钉的是服务层判据，本步钉的是「这些判据在真 HTTP + 真 MySQL + 真审核链上仍然成立」。
+  //
+  // 🔴 打卡刻意只补两天：BR12 规定可信记录不足 3 天时不做趋势判断，服务层据此【不调模型】
+  // （WeeklyReportService.generate 的 accumulating 分支直接给模板文案）。本步要钉的四件事
+  // ——授权、越权、幂等、去标识——一件都不靠 LLM 文案成立，所以冒烟可以零成本反复跑；
+  // 模型那条路另有 T4.20 的 ai_call_log 取证与 §7.4 现场演示负责，不在这里重复烧钱。
+  const shWeekDate = function (offsetFromLastMonday) {
+    const d = new Date();
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - 7 + offsetFromLastMonday);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0")
+      + "-" + String(d.getDate()).padStart(2, "0");
+  };
+  const shW0 = shWeekDate(0), shW1 = shWeekDate(1), shW6 = shWeekDate(6);
+  const shTitle = "情绪周报 · " + shW0 + " ~ " + shW6;
+  const shReq = function (method, token, p, reqBody) {
+    const headers = {};
+    if (token) { headers.Authorization = "Bearer " + token; }
+    if (reqBody !== undefined && reqBody !== null) {
+      headers["Content-Type"] = "application/json";
+      headers["Content-Length"] = Buffer.byteLength(reqBody);
+    }
+    return rlSafe(function () { return send(method, p, { headers: headers, body: reqBody }); });
+  };
+  const shJson = function (o) { return JSON.stringify(o); };
+  // 🔴 本步自带 msgOf/hasStr：第 21 步那两个取数器是 if 块里的块作用域常量，在这里够不着
+  // （同一件事在 pvReq 那段注释里已经记过一次了，别再假定「前面定义过就能用」）。
+  const shMsgOf = function (rr) { return (rr.json && rr.json.msg) || ""; };
+  const shHas = function (v, needle) {
+    return String(v === undefined || v === null ? "" : v).indexOf(needle) >= 0;
+  };
+  // 打卡原文哨兵：这个词面只该活在 emotion_record.text_snippet 里。
+  // 它要是出现在分享帖正文里，就是「分享把原始记录一起公开了」——BR13 最贵的一种破法。
+  const shSentinel = "冒烟哨兵" + stamp;
+  const shA = await regAccount("smoke_sha_" + stamp, "冒烟分享甲");
+  const shB = await regAccount("smoke_shb_" + stamp, "冒烟分享乙");
+  check("24", "注册两名一次性账号（甲=周报作者，乙=越权尝试者兼第三方读者）",
+    !!shA && !!shB, "甲=" + !!shA + " 乙=" + !!shB);
+
+  let shReportId = null, shPostId = null, shSummary = "";
+  if (shA && shB) {
+    r = await shReq("POST", shA, "/api/emotions/checkin",
+      shJson({ emotion: "joy", intensity: 4, recordDate: shW0, note: shSentinel }));
+    check("24", "🔴 没授予 SENSITIVE_INFO 就打卡 → 403/20005：情绪记录是敏感个人信息，"
+      + "同意闸排在写库之前（与 ChatService 同一道闸、同一个码）。注册时没勾「单独同意」的人，"
+      + "不该因为「打卡按钮正好在这儿」就被动留下数据",
+      r.status === 403 && code(r) === "20005", r.status + " code=" + code(r) + " msg=" + shMsgOf(r));
+
+    r = await shReq("POST", shA, "/api/users/me/consents", shJson({
+      consentType: "SENSITIVE_INFO", action: "GRANT",
+      contentVersion: "v1.0", sourcePage: "smoke-step-24" }));
+    const shGrant = bodyOf(r);
+    check("24", "授予敏感信息单独同意 → 200 + 追加一条 action=GRANT 的流水（sourcePage 记下是在哪一步点的）",
+      r.status === 200 && shGrant.action === "GRANT" && shGrant.consentType === "SENSITIVE_INFO"
+      && shGrant.sourcePage === "smoke-step-24", r.status + " " + nj(shGrant));
+
+    r = await shReq("POST", shA, "/api/emotions/checkin",
+      shJson({ emotion: "joy", intensity: 4, recordDate: shW0, note: shSentinel }));
+    const shCk1 = bodyOf(r);
+    check("24", "授权之后同一次打卡重放 → 200 真落库：channel=manual、source=checkin 由服务端定，"
+      + "客户端全程没有机会报 confidence（被动识别与主动打卡的置信度口径不能混）",
+      r.status === 200 && !!shCk1.id && shCk1.channel === "manual" && shCk1.source === "checkin"
+      && shCk1.recordDate === shW0, r.status + " " + nj(shCk1));
+
+    r = await shReq("POST", shA, "/api/emotions/checkin",
+      shJson({ emotion: "sadness", intensity: 2, recordDate: shW1, note: "周末有点累" }));
+    const shCk2 = bodyOf(r);
+    check("24", "第二天补卡（上一个自然周共 2 天）→ 200，补卡日期落在 30 天窗口内",
+      r.status === 200 && !!shCk2.id && shCk2.recordDate === shW1 && shCk2.emotion === "sadness",
+      r.status + " " + nj(shCk2));
+
+    r = await shReq("POST", shA, "/api/emotions/checkin",
+      shJson({ emotion: "envy", intensity: 3, recordDate: shW0 }));
+    check("24", "七类之外的标签 → 400/10001 且文案把合法取值整串列出：需求 §1.5 不含 Plutchik 的惊讶/嫉妒，"
+      + "取值域以 EmotionPrior.LABELS 为唯一出处，前端与后端不各维护一份映射",
+      r.status === 400 && code(r) === "10001" && shHas(shMsgOf(r), "neutral") && shHas(shMsgOf(r), "disgust"),
+      r.status + " code=" + code(r) + " msg=" + shMsgOf(r));
+
+    r = await shReq("GET", shA, "/api/emotions/weekly-report?week=last");
+    const shRep = bodyOf(r);
+    shReportId = shRep.id || null;
+    shSummary = String(shRep.summaryText || "");
+    check("24", "读上一自然周的周报 → 200 当场生成并 upsert 回读：id 非空、周区间与打卡的两天严格对齐、"
+      + "accumulating=true（2 天 < BR12 的 3 天线）、generator=template（本步不烧 token，见上）",
+      r.status === 200 && !!shReportId && shRep.weekStart === shW0 && shRep.weekEnd === shW6
+      && shRep.accumulating === true && shRep.generator === "template" && shRep.checkinDays === 2
+      && !!shRep.summaryText,
+      r.status + " " + nj({ id: shReportId, weekStart: shRep.weekStart, weekEnd: shRep.weekEnd,
+        checkinDays: shRep.checkinDays, accumulating: shRep.accumulating, generator: shRep.generator }));
+    check("24", "分享位出参在读取时就是「未分享」：shared=false 且 sharedPostId=null——"
+      + "前端按钮的文案读的是后端这两个字段，不是本地状态（否则刷新一次按钮就自己退回「分享」）",
+      shRep.shared === false && shRep.sharedPostId === undefined,
+      "shared=" + shRep.shared + " sharedPostId=" + String(shRep.sharedPostId));
+
+    r = await shReq("POST", null, "/api/emotions/weekly-report/" + shReportId + "/share");
+    check("24", "未登录打分享端点 → 401/10002：这条会真发一条公开帖，登录是最低门槛；"
+      + "请求体里没有 user_id 这种东西，作者身份只来自 JWT",
+      r.status === 401 && code(r) === "10002", r.status + " code=" + code(r));
+
+    r = await shReq("POST", shB, "/api/emotions/weekly-report/" + shReportId + "/share");
+    check("24", "🔴 乙拿甲的周报 id 打分享 → 403/10003 且甲的周报没被标记：越权闸写在服务层而不是靠前端藏按钮。"
+      + "分享出去的内容就是别人的心情记录，这是本项目里最贵的一类越权（NFR8 / BR13）",
+      r.status === 403 && code(r) === "10003", r.status + " code=" + code(r));
+
+    r = await shReq("POST", shA, "/api/emotions/weekly-report/999999999/share");
+    check("24", "分享一个不存在的周报 id → 404/90006（不是 30001：这个 id 指的是「周报」这个资源，不是帖子）",
+      r.status === 404 && code(r) === "90006", r.status + " code=" + code(r) + " msg=" + shMsgOf(r));
+
+    r = await shReq("POST", shA, "/api/emotions/weekly-report/" + shReportId + "/share");
+    const shV1 = bodyOf(r);
+    shPostId = shV1.postId || null;
+    check("24", "甲首次分享 → 200 + postId 非空 + alreadyShared=false + 周区间原样回显",
+      r.status === 200 && code(r) === "0" && !!shPostId && shV1.reportId === shReportId
+      && shV1.alreadyShared === false && shV1.weekStart === shW0 && shV1.weekEnd === shW6,
+      r.status + " " + nj(shV1));
+    check("24", "首次分享走完整审核链并原样回显状态：本条正文干净 ⇒ PUBLISHED。"
+      + "机审没放行时谎称「已发布」比失败更糟，所以 postStatus 是发帖终态而不是恒 0",
+      shV1.postStatus === "PUBLISHED" && !!shV1.displayName,
+      "postStatus=" + shV1.postStatus + " 展示名=" + shV1.displayName + " tip=" + String(shV1.tip));
+    check("24", "分享出来的帖是匿名马甲（不是昵称）：展示名以「匿名屿民」开头。"
+      + "周报带着一周的心情走向，实名公开等于把「这周我很低落」挂到身份证上",
+      String(shV1.displayName || "").indexOf("匿名屿民") === 0, "展示名=" + shV1.displayName);
+
+    r = await shReq("POST", shA, "/api/emotions/weekly-report/" + shReportId + "/share");
+    const shV2 = bodyOf(r);
+    check("24", "🔴 同一个用户连点两次分享 → 200 + postId 与第一次逐字相同 + alreadyShared=true："
+      + "幂等键是周报行上的 shared_flag/shared_post_id，不是「再发一条一样的」。"
+      + "答辩现场手抖双击不该在广场上留下两条复读机",
+      r.status === 200 && shV2.postId === shPostId && shV2.alreadyShared === true
+      && shV2.reportId === shReportId,
+      r.status + " 第一次=" + shPostId + " 第二次=" + String(shV2.postId) + " " + nj(shV2));
+    check("24", "回放那一路不重新读帖子：postStatus/displayName/tip 一律为 null（序列化后这三个键直接缺席）。"
+      + "帖子的权威状态只有帖子详情一个出处，在这里复制第二份必然产生口径分裂（阶段 3 的「评论数分裂」就是这么来的）",
+      shV2.postStatus === undefined && shV2.displayName === undefined && shV2.tip === undefined,
+      "键=" + Object.keys(shV2).join(","));
+
+    r = await shReq("GET", shA, "/api/emotions/weekly-report?week=last");
+    const shRep2 = bodyOf(r);
+    check("24", "分享之后再读周报 → shared=true + sharedPostId=那条帖 id，且没有重新生成（createdAt 原样、id 不变）："
+      + "按钮从「分享（去标识）」变成「已分享 · 去看那条帖」靠的是这一行读数",
+      r.status === 200 && shRep2.shared === true && shRep2.sharedPostId === shPostId
+      && shRep2.id === shReportId
+      && shRep2.createdAt === shRep.createdAt,
+      r.status + " " + nj({ id: shRep2.id, shared: shRep2.shared, sharedPostId: shRep2.sharedPostId,
+        createdAt: shRep2.createdAt }));
+
+    r = await shReq("GET", shB, "/api/posts/" + shPostId);
+    const shPost = bodyOf(r);
+    check("24", "第三方（乙）读这条分享帖 → 200 + 标题逐字等于「情绪周报 · 周区间」，标题里没有人、没有数字、没有主导情绪",
+      r.status === 200 && shPost.title === shTitle,
+      r.status + " 实际标题=" + String(shPost.title) + " 期望=" + shTitle);
+    check("24", "🔴 正文只放三样：周区间 + 周报结论原句 + 生成方式，另外钉住口径声明两句"
+      + "（「心屿不做诊断」「分享已去标识」）——模板冒充模型结论是 FR3.5 明令禁止的一件事",
+      String(shPost.content || "").indexOf(shSummary) >= 0
+      && String(shPost.content || "").indexOf("心屿不做诊断") >= 0
+      && String(shPost.content || "").indexOf("分享已去标识") >= 0
+      && (String(shPost.content || "").indexOf("AI 陪伴模型撰写") >= 0
+        || String(shPost.content || "").indexOf("本地模板") >= 0),
+      "正文前 120 字=" + String(shPost.content || "").slice(0, 120).replace(/\n/g, "⏎"));
+    check("24", "🔴 去标识在 HTTP 侧同样成立：整条响应里①不含打卡原文哨兵「" + shSentinel + "」"
+      + "（emotion_record.text_snippet 的那句「" + shSentinel + "」确实落库了，只是没被带出来）"
+      + "②不含作者昵称「冒烟分享甲」③authorId 键整个缺席（留在响应体里，前端不显示也照样能被抓包反查）",
+      String(shPost.content || "").indexOf(shSentinel) < 0
+      && JSON.stringify(r.json).indexOf(shSentinel) < 0
+      && JSON.stringify(r.json).indexOf("冒烟分享甲") < 0
+      && !("authorId" in shPost) && shPost.anonymous === true,
+      "authorId键=" + ("authorId" in shPost) + " anonymous=" + shPost.anonymous
+      + " 展示名=" + shPost.displayName);
+    check("24", "这条帖是 type=normal 的普通帖、不自动销毁：周报是「我自己愿意留下的公开记录」，"
+      + "不是树洞；树洞那种到期物理删除的语义用在这里会让用户找不到自己分享过的东西",
+      shPost.type === "normal" && (shPost.autoDestroyAt === undefined || shPost.autoDestroyAt === null)
+      && shPost.visibility === "public",
+      "type=" + shPost.type + " visibility=" + shPost.visibility + " autoDestroyAt=" + String(shPost.autoDestroyAt));
+
+    r = await shReq("GET", shA, "/api/emotions/weekly-report?week=last&refresh=true");
+    const shRep3 = bodyOf(r);
+    check("24", "🔴 refresh=true 重算之后 shared 仍然是 true、sharedPostId 仍然是原来那条帖："
+      + "shared_flag 不在 upsert 的 ON DUPLICATE UPDATE 列表里，重算周报不该把「我已分享」洗掉，"
+      + "否则用户再点一次就发出第二条（这一条正是上一轮证伪 A 打红过的位置）",
+      r.status === 200 && shRep3.shared === true && shRep3.sharedPostId === shPostId,
+      r.status + " shared=" + shRep3.shared + " sharedPostId=" + String(shRep3.sharedPostId));
+
+    info("24", "SQL 取证（root 直连复核，脚本自证不算）：① 这条周报的 shared_flag=1 且 shared_post_id="
+      + shPostId + "；② post 表里标题为「" + shTitle + "」的行只有一条（幂等不是靠应用层记性）；"
+      + "③ 那条 post 的 is_anonymous=1、alias_id 非空、user_id=甲；④ 甲的两句打卡原文都还在 emotion_record 里"
+      + "（分享没有顺手删原始数据，撤回分享是另一件事）；⑤ 本步留下的一次性账号 smoke_sha_/smoke_shb_ 进「待清」清单。",
+      "SELECT id,user_id,week_start,week_end,shared_flag,shared_post_id FROM weekly_report WHERE id="
+      + shReportId + "; SELECT id,user_id,is_anonymous,alias_id,status,type,title FROM post WHERE id="
+      + shPostId + "; SELECT COUNT(*) AS same_title_rows FROM post WHERE title=\"" + shTitle + "\";"
+      + " SELECT id,record_date,label,intensity,LEFT(text_snippet,24) AS snippet FROM emotion_record"
+      + " WHERE user_id=(SELECT id FROM user WHERE username=\"smoke_sha_" + stamp + "\") ORDER BY id;");
+  } else {
+    info("24", "分享夹具（smoke_sha_/smoke_shb_）没注册成功，本步断言整体跳过", "");
   }
 
   console.log("");

@@ -14,6 +14,7 @@ import com.mindisle.entity.UserProfile;
 import com.mindisle.mapper.UserConsentMapper;
 import com.mindisle.mapper.UserMapper;
 import com.mindisle.mapper.UserProfileMapper;
+import com.mindisle.privacy.CoolingState;
 import com.mindisle.security.JwtService;
 import com.mindisle.security.JwtService.TokenPair;
 import java.time.Duration;
@@ -168,7 +169,7 @@ public class AuthService {
       recordFailure(failKey);
       throw new BizException(ErrorCode.LOGIN_FAILED);
     }
-    if (!"ACTIVE".equals(user.getStatus())) {
+    if (!allowCoolingOrReject(user)) {
       // 停用/封禁是「口令对但不给进」，不计入失败锁定，让用户直接看到 20003 的原因
       throw new BizException(ErrorCode.USER_DISABLED);
     }
@@ -198,10 +199,47 @@ public class AuthService {
     if (user == null) {
       throw new BizException(ErrorCode.USER_NOT_FOUND);
     }
-    if (!"ACTIVE".equals(user.getStatus())) {
+    if (!allowCoolingOrReject(user)) {
       throw new BizException(ErrorCode.USER_DISABLED);
     }
     return toResponse(user, pair);
+  }
+
+  /**
+   * 账号状态闸门：ACTIVE 直接放行；DELETED 且仍在冷静期内视为「撤回注销」并放行；其余一律拒绝。
+   *
+   * <p><b>为什么登录路径里藏着一次写库</b>（任务 T4.21 · 手册 §7.5「冷静期内登录即撤回注销」）：
+   * 需求把注销定义成 30 天可反悔窗口，而「反悔」在真实产品里唯一的入口就是把账号登进来。
+   * 如果要求用户先去点一个「撤回注销」按钮，他就必须先能登录，而登录又被状态闸拦住 ——
+   * 这是一个自相矛盾的闭环，做出来就是「注销了的人永远回不来」。
+   * 所以闸门在这里顺便把状态改回 ACTIVE，而不是拒绝之后再让他找入口。</p>
+   *
+   * <p><b>为什么不用 {@code updateById}</b>：要把 {@code deactivate_at} 与 {@code purge_at}
+   * 写回 null，而 MyBatis-Plus 默认字段策略 NOT_NULL 会让这两列静默不写（详见
+   * {@code UserMapper#restoreActive} 的注释）。这里用的是那条显式 @Update。</p>
+   *
+   * <p><b>{@code n == 0} 为什么拒绝而不是放行</b>：前置态不匹配意味着这一行在本次读取之后
+   * 已经被别的入口改过（管理员封禁、清除任务已经动手）。这时「以用户视角放行」等于
+   * 把一个已经不处于冷静期的账号点亮 —— 宁可让用户看到 20003 并重新登录一次。</p>
+   *
+   * @return true 放行；false 由调用方抛 {@code USER_DISABLED}
+   */
+  private boolean allowCoolingOrReject(User user) {
+    if (CoolingState.ACTIVE.equals(user.getStatus())) {
+      return true;
+    }
+    LocalDateTime now = LocalDateTime.now();
+    if (!CoolingState.isCooling(user, now)) {
+      return false;
+    }
+    int n = userMapper.restoreActive(user.getId(), CoolingState.DELETED, CoolingState.ACTIVE);
+    if (n == 0) {
+      log.warn("冷静期内登录但状态已被改写，拒绝放行 id={} status={}", user.getId(), user.getStatus());
+      return false;
+    }
+    CoolingState.restore(user);
+    log.info("冷静期内登录，已自动撤回注销 id={} purge_at={}", user.getId(), user.getPurgeAt() == null ? "null" : user.getPurgeAt());
+    return true;
   }
 
   /** 登出：作废服务端白名单里的 access 令牌（当前单活动会话，见 JwtService 注释）。 */

@@ -23,7 +23,13 @@ export const logout = () => http.post('/auth/logout', {}, { silent: true })
  * GET /api/users/{id}/profile（T3.6）、GET /api/users/me/posts（T3.13）、
  * GET /api/notifications 与 POST /api/notifications/read（T3.11-b 站内通知，顶栏铃铛已接通）、
  * GET /api/feed/following（T3.17 关注流，首页「广场 / 关注」两个 Tab 已接通）、
- * GET /api/search/{posts,topics,users}（T3.9 站内搜索，/search 页已接通）。
+ * GET /api/search/{posts,topics,users}（T3.9 站内搜索，/search 页已接通）、
+ * POST /api/ai/chat/stream 与 GET/POST/DELETE /api/ai/conversations、
+ * GET /api/ai/conversations/{id}/messages、POST /api/ai/messages/{id}/feedback
+ * （阶段 4 的 AI 域 6 条，2026-09-24 按 web 包 @*Mapping 反推核对；/ai 页已接通多会话侧栏、
+ * 流式回复、旧会话回看与赞踩）。同一天的情绪域三条（POST /api/emotions/checkin、
+ * GET /api/emotions/profile、GET /api/emotions/weekly-report，外加 GET /api/emotions/checkins 回看）
+ * 也已从本表删掉：它们不再是「点了没反应」，/emotion 页在真浏览器里出图、写库、回看均已实测。
  * 后两批是 2026-09-23 按 web 包里的 @*Mapping 反推核对的。搜索这条不存在「从表里删掉旧的一行」，
  * 因为需求 §9.1 那条单接口 /search 后端从来没映射过 —— 它一落地就是三条路径。
  * 独立的「通知中心」整页仍属任务 3.16 —— 那是同一批接口的第二个消费者，不是接口没做，
@@ -35,10 +41,7 @@ export const logout = () => http.post('/auth/logout', {}, { silent: true })
  * 「该功能尚未实现」，所以前端照旧要把那句话显示出来，不许当成保存成功。</p>
  */
 export const NOT_IMPLEMENTED_YET = [
-  'GET  /api/feed/recommend（情绪感知协同过滤推荐）→ 阶段 6/7，接口在但直接返 90001',
+  'GET  /api/feed/recommend（情绪感知协同过滤推荐）→ 阶段 7（T7.2/T7.5 召回 · T7.4 EmotionBoost），接口在但直接返 90001',
   'PATCH/DELETE /api/posts/{id}（编辑进重审、树洞到期销毁）→ 任务 3.15',
-  'POST /api/emotions/checkin（情绪打卡与档案）→ 阶段 4',
-  'POST /api/ai/chat/stream（SSE 流式对话）→ 阶段 4',
-  'GET/DELETE /api/ai/conversations（会话历史）→ 阶段 4',
   'WS /ws/pm（私信实时推送）→ 阶段 5'
 ]

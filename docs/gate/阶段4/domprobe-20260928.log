@@ -1,0 +1,170 @@
+
+ WARN  inlineDynamicImports option is ignored because codeSplitting: false is set.
+
+[EMPTY_IMPORT_META] `import.meta` may not be a valid syntax with the `iife` output format.
+    ╭─[ \0vite/preload-helper.js:17:8 ]
+    │
+ 17 │          if (import.meta.resolve) return import.meta.resolve(specifier);
+    │              ─────┬─────  
+    │                   ╰─────── This `import.meta` will be replaced with an empty object (`{}`) automatically. If this is desired, you can suppress this warning by adding `transform.define: { 'import.meta': {} }`. If `import.meta` needs to be kept as-is, you need to set the output format to `esm`.
+────╯
+
+[EMPTY_IMPORT_META] `import.meta` may not be a valid syntax with the `iife` output format.
+    ╭─[ \0vite/preload-helper.js:17:36 ]
+    │
+ 17 │          if (import.meta.resolve) return import.meta.resolve(specifier);
+    │                                          ─────┬─────  
+    │                                               ╰─────── This `import.meta` will be replaced with an empty object (`{}`) automatically. If this is desired, you can suppress this warning by adding `transform.define: { 'import.meta': {} }`. If `import.meta` needs to be kept as-is, you need to set the output format to `esm`.
+────╯
+
+[EMPTY_IMPORT_META] `import.meta` may not be a valid syntax with the `iife` output format.
+    ╭─[ \0vite/preload-helper.js:21:5 ]
+    │
+ 21 │           import.meta.url
+    │           ─────┬─────  
+    │                ╰─────── This `import.meta` will be replaced with an empty object (`{}`) automatically. If this is desired, you can suppress this warning by adding `transform.define: { 'import.meta': {} }`. If `import.meta` needs to be kept as-is, you need to set the output format to `esm`.
+    │ 
+    │ Help: If you want to polyfill `import.meta.url` like Rollup does, check out the Document: https://rolldown.rs/in-depth/non-esm-output-formats#well-known-import-meta-properties
+────╯
+
+
+===== DOM PROBE（jsdom + 真实 Vite 代理 + 真实后端）=====
+PASS [1] 探针包挂载成功（createApp + pinia + router + ElementPlus 全跑通）   <- router={"path":"/"}
+PASS [1] 深链 /me/posts 被路由守卫放行并停在 my-posts（没有被踢去登录页）   <- /me/posts
+PASS [1] 浏览器地址栏停在 /me/posts（history 模式深链可用，不是 redirect 之后改了地址）   <- http://127.0.0.1:5173/me/posts
+PASS [2] U12 真渲染出 4 张卡片（后端 mine 回 4 条：42/41/39/40）   <- titles=冒烟·匿名树洞|冒烟·被看见|冒烟·仅自己可见|冒烟·转人工
+PASS [2] U12 四条标题逐字来自数据库   <- 冒烟·匿名树洞|冒烟·被看见|冒烟·仅自己可见|冒烟·转人工
+PASS [2] 状态徽标：已发布 x3 + 人工审核中 x1（status 字段真的接到了卡片上）   <- 树洞,匿名,已发布,分享,已发布,分享,已发布,仅自己可见,分享,人工审核中
+PASS [2] 私密徽标只有 1 条「仅自己可见」（private 只有 post 39）   <- 树洞,匿名,已发布,分享,已发布,分享,已发布,仅自己可见,分享,人工审核中
+PASS [2] U12 计数行走页码模式的 total   <- 🏝心屿校园心理陪伴社区广场搜索发布屿屿情绪我的隐私需要帮助？MindIsle 心屿 v0.0.1-SNAPSHOT后端连接正常🔔屿友退出我的帖子这里能看到「仅自己可见」和「还没过审」的帖子。广场上找不到它们，那是可见性分工，不是系统把帖吞了。刷新账户中心去发帖全部已发布人工审核中未通过我发过 4 条 · 已加载 4
+PASS [2] U12 自己的帖子上没有「不感兴趣」按钮（dismissable=false）
+PASS [2] 作者名可点的卡片是 3 张而不是 4 张（匿名帖 authorId 为空 → 天然不可点）   <- links=3
+PASS [2] 读接口是 silent 的：没有弹出任何全局消息条
+PASS [2] 「这一页还欠什么」写白段渲染
+PASS [3] 切到「未通过」Tab → 该账号没有 REJECTED 帖，界面给空态而不是留着上一份列表   <- 0 张卡
+PASS [3] 切到「人工审核中」→ 只剩待审那条（40）   <- 冒烟·转人工
+PASS [3] 切回「全部」重新拉回 4 条（reload 丢弃旧列表而不是叠加）
+PASS [3] 整个切 Tab 过程没有冒全局错误条
+PASS [4] 点作者名进 U11 主页，而不是进详情页（.who 上的 click.stop 生效）   <- /user/23
+PASS [4] U11 只渲染 1 张卡（公开 + 已过审 + 非匿名：post 41）   <- 冒烟·被看见
+PASS [4] U11 不出现匿名树洞那条（前端这条链路就是解匿面，测它比测后端更容易被忽略）
+PASS [4] U11 标题按路由参数渲染
+PASS [4] U11 资料卡渲染（昵称 + 四个统计来自 GET /api/users/:id/profile）
+PASS [4] 自己看自己不出现「关注」按钮，改出一行说明（不存在「关注自己」这种关系）
+PASS [4] U11 写白段已改写为「刻意有什么、刻意没有什么」
+PASS [5] 主页 id 换成不存在的用户：旧卡片被清空并给专属告警（组件复用时不 watch 就会停在上一家）   <- 0 张卡 / /user/99999999
+PASS [6] （前置）回到自己的主页，资料卡真的又画出来了 —— 下一次要判的是「有卡片 → 地址栏改坏」这条边   <- card=true path=/user/23
+PASS [6] /user/abc 给「id 不是数字」的专属提示，而不是发一个注定 404 的请求再显示空白；上一张资料卡必须跟着一起消失   <- cardCleared=true cards=0
+PASS [7] 别人主页出现一颗「关注」按钮（未关注态文案，且不是自己的主页）   <- id=454 btns=["关注"]
+PASS [7] 别人主页资料卡取到了才画按钮：没有「资料卡暂时取不到」的降级行，统计行也在
+PASS [7] 这一跳落在未关注态（文案是「关注」而不是「已关注」）
+PASS [8] 广场每张卡片底部都有两颗互动按钮（赞 / 收藏），文本带后端回来的计数   <- cards=20 acts=赞 0,收藏 0,赞 0,收藏 0
+PASS [8] 互动条没把「浏览/评论」挤掉（旧字段还在，只是位置让给了按钮）
+PASS [9] U4 详情页评论区真渲染出 19 棵一级楼（GET /api/posts/141/comments 走的是 Vite 代理）   <- threads=19 rows=19
+PASS [9] 匿名评论显示马甲名：第一楼作者名以「匿名屿民·」开头   <- 匿名屿民·柏舟
+PASS [9] 翻到底之后不再给「查看更多」按钮，改出一行「一级评论 19 条已全部加载」   <- 一级评论 19 条已全部加载。
+PASS [9] 卡片「评论 N」与评论区标题「评论 N」是同一个数（两处必须同口径）   <- 卡片=19 / 标题=19
+PASS [9] 评论区加载全程没有弹全局消息条（读接口是 silent 的）
+PASS [9] 发表框、字数计数、匿名勾选三样都在（没登录时才不画，这一版登录着）   <- 0 / 1000
+PASS [10] 一号楼默认只给 3 条回复预览（后端 REPLY_PREVIEW=3，replyTotal=5）   <- rows=4
+PASS [10] 预览不够就出现「查看 5 条回复」，数字来自后端 replyTotal 而不是页面自己数   <- 查看 5 条回复
+PASS [10] 点展开 → 整棵子树 5 条回复都出来了（rootId 分支一次给完），按钮随即消失   <- rows=6
+PASS [10] 压平成两级：回复里有「回复 @某某」这句话，但没有第三层缩进   <- 回复 @冒烟用户：想伤害自己，可是看到这条社区还在
+PASS [10] 「楼主」标只出现在本帖作者的评论上（authorIsPostOwner 真接到了界面）   <- n=2
+PASS [10] 危机词那条评论正常显示（已被分级、工单已落库，但内容不隐藏：L2 不删帖）
+PASS [10] 换帖之后评论区是干净重挂的：上一帖的 19 楼没有留在这页
+PASS [11] 注册三名一次性账号（甲/乙/丙），本段所有写入只落在这三个人身上   <- a=458 b=459 c=460
+PASS [11] 甲关注乙 → changed=true（下面要点掉的那条未读就是它）   <- 200 {"targetUserId":459,"action":"follow","changed":true,"following":true,"followerCnt":1,"myFollowingCnt":1}
+PASS [11] 以乙的身份重新挂载并停在广场（顶栏每个页面都挂着，铃铛就在这一层）   <- /feed
+PASS [11] 已登录时顶栏画出铃铛（未登录那一块整棵 v-if 掉，不给游客留一个点开必 401 的空壳）
+PASS [11] 红点由挂载时那次 size=1 的轻量刷新点亮：徽标显示 1   <- badge="1"
+PASS [11] 还没点铃铛之前列表是空的：轻量刷新只取 unreadCount，不把那一条例塞进 items   <- items=0
+PASS [11] 点铃铛 → 真的发出 GET /api/notifications 并渲染出那一条（列表只在点开这一刻读）   <- items=1
+PASS [11] 文案来自后端 typeLabel+title：「探针通知甲 关注了你」，界面上不出现登录名 probe_ntf_a593669731   <- 🤝探针通知甲 关注了你去他的主页看看关注 · 刚刚
+PASS [11] 未读那条带 is-unread（左侧色条是「没读过」唯一的视觉标记）   <- unread=1
+PASS [11] 头部计数与按钮跟着未读数走：「1 条未读」+ 一颗「全部已读」   <- head="1 条未读" btns=["全部已读"]
+PASS [11] 点这条 follow 通知跳到甲的主页（跳转只认 refType=user，不猜文案）   <- path=/user/458 应为 /user/458
+PASS [11] 点完这条就不亮了：is-unread 归零、徽标消失（markRead 回执里的 unreadCount 直接刷了红点）   <- badge="" unread=0 items=1 head="暂无未读"
+PASS [11] 服务端同步认为已读：乙自己再读一次列表 unreadCount=0（界面不是自说自话）   <- unreadCount=0
+PASS [11] 丙再关注乙一次 → 又来一条未读（同一个人不能替别人把通知读完）   <- 200 {"targetUserId":459,"action":"follow","changed":true,"following":true,"followerCnt":2,"myFollowingCnt":1}
+PASS [11] 关掉再点开 → 重新读了一次列表，两条都在（reset 是替换不是叠加）   <- items=2
+PASS [11] 重读之后只有新来的那条亮着：上一轮的已读是真落库了，不是前端记在内存里   <- unread=1 items=2
+PASS [11] 点「全部已读」→ 两条都熄灭，头部变成「暂无未读」，那颗按钮自己也跟着消失   <- head="暂无未读" btns=[]
+PASS [11] 一键已读落到库里：两条 read 都是 true（第二次独立取证，不看界面）   <- n=2 read=true,true
+PASS [11] 整段铃铛交互没有弹过全局错误条：读是 silent 的，写也没出错   <- n=0
+PASS [12] 注册两名一次性账号：读者 R 只负责看关注流，作者 D 只负责被关注（本段所有写入都落在这两个人身上）   <- r=461(200) d=462(200)
+PASS [12] 作者落库四条夹具：两条公开实名 + 一条树洞（自动匿名）+ 一条仅自己可见 —— 新号 24 小时内每日 5 帖，这里只占 4 条   <- ids=1232,1233,1234,1235 hole=匿名屿民·清和 priv=private
+PASS [12] 读者关注作者 → changed=true：关注流读的就是这条 user_follow（后端每次现取，没有缓存，取关立刻消失）   <- 200 {"targetUserId":462,"action":"follow","changed":true,"following":true,"followerCnt":1,"myFollowingCnt":1}
+PASS [12] 以读者身份挂载并停在广场（这一段的入口是页面本身，不是任何接口）   <- /feed
+PASS [12] 广场页同时挂着两节列表：切 Tab 用的是 v-show 而不是 v-if —— 节点一旦被销毁，那两份无限滚动的哨兵就再也等不到「第二次进视野」   <- n=2
+PASS [12] 首屏只露出广场：广场节有卡片且带「不感兴趣」，关注节整节 display:none（数据没取，节点已经在）   <- plazaCards=20 plazaHide=20 folStyle="display: none;"
+PASS [12] 点「关注」→ 只发出一次 GET /api/feed/following（不是又抓一遍广场，也不是不发请求）   <- ["GET /api/feed/following?size=20"]
+PASS [12] 关注流恰好两张卡片，标题全部来自作者这次的夹具：树洞与私密那两条恒不出现（前端没做任何二次过滤，接口回什么就画什么）   <- titles=探针关注593671974乙|探针关注593671974甲
+PASS [12] 切过来之后是关注节显示、广场节 display:none：两节互为镜像，都不靠重建   <- fol="" plaza="display: none;"
+PASS [12] 关注流的卡片不带「不感兴趣」：那是广场的负反馈位，后端也没有对应的这条路径的接口（对比广场那节有 20 个）   <- n=0
+PASS [12] 关注流的作者名两条都可点进主页（.who.link）：这条流里全是实名帖，这正是它和广场的区别   <- link=2 names=探针作者593671974/探针作者593671974
+PASS [12] 关注节的计数行报的是后端 total（页码模式首屏才有的那个字段），不是本页卡片数   <- hint=这里只有「你关注的人」的公开实名帖；他们发的树洞与匿名帖恒不出现（需求 FR1.4）。 || 关注的人共 2 条可见更新 || 到这里就是全部了（已加载 2 条）
+PASS [12] 切回广场：一条列表请求都没发，卡片与标题顺序和切走前逐字一致（两份列表各有各的游标与缓存，切 Tab 不重抓）   <- reqs=[] cards=20
+PASS [12] 顶栏「搜索」这条路进得来 /search（路由注册 + requiresAuth 放行已登录读者）   <- /search
+PASS [12] 空关键词时给的是说明而不是错误：「输入关键词后按回车开搜」，且一条请求都不发（后端空词直接 10001）   <- reqs=0
+PASS [12] 结果类别是单选按钮组而不是下拉：与全站另外三处「换一张列表」同一个控件，本段也才能复用同一个点击器   <- modes=帖子/话题/屿友
+PASS [12] 在输入框里打关键词、点「搜索」→ GET /api/search/posts 真发出并画出三张卡片：两条公开 + 那条树洞（它公开可见，只是匿名）   <- reqs=["GET /api/search/posts?size=20&q=%E6%8E%A2%E9%92%88%E5%85%B3%E6%B3%A8593671974"] n=3
+PASS [12] 私密夹具搜不到：四条落库的帖子里只回三条（可见性判据与广场共用同一份，不是搜索自己另写一套）   <- titles=探针关注593671974洞|探针关注593671974乙|探针关注593671974甲
+PASS [12] 树洞那条在结果里带着马甲名「匿名屿民·」：搜索这条路径同样不能解匿（FR1.4）   <- who=匿名屿民·清和/探针作者593671974/探针作者593671974
+PASS [12] 计数行报出后端 total：「共 3 条命中」，并把这次查询写进地址栏 ?q=（能刷新还在、能后退回去、链接能发给别人）   <- search=?m=post&q=探针关注593671974
+PASS [12] 点类型筛选「树洞」→ 只多发一条请求，且 type=hole 是发请求那一刻才拼进去的（参数由 query() 现取，不是挂载时的快照）   <- ["GET /api/search/posts?size=20&q=%E6%8E%A2%E9%92%88%E5%85%B3%E6%B3%A8593671974","GET /api/search/posts?size=20&q=%E6%8E%A2%E9%92%88%E5%85%B3%E6%B3%A8593671974&type=hole"]
+PASS [12] 筛选后只剩那一条树洞，标题逐字对得上，计数行跟着后端重算成「共 1 条命中」   <- titles=探针关注593671974洞
+PASS [12] 筛选条件同步进了地址栏 ?type=hole：改回 run() 之前这里只调 reload()，筛选生效了链接却还是没筛的那条，「把这一屏发给同学」会发错   <- search=?m=post&q=探针关注593671974&type=hole
+PASS [12] 点输入框的清空叉 → 结果清空、回到「输入关键词后按回车开搜」那句说明，且清空本身不发请求（后端空词直接 10001）   <- clearBtn=true reqs=2
+PASS [12] 清空连地址栏一起清：屏幕上已经是「还没搜」，链接里就不该还留着 q=（否则一刷新会凭空恢复一份刚被用户清掉的结果）   <- search=?m=post&type=hole
+PASS [12] 换成一个只有昵称里才有的词（先退回「全部」类型）→ 零命中：画空态而不是报错，不许留着上一轮的结果，type 也从地址栏掉了   <- n=0 empty=1 search=?m=post&q=探针作者593671974
+PASS [12] 同一个关键词换到「屿友」这一栏就命中：三条路径查的是三张表，切栏不换词，且只多发自己那一条请求   <- row=探探针作者593671974uid 462查看主页 → reqs=1
+PASS [12] 换栏也把类别写回了地址栏 ?m=user：刷新回来还在屿友这一栏，而不是被弹回帖子栏   <- search=?m=user&q=探针作者593671974
+PASS [12] 点这条屿友结果跳进作者主页 /user/462：搜索的落点与主页是同一条路由，不是另做一份资料卡   <- path=/user/462
+PASS [12] 带着 ?m=topic&q=焦虑 深链进搜索页：组件重新挂载时 onMounted 读地址栏自动跑了一次话题检索（刷新还在、链接可分享）   <- search="?m=topic&q=%E7%84%A6%E8%99%91" reqs=["GET /api/search/topics?q=%E7%84%A6%E8%99%91&limit=20"]
+PASS [12] 话题卡现在点得动了（T3.8 交付的就是这一步，之前这里是一句「点不动是刻意的」）：这一栏每张卡都带着「进入话题」，那句解释也跟着结果一起出现   <- cards=2 go=进入话题 →
+PASS [12] 点搜索页这张话题卡 → 路由真的换成 topic-detail、地址栏真的变成 /topic/编号：搜索页与广场共用同一个详情页，没有各画一份头图（这一条放在本组最末尾，因为它一旦点出去就离开了 /search）   <- path=/topic/5 name=topic-detail
+PASS [12] 整段关注流 + 搜索页没弹过一条全局错误条：三条搜索路径都是 silent 的，401/10001/90002 各自由页面自己说清楚   <- n=0
+PASS [13] 注册一名一次性账号：话题详情/帖流/关注/创建/发帖这五条路径全要求登录，本段所有写入都落在它身上   <- u=463(200)
+PASS [13] 话题墙里能挑出两种真夹具：至少一个「有帖话题」（验列表）和至少一个「零帖话题」（验空态那句诚实话）   <- wall=20 T=1:失眠夜/发帖102 TE=2:考研加油站
+PASS [13] 带 topicIds 向一个已过审话题发帖被后端放行（PUBLISHED）：话题页的列表接下来才有东西可画   <- 200 id=1236 st=PUBLISHED
+PASS [13] 广场墙上每一张话题卡都带着「进入话题」这个落点：这一条同时把 T3.8 之前那个「点不动」的旧状态钉死   <- cards=10 go=进入话题 →
+PASS [13] 点墙上那张「失眠夜」→ 路由真的变成 topic-detail、地址栏真的变成 /topic/1（搜索页那条入口在第 12 组已验：两处共用同一个组件，不会出现两处各画一份头图）   <- name=# 失眠夜 path=/topic/1
+PASS [13] 话题头三件套真渲染出来了：名字带 # 前缀、三个计数各占一个 span、已过审官方话题挂「官方」角标   <- stats=发帖 103/关注 0/热度 0.0 tag=官方
+PASS [13] 头图那两个数字与接口逐字相同（发帖数、关注数）：前端不做任何「先猜一个」的估算   <- dom=发帖 103/关注 0/热度 0.0 api=103/0
+PASS [13] 进这一页恰好两条请求：一条话题资料、一条帖流；帖流首屏不带 sort 参数（latest 是后端默认档，前端不重复发一遍）   <- ["GET /api/topics/1","GET /api/topics/1/posts?size=20"]
+PASS [13] 话题下的帖流画出卡片，且刚挂上这个话题的那条夹具就在里面（post_topic 真的驱动了这条列表，不是「所有帖子」）   <- titles=探针话题593674871甲|话题冒烟·树洞20260928104213|话题冒烟·公开20260928104213|冒烟·普通帖|探针话题590177971乙|探针话题590177971甲|探针话题590087605乙|探针话题590087605甲|话题冒烟·树洞20260928095501|话题冒烟·公开20260928095501|冒烟·普通帖|话题冒烟·树洞20260928095159|话
+PASS [13] 计数行「这个话题下共 N 条可见帖子」的 N 与后端 total 逐字相同（界面不许自己数卡片数冒充总数）   <- dom=这个话题下共 103 条可见帖子 api=103
+PASS [13] 换到一个零帖话题（走的是组件复用 + watch 编号那条路）：头图说「发帖 0」，列表给的是「还没有人发帖，点上面开个头」   <- TE=2 name=# 考研加油站 stats=发帖 0/关注 0/热度 0.0
+PASS [13] 这次「换话题」只发了新话题那两条请求，一条都没再打回旧话题 1（组件复用最容易漏的就是这一步）   <- teDetail=1 tePosts=1 oldTid=2/2
+PASS [13] 地址栏编号写成 abc：页面自己说一句人话（这个话题不存在），且一条请求都不发 —— 不拿 abc 去后端换 404 再让人猜为什么白屏   <- reqs=[]
+PASS [13] 上面这一整段只读路径没弹过一条全局红条：详情与帖流都是 silent 接口，页面自己解释自己   <- n=0
+PASS [13] 在话题名里连敲 40 个字：数码点当场给出「已输入 40 / 上限 32」—— 这一行是跟着字走的，不用等提交完才告诉用户超了   <- hint=已输入 40 / 上限 32 字（一个表情算一个字，与后端同口径）；首尾空白与连续空格会被折叠，全站重名会被拒
+PASS [13] 超长这一次被挡在提交之前：一条 POST /api/topics 都没发出去（不做 maxlength，但判定必须发生在网络请求之前） —— 口径与后端 normalizeName 的 codePointCount 一致，一个 emoji 算一个字   <- toast=话题名最长 32 字 reqs=0
+PASS [13] 合法长度这一次真的发出去了：恰好一条 POST /api/topics、HTTP 200，横幅把话题名念回给用户（不是一句笼统的「成功」） —— 预审开着时「进了待审」也走 200，接口不拿状态码骗前端   <- reqs=1 status=200 id=55 alert=# 探针话题593674871圈 已提交
+PASS [13] （预审开着，默认配置走的就是这条）「已提交」没被伪装成失败：auditStatus=PENDING，弹窗里同时写清了「阶段 3 还没有审核台能放行、管理端属任务 6.1」， 而且根本没有画那颗点不动的「现在就进去」（FR8.6 的边界在界面上是可见的，不是藏在注释里）   <- auditStatus=PENDING body=话题已提交，通过审核后就能进去发帖了，通常很快 但要说明白：阶段 3 还没有审核台，今天没有人能把这条待审话题放行 ——管理端属任务 6.1。它已经落库了，不是没建上，只是暂时进不去。
+PASS [13] 深链进一个待审话题是后端 + 前端一起认的账：接口 409/30004，页面给的是「还在审核中 + FR8.6 预审开关默认开着」这句人话， 并且不画那个空的头图（拿不到资料就宁可少一块卡片，也不摆一颗点了没反应的关注按钮）   <- 409 code=30004 hero=false
+PASS [13] 话题页那颗「发帖到该话题」把编号写进了地址栏（/publish?topic=1）： 落点是一个能刷新、能转给同学的地址，不是内存里的一个变量（上一版这里踩过：切 Tab 忘了同步 query）   <- search=?topic=1
+PASS [13] 发布页顶上那行确认语把话题名字念了出来、并且挂的是 is-ok 那一档： 三态不是摆样子 —— checking 与 miss 各有各的话，这里等到的是「带上了」而不是替用户猜一个   <- line=已带上话题 # 失眠夜：发布后会出现在这个话题的帖子列表里。 cls=preset-line is-ok
+PASS [13] 预填不是只在文案里说了句好话：关联话题那个下拉框上看得到 # 失眠夜（选中值真进了 form.topicIds） —— 顺序也钉住了：草稿恢复在前、合入预填在后，反过来的话一分钟前那份草稿会把手跳进来的这个话题覆盖掉   <- tags=# 失眠夜 select=# 失眠夜
+PASS [13] 点「发布」那一刻的请求体里已经带着 "topicIds":[1]：整条预填链路一路通到 payload，用户没有再手动挑一次话题（这一条只有请求体能证明，界面上那个选中态证明不了它）   <- body={"title":"探针话题593674871乙","content":"从话题页跳过来发的第二条 探针话题593674871","type":"normal","visibility":"public","anonymous":false,"topicIds":[1],"images":[]}
+PASS [13] 后端认下了这个预挂：新帖 status=PUBLISHED，页面按回执里的 id 跳进了详情页（不是丢回列表让用户自己找哪条是刚发的）；挂题成功这件事是后端说的，不是前端自己宣布的   <- status=200 st=PUBLISHED route=/post/1237
+PASS [13] 回到这个话题页，两条夹具帖都排在首页里：一条走接口挂题、一条从话题页点出来发的 —— 进话题、发进话题、在话题里看到它，这一整圈闭环通了（话题页读的是 post_topic，不是「所有帖子里标题带话题名的那些」）   <- titles=探针话题593674871乙|探针话题593674871甲|话题冒烟·树洞20260928104213|话题冒烟·公开20260928104213|冒烟·普通帖|探针话题590177971乙|探针话题590177971甲|探针话题590087605乙|探针话题590087605甲|话题冒烟·树洞20260928095501|话题冒烟·公开20260928095501|冒烟·普通帖|话题冒烟·树洞2
+---- 汇总：121 项，失败 0 项
+# bundle: 4815886B / 编译 1481ms / E:\codex workspace\_cache\mindisle-dbtmp\fe-probe\probe.js
+# seed: OK(exit 0) OK 演示夹具就位：过期树洞 0 条 → ROW_COUNT()=0 → 剩余过期 0 条；三条取证夹具全在未过期一侧；未删树洞总数=142
+# login via 5173 proxy: code=0 tokenLen=268
+# tail DOM text: 🏝心屿校园心理陪伴社区广场搜索发布屿屿情绪我的隐私需要帮助？MindIsle 心屿 v0.0.1-SNAPSHOT后端连接正常🔔屿友退出分享冒烟可见性账号·9月21日冒烟·被看见公开的一条，用来验翻页与浏览量。浏览 28评论 6发布于 
+# window logs: console.warn: [MindIsle][traceId] 9902a69fdcdc4471 || console.warn: [MindIsle][traceId] a14256e17ecc4720 || jsdomError: Uncaught [ReferenceError: fetch is not defined] || jsdomError: Uncaught [ReferenceError: fetch is not defined]
+# bell 一次性账号：probe_ntf_a593669731(458) probe_ntf_b593669731(459) probe_ntf_c593669731(460)
+# bell 通知 id：740,739
+# bell window logs: none
+# src/search 一次性账号：probe_src_r593671974(461) probe_src_d593671974(462)
+# src/search 夹具帖 id：1232,1233,1234,1235（其中 1235 是私密、1234 是树洞）
+# src/search window logs: none
+# 本段触发搜索用的是「点搜索按钮」，没有测 @keyup.enter：jsdom 下 keyup 与 Element Plus 输入框包装层的对应关系不保证成立，键盘路径留给真浏览器
+# topic 一次性账号：probe_topic_u593674871(463)；有帖话题 1:失眠夜/发帖102；零帖话题 2:考研加油站
+# topic 夹具帖 id：1236(甲·走接口挂题) 1237(乙·走 ?topic= 预填)
+# topic 新建话题 id=55 auditStatus=PENDING usable=false —— 预审开关（FR8.6）默认开着，PENDING 是这条路径今天的正常结局
+# 本段验的是「选中值有没有一路走到 payload」：jsdom 下 el-select 的 popper teleport 在 body 上，所以那条预填断言同时认 .el-tag 与整个 select 的文本，两种画法都不影响判据；点下拉的鼠标路径留给真浏览器
+# topic window logs: jsdomError: Uncaught [ReferenceError: fetch is not defined]

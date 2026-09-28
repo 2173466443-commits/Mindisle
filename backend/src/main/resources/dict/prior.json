@@ -1,0 +1,77 @@
+{
+  "version": "prior-v1.0",
+  "note": "情绪七类先验与词典通道全部可调参数。写在这里而不是写死在 Java 里，是 NFR10 的要求：改阈值不改代码。valence 数值与 frontend/src/components/EmotionPill.vue、views/emotion/EmotionView.vue 的取值逐字一致，两端不许各自漂移。",
+  "labels": {
+    "joy": {
+      "zh": "喜悦",
+      "valence": 0.8,
+      "anchorIntensity": 4
+    },
+    "trust": {
+      "zh": "信任",
+      "valence": 0.5,
+      "anchorIntensity": 3
+    },
+    "neutral": {
+      "zh": "平静",
+      "valence": 0,
+      "anchorIntensity": 2
+    },
+    "sadness": {
+      "zh": "难过",
+      "valence": -0.6,
+      "anchorIntensity": 4
+    },
+    "fear": {
+      "zh": "恐惧",
+      "valence": -0.6,
+      "anchorIntensity": 4
+    },
+    "anger": {
+      "zh": "愤怒",
+      "valence": -0.6,
+      "anchorIntensity": 4
+    },
+    "disgust": {
+      "zh": "厌恶",
+      "valence": -0.4,
+      "anchorIntensity": 3
+    }
+  },
+  "tieBreakNegativeFirst": [
+    "anger",
+    "disgust",
+    "fear",
+    "sadness",
+    "neutral",
+    "trust",
+    "joy"
+  ],
+  "weights": {
+    "sensePrimary": 1,
+    "auxRole": 0.5,
+    "emojiHit": 0.7
+  },
+  "thresholds": {
+    "llmFallbackConf": 0.55,
+    "uncertainConf": 0.6,
+    "negationGapChars": 1,
+    "negationChainSteps": 4,
+    "degreeGapBeforeChars": 1,
+    "exclamationMultiplier": 1.3,
+    "intensityMin": 1,
+    "intensityMax": 5,
+    "minCharsForAnalysis": 2
+  },
+  "coverage": {
+    "denominatorMinChars": 8,
+    "saturatedCoverageChars": 24,
+    "confCeiling": 0.95
+  },
+  "experiment": {
+    "targetMacroF1": 0.62,
+    "targetBinaryAcc": 0.85,
+    "targetCrisisRecall": 0.95,
+    "latencyP95BudgetMs": 50
+  }
+}

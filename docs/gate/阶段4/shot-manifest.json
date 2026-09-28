@@ -1,0 +1,99 @@
+{
+  "at": "2026-09-28T08:00:20.741Z",
+  "base": "http://127.0.0.1:5173",
+  "api": "http://127.0.0.1:8080",
+  "chrome": "C:/Users/Drbrain/AppData/Local/Google/Chrome/Application/chrome.exe",
+  "browser": "chrome",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "reader": "demo01/2",
+  "author": "demo03/4",
+  "evidencePostId": 1094,
+  "crisisRan": true,
+  "probeConvs": [
+    {
+      "tag": "A-编号列表",
+      "id": 59
+    },
+    {
+      "tag": "B-危机轮",
+      "id": 60
+    }
+  ],
+  "pass": 63,
+  "fail": 0,
+  "failures": [],
+  "shots": [
+    {
+      "file": "01-AI对话-流式回复与Markdown编号列表.png",
+      "label": "U7：屿屿的流式回复与渲染成有序列表的 Markdown（ol.md-ol / li.md-li）",
+      "ok": true,
+      "reading": "li=3 编号行=3 whiteSpace=normal"
+    },
+    {
+      "file": "02-AI对话-情绪标签与免责脚注.png",
+      "label": "U7：气泡下方的情绪标签、判定通道、真实耗时与页面常驻免责脚注（含 12356）；整页图，内层滚动容器不参与可见性判定",
+      "ok": true,
+      "reading": "标签=true 脚注在屏=true me.meta=\"09-28 15:59恐惧· 词典初判\""
+    },
+    {
+      "file": "03-AI对话-L2L3危机卡.png",
+      "label": "U7/FR10：L2 危机轮次置顶的求助卡（12356 + 完整求助页入口）",
+      "ok": true,
+      "reading": "badge=L2 需要专业支持 lv=2 回复长度=136"
+    },
+    {
+      "file": "04-情绪档案-趋势与分布.png",
+      "label": "U9：情绪档案的趋势图与分布图（ECharts 在真浏览器里画出来了）",
+      "ok": true,
+      "reading": "canvas=6 已画=6"
+    },
+    {
+      "file": "04b-情绪档案-整页.png",
+      "label": "U9：整页（打卡 / 档案 / 周报 / 数据用途说明），验长页不破版",
+      "ok": true,
+      "reading": "h2 数=4"
+    },
+    {
+      "file": "05-详情页-停留计时中.png",
+      "label": "U4/FR5.1：详情页停留计时读数（够一次浏览 / 尚未读到底）",
+      "ok": true,
+      "reading": "本页已读 4 秒 · 够一次浏览 · 未读到底"
+    },
+    {
+      "file": "06-详情页-已读到底.png",
+      "label": "U4/FR5.1：滚到底之后的完读态（2 分那一档的界面侧证据）",
+      "ok": true,
+      "reading": "本页已读 5 秒 · 够一次浏览 · 已读到底（完读计 2 分）"
+    },
+    {
+      "file": "07-隐私中心-概览与逐域对账.png",
+      "label": "FR1.5：可查看、可核对 —— 账号状态 + 逐域条数对账表（默认只看有条数的域）",
+      "ok": true,
+      "reading": "合计 350 条 / 9 行"
+    },
+    {
+      "file": "07b-隐私中心-逐域全表.png",
+      "label": "FR1.5：关掉「只看有条数的域」之后的全表对账（注册表里每个域都在，含 0 行）",
+      "ok": true,
+      "reading": "全表 25 行 / 合计 350 条"
+    },
+    {
+      "file": "08-隐私中心-导出成功可下载.png",
+      "label": "FR1.6：可携带权 —— 导出任务 SUCCESS 并把包裹下载到本机（图上带回执提示）",
+      "ok": true,
+      "reading": "包裹=mindisle-export-2-20260928-160009.json/169060B 提示=\"导出包已生成，可以下载到本机 | 已保存到浏览器下载目录：mindisle-export-2-20260928-160009.json（165.1 KB）\""
+    },
+    {
+      "file": "09-隐私中心-注销二次确认.png",
+      "label": "FR1.7：注销账号的两段式确认（30 天冷静期入口，本图没提交）",
+      "ok": true,
+      "reading": "按钮=\"再点一次确认注销\""
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "httpErrors": []
+}

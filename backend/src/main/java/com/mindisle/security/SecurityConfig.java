@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mindisle.common.ErrorCode;
 import com.mindisle.common.Result;
 import com.mindisle.config.MindisleProperties;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -83,6 +84,16 @@ public class SecurityConfig {
                 .logout(logout -> logout.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // 🔴 ASYNC 二次派发 必须放行，否则 SSE 流会在收尾处被自己人掐断（2026-09-24 实测）。
+                        // Boot 把本过滤器链注册在全部 DispatcherType 上，异步请求结束时容器会再做一次 ASYNC dispatch；
+                        // 而 JwtAuthFilter 继承 OncePerRequestFilter，它对 ASYNC dispatch 默认直接跳过，
+                        // 加上本项目 STATELESS（没有 HttpSession 兜存上下文），这一趟的 SecurityContext 是空的，
+                        // AuthorizationFilter 就按「未登录」抛 AuthorizationDeniedException。
+                        // 因为响应此刻已经 commit，异常写不进响应体，症状变成「前端只看到连接被重置」——
+                        // 用户侧观感就是「话发出去了，回答说到一半就没了」，而日志里连一条业务错误都搜不到。
+                        // 放行它是安全的：ASYNC dispatch 不是外部可达的独立入口，只是同一条已通过鉴权的请求的延续；
+                        // 真正的准入判定仍由第一次 REQUEST dispatch 完成，撤回授权的人第一次就会被挡下。
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         .requestMatchers(HttpMethod.GET, PUBLIC_READ_ONLY_MATCHERS).permitAll()
                         .requestMatchers(HttpMethod.HEAD, PUBLIC_READ_ONLY_MATCHERS).permitAll()
                         .requestMatchers(PUBLIC_MATCHERS).permitAll()

@@ -8,6 +8,7 @@
       <div class="ops">
         <el-button size="small" :loading="busy.page" @click="loadAll">刷新</el-button>
         <el-button size="small" @click="goMyPosts">我的帖子</el-button>
+        <el-button size="small" @click="goPrivacy">隐私中心</el-button>
         <el-button size="small" type="primary" @click="openEdit">编辑资料</el-button>
         <el-button size="small" text @click="doLogout">退出登录</el-button>
       </div>
@@ -275,6 +276,13 @@ const form = reactive({ nickname: '', school: '', gender: 'U', bio: '' })
 // U12 入口：账户中心的「树洞」计数以前是个死数字，点不进去；现在它通向真正按 user_id 查的那张列表。
 function goMyPosts() {
   router.push({ name: 'my-posts' })
+}
+
+// 隐私中心（任务 T4.21）：账户中心这页管的是「授权开关」，而个保法第 45/47 条要的是「我能把自己的数据带走、
+// 也能把自己的账号关掉」。这两件事以前散在三个接口里没人给它们一个入口，现在收进 /privacy 一整页：
+// 逐域条数对账、导出下载、冷静期注销与撤回、授权撤回、管理员到期清除。
+function goPrivacy() {
+  router.push({ name: 'privacy' })
 }
 
 function openEdit() {

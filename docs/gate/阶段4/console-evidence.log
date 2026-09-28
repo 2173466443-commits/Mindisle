@@ -1,0 +1,95 @@
+# 读者 demo01(id=2 nick=屿01) · 作者 demo03(id=4 nick=屿03)
+PASS [夹具] 读者 demo01 的会话列表基线取到了（AI 段的「新建了几条」全看它）   <- 基线 24 条
+PASS [夹具] demo03 现造一条 1162 字公开长帖并停在 PUBLISHED（Gate4 的 05/06 两张图拍它）   <- http=200 code=0 id=1094 status=PUBLISHED
+# 浏览器 150.0.7871.115 · C:/Users/Drbrain/AppData/Local/Google/Chrome/Application/chrome.exe · 视口 1600x1000
+PASS [stale] ChatView.vue 的 dev server 模块体和磁盘源码同步（按中文字面量抽样 6 条，全部命中）   <- http=200 字节=198482 缺=[]
+PASS [stale] utils/markdown.js 的 dev server 模块体和磁盘源码同步（按中文注释行抽样 6 条，全部命中）   <- http=200 字节=48911 缺=[]
+PASS [ai] 点「＋ 新建」之后聊天区是空的（残留会把两轮对话缝成一屏，判据会数错气泡）   <- rows=0
+PASS [ai] 这一轮真的在服务端建了会话（不是前端起了个空壳）   <- conv=59
+PASS [ai] 助手那句完整跑完并从库里读回来了（done 帧之后落的那一行）   <- len=181 role=ai 界面 len=166
+PASS [ai] 助手气泡带 .txt.md（Markdown 通道挂上了；没有它 v-html 那条分支就没走）   <- {"role":"ai","len":166,"generating":false,"stopBtn":false}
+PASS [ai] 助手气泡的计算样式 white-space 是 normal（CSS 里 .md 把 .txt 的 pre-wrap 压掉了，Markdown 才成形状）   <- whiteSpace=normal
+PASS [ai] 编号列表真的被渲染成 li 元素：库里那句有 3 行编号，DOM 里数到 3 条 li   <- li=3 ol=1 ul=0 p=2 原文编号行=3
+PASS [ai] 而且它落成的是 <ol><li>（有序，不是被降级成 ul 或纯段落）—— 这条如果模型不配合会红，红就是取证没达成   <- ol=1 非OL父节点=0 marker=decimal 原文编号行=3 原文="上台前发慌这件事，很多人都有，你能提前为周末这场演讲做准备，已经比干等着强了。\n\n1. 今晚把稿子念三遍并录音，回听时只"
+PASS [ai] 用户那句下方出现情绪标签（挂在 me 而不是 ai，且和刷新后同一个位置）   <- me.pill="恐惧"
+PASS [ai] 用户那句下方写明判定来源通道（通道挂在 me 行：ChatView 把服务端 meta 里的 emotion 记成 mine.channel，判的是用户那一句的情绪从哪来）   <- me.meta="09-28 15:59恐惧· 词典初判" ai.meta="09-28 15:59 · 首字 522ms／全篇 1479ms"
+PASS [ai] 常驻免责脚注同时在屏幕上写着「不构成医疗诊断」和 12356（FR10 要求这句话不是弹一次就没了）   <- " 心屿提供的是情绪陪伴与倾诉，不构成医疗诊断或治疗建议；出现危机念头请拨打 12356 或前往就近医院急诊。 "
+PASS [ai] 侧栏列出这一条新会话   <- conv=25
+PASS [ai] 这一屏没有夹具账号字样（Gate 清单里那条独立的污染检查项）   <- 命中=[] 会话数=25
+  [图] 01-AI对话-流式回复与Markdown编号列表.png —— U7：屿屿的流式回复与渲染成有序列表的 Markdown（ol.md-ol / li.md-li）  <- li=3 编号行=3 whiteSpace=normal
+# [ai] 02 图现场几何：vh=1000 disclaimer={"top":978,"bottom":1000,"h":23} 在视口=true me.pill={"top":358,"bottom":382,"h":24} 在视口=true me.meta="09-28 15:59恐惧· 词典初判"
+  [图] 02-AI对话-情绪标签与免责脚注.png —— U7：气泡下方的情绪标签、判定通道、真实耗时与页面常驻免责脚注（含 12356）；整页图，内层滚动容器不参与可见性判定  <- 标签=true 脚注在屏=true me.meta="09-28 15:59恐惧· 词典初判"
+PASS [ai] 点「有用」之后只有一个按钮亮着（:class="{on:...}" 真被写进去了）   <- on=1 状态="+有用,-没被理解"
+PASS [ai] 助手那条气泡下面有反馈按钮组（没有它 T4.19 那条端点就没有用户入口）   <- 按钮="有用,没被理解"
+PASS [ai] 这一屏没有 console error / 未捕获异常 / 4xx·5xx   <- console=0 pageerror=0 http=0 明细=[]
+PASS [ai·L2] 危机这一轮自己建了会话（不复用上一段的 convId，否则等的是旧回复）   <- conv=60
+PASS [ai·L2] 危机轮次里屏幕上置顶了那张求助卡（不只是一句文案）   <- cls=mi-card crisis lv2 text="你现在的感受很重要，专业的人愿意听你说。可以拨打心理援助热线 12356，也可以预约学校心理咨询中心。"
+PASS [ai·L2] 徽标停在 L2 以上，卡片外框也升到同一档   <- badge=L2 需要专业支持 lv=2
+PASS [ai·L2] 卡片上写着 12356（读 sys_config，不是前端写死的字符串）   <- phone=12356
+PASS [ai·L2] 卡片里带完整求助页入口（免登录也能进）   <- ops=完整求助页（免登录可访问） 后端把这一轮判定为 L2：求助入口已置顶，站内也已登记一条需要人工关注的记录。 这仍然是陪伴
+PASS [ai·L2] 危机这一屏也没有夹具字样   <- 命中=[]
+  [图] 03-AI对话-L2L3危机卡.png —— U7/FR10：L2 危机轮次置顶的求助卡（12356 + 完整求助页入口）  <- badge=L2 需要专业支持 lv=2 回复长度=136
+PASS [stale] EmotionView.vue 的 dev server 模块体和磁盘源码同步（按中文字面量抽样 6 条，全部命中）   <- http=200 字节=123413 缺=[]
+PASS [emo] 情绪档案这一页真的画出了图表（canvas 不止一个且宽高都不是 0）—— jsdom 与冒烟都证不到这件事   <- canvas=6 已画=6 小标题="情绪趋势 | 情绪分布 | 高频触发词 | 日历热力"
+PASS [emo] 没有「接口正常但图没画出来」的降级横幅，也没落在「数据积累中」的空态   <- chart-err=false accumulating=false meta="2026-09-22 ~ 2026-09-28共 61 条情绪记录，其中可信 54 条7 条置信度不足，没算进趋势连续打卡 1 天 · 最长 3 天"
+PASS [emo] 三个板块的标题都在（档案 / 周报 / 答辩口径），需求 FR7.4 那句「说得清数据怎么被用」是界面的一部分   <- h2="今天感觉怎么样 | 情绪档案 | 情绪周报 | 这份情绪数据会被怎么用（答辩口径）"
+PASS [emo] 这一屏没有夹具账号字样   <- 命中=[]
+  [图] 04-情绪档案-趋势与分布.png —— U9：情绪档案的趋势图与分布图（ECharts 在真浏览器里画出来了）  <- canvas=6 已画=6
+  [图] 04b-情绪档案-整页.png —— U9：整页（打卡 / 档案 / 周报 / 数据用途说明），验长页不破版  <- h2 数=4
+PASS [emo] 这一屏没有 console error / 未捕获异常 / 4xx·5xx   <- console=0 pageerror=0 http=[]
+PASS [stale] PostDetailView.vue 的 dev server 模块体和磁盘源码同步（按中文字面量抽样 6 条，全部命中）   <- http=200 字节=123739 缺=[]
+PASS [dwell] 这条帖在这一屏放不下（真的需要滚动才能读完），下面「未读到底 → 已读到底」才有意义   <- scrollHeight=1607 innerHeight=1000 差=607
+PASS [dwell] 详情页底部那行停留读数当场就在（埋点是最容易「代码在、数据不在」的东西，让它可读才有人核对）   <- "本页已读 0 秒 · 还差 3 秒才算一次浏览 · 未读到底"
+PASS [dwell] 那行读数在往前跳（1s 心跳真的在刷，不是把接口回执抄上来的一次性文案）   <- t0=0s → t+2.6s=1s  "本页已读 1 秒 · 还差 2 秒才算一次浏览 · 未读到底"
+PASS [dwell] 没读够的时候界面写的是「还差几秒」，读够了写「够一次浏览」（阈值判据在服务端，界面只如实转述）   <- "本页已读 1 秒 · 还差 2 秒才算一次浏览 · 未读到底"
+PASS [dwell] 累计过 3 秒之后界面翻成「够一次浏览」   <- "本页已读 4 秒 · 够一次浏览 · 未读到底"
+PASS [dwell] 还没滚到底的时候不许提前写「已读到底」（完读是另一条判据，2 分那档）   <- "本页已读 4 秒 · 够一次浏览 · 未读到底"
+  [图] 05-详情页-停留计时中.png —— U4/FR5.1：详情页停留计时读数（够一次浏览 / 尚未读到底）  <- 本页已读 4 秒 · 够一次浏览 · 未读到底
+PASS [dwell] 滚到底之后那行换成「已读到底（完读计 2 分）」   <- "本页已读 5 秒 · 够一次浏览 · 已读到底（完读计 2 分）"
+  [图] 06-详情页-已读到底.png —— U4/FR5.1：滚到底之后的完读态（2 分那一档的界面侧证据）  <- 本页已读 5 秒 · 够一次浏览 · 已读到底（完读计 2 分）
+# [dwell] 浏览器实际发出的 /read 请求共 1 条：[{"body":{"durationMs":5279,"completed":true},"resp":{"status":200,"data":{"postId":1094,"thresholdMs":3000,"viewRecorded":true,"readThroughRecorded":true}}}]
+PASS [dwell] 这一趟阅读真的往服务端报了（不是只在本机累加）   <- 条数=1
+PASS [dwell] 其中至少一条带着 completed=true 且 durationMs>=3000（完读与够时长在同一次上报里都成立）   <- 明细=[{"durationMs":5279,"completed":true}]
+PASS [dwell] 没有任何一条 completed=true 的上报短于 3 秒（r2 的 1ms 绕过在客户端这一侧也被钉住了）   <- 短报明细=[]
+PASS [dwell] 服务端回执里 viewRecorded=true（界面说够 3 秒，服务端也认了这一次浏览）   <- 回执=[{"postId":1094,"thresholdMs":3000,"viewRecorded":true,"readThroughRecorded":true}]
+PASS [dwell] 服务端回执里 readThroughRecorded=true（完读那 2 分真的落进了隐式行为权重）   <- 回执=[{"postId":1094,"thresholdMs":3000,"viewRecorded":true,"readThroughRecorded":true}]
+PASS [dwell] 重开这一页是从 0 重新计时的（没把上一趟的 6 秒续上来，也没继承「已读到底」）   <- 秒=0 读数="本页已读 0 秒 · 还差 3 秒才算一次浏览 · 未读到底"
+PASS [stale] PrivacyView.vue 的 dev server 模块体和磁盘源码同步（按中文字面量抽样 6 条，全部命中）   <- http=200 字节=111490 缺=[]
+PASS [priv] 隐私中心四块都在（账号本体 / 逐域对账 / 导出 / 注销）   <- blk=5 h2="1 · 账号本体与当前状态 | 2 · 逐域条数对账（FR1.5「可查看、可核对」） | 3 · 导出我的全部个人信息（FR1.6） | 4 · 注销账号（30 天冷静期，不是点一下就没了） | 5 · 撤回某一项授权（NFR8）"
+PASS [priv] 接口侧先给出同源分域数字（总共多少域、其中多少域有条数），界面判据拿它校准，而不是拍脑袋写一个 20   <- domains=25 非零=9 totalRows=350
+PASS [priv] 默认态（只看有条数的域）的表行数与「列出 N 个域」都等于接口里 rows 大于 0 的域数   <- rows=9 列出=9 接口非零=9
+PASS [priv] 界面「接口合计」与接口 totalRows 同源相等   <- 界面=350 接口=350
+PASS [priv] 「接口合计」与「逐域加起来」相等（对账这条判据的意义就在这两个数必须同源）   <- total=350 listedSum=350 warn=false
+PASS [priv] 当前账号是正常态（没有待清除的注销申请）   <- "账号状态正常没有待清除的注销申请。"
+PASS [priv] 这一屏没有夹具账号字样   <- 命中=[]
+  [图] 07-隐私中心-概览与逐域对账.png —— FR1.5：可查看、可核对 —— 账号状态 + 逐域条数对账表（默认只看有条数的域）  <- 合计 350 条 / 9 行
+PASS [priv] 关掉「只看有条数的域」之后列出 PrivacyDomains 注册表里的全部域（0 行的也在清单上，可携带权要求说得全）   <- rows=25 列出=25 接口域数=25
+PASS [priv] 全表态下「接口合计」与「逐域加起来」仍然相等（多列出来的 0 行不改变总数，这才叫对账）   <- total=350 listedSum=350 接口=350
+  [图] 07b-隐私中心-逐域全表.png —— FR1.5：关掉「只看有条数的域」之后的全表对账（注册表里每个域都在，含 0 行）  <- 全表 25 行 / 合计 350 条
+# [priv] 提交导出之前的 latest：id=9 status=SUCCESS
+PASS [priv] 这一趟新建的导出任务没有跑成 FAILED（排队 → 后台跑 → 成功 这条状态机在浏览器这一端走到底）   <- 末次接口读数={"id":10,"status":"SUCCESS"}
+PASS [priv] 导出任务在浏览器里跑到了 SUCCESS，「下载到本机」由灰变亮（异步四步：排队→后台跑→成功才给口令）   <- 轮询读数="已生成，可以下载"
+PASS [priv] 亮起来的按钮背后是这一趟新建的那条任务（id 从 9 递增、status=SUCCESS、downloadReady=true）   <- id=10 status=SUCCESS ready=true rows={"post": 0, "comment": 0, "post_like": 0, "post_image": 0, "post_topic": 0, "user_block": 0, "ai_call_log": 91, "post_appeal": 0, "user_action": 29, "user_follow": 0, "alert_ticket": 6, "chat_message": 104, "conversation": 52, "topic_follow": 0, "user_consent": 4, "user_profile": 1, "weekly_report": 2, "content_report": 0, "emotion_record": 61, "notify_message": 0, "anonymous_alias": 0, "item_similarity": 0, "post_status_log": 0, "private_message": 0, "recommend_result": 0} bytes=169060
+PASS [priv] 浏览器真的收到了一个非空的个人信息包裹（可携带权的最后一公里在界面上走通了）   <- 文件名=mindisle-export-2-20260928-160009.json 字节=169060
+  [图] 08-隐私中心-导出成功可下载.png —— FR1.6：可携带权 —— 导出任务 SUCCESS 并把包裹下载到本机（图上带回执提示）  <- 包裹=mindisle-export-2-20260928-160009.json/169060B 提示="导出包已生成，可以下载到本机 | 已保存到浏览器下载目录：mindisle-export-2-20260928-160009.json（165.1 KB）"
+PASS [priv] 注销按钮在正常态显示的是「提交注销申请」（不是直接一个红的危险按钮）   <- visible=true
+PASS [priv] 第一下点下去只把按钮换成「再点一次确认注销」（FR1.7 的不可逆动作不许一下到位）   <- 按钮="再点一次确认注销"
+  [图] 09-隐私中心-注销二次确认.png —— FR1.7：注销账号的两段式确认（30 天冷静期入口，本图没提交）  <- 按钮="再点一次确认注销"
+PASS [priv] 5 秒不点第二下自己回到原态（armed 是个会过期的状态，不是一个悬在半空的危险按钮）   <- 按钮="提交注销申请"
+PASS [priv] 这一屏没有 console error / 未捕获异常 / 4xx·5xx   <- console=0 pageerror=0 http=[]
+
+---- 阶段4 取证汇总：PASS 63 / FAIL 0 / 图 11 张 ----
+  [PASS] 01-AI对话-流式回复与Markdown编号列表.png —— U7：屿屿的流式回复与渲染成有序列表的 Markdown（ol.md-ol / li.md-li） / li=3 编号行=3 whiteSpace=normal
+  [PASS] 02-AI对话-情绪标签与免责脚注.png —— U7：气泡下方的情绪标签、判定通道、真实耗时与页面常驻免责脚注（含 12356）；整页图，内层滚动容器不参与可见性判定 / 标签=true 脚注在屏=true me.meta="09-28 15:59恐惧· 词典初判"
+  [PASS] 03-AI对话-L2L3危机卡.png —— U7/FR10：L2 危机轮次置顶的求助卡（12356 + 完整求助页入口） / badge=L2 需要专业支持 lv=2 回复长度=136
+  [PASS] 04-情绪档案-趋势与分布.png —— U9：情绪档案的趋势图与分布图（ECharts 在真浏览器里画出来了） / canvas=6 已画=6
+  [PASS] 04b-情绪档案-整页.png —— U9：整页（打卡 / 档案 / 周报 / 数据用途说明），验长页不破版 / h2 数=4
+  [PASS] 05-详情页-停留计时中.png —— U4/FR5.1：详情页停留计时读数（够一次浏览 / 尚未读到底） / 本页已读 4 秒 · 够一次浏览 · 未读到底
+  [PASS] 06-详情页-已读到底.png —— U4/FR5.1：滚到底之后的完读态（2 分那一档的界面侧证据） / 本页已读 5 秒 · 够一次浏览 · 已读到底（完读计 2 分）
+  [PASS] 07-隐私中心-概览与逐域对账.png —— FR1.5：可查看、可核对 —— 账号状态 + 逐域条数对账表（默认只看有条数的域） / 合计 350 条 / 9 行
+  [PASS] 07b-隐私中心-逐域全表.png —— FR1.5：关掉「只看有条数的域」之后的全表对账（注册表里每个域都在，含 0 行） / 全表 25 行 / 合计 350 条
+  [PASS] 08-隐私中心-导出成功可下载.png —— FR1.6：可携带权 —— 导出任务 SUCCESS 并把包裹下载到本机（图上带回执提示） / 包裹=mindisle-export-2-20260928-160009.json/169060B 提示="导出包已生成，可以下载到本机 | 已保存到浏览器下载目录：mindisle-export-2-20260928-160009.json（165.1 KB）"
+  [PASS] 09-隐私中心-注销二次确认.png —— FR1.7：注销账号的两段式确认（30 天冷静期入口，本图没提交） / 按钮="再点一次确认注销"
+# 控制台红字合计 console=0 pageerror=0 http=0
+# 本轮夹具：读者=demo01(id=2) 作者=demo03(id=4) 帖子 id=1094
+# 本轮新建的 AI 会话（落库对账之后再删）：[{"tag":"A-编号列表","id":59},{"tag":"B-危机轮","id":60}]

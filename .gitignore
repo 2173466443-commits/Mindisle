@@ -53,3 +53,8 @@ __pycache__/
 # 不是运行时日志，且 docs/gate/阶段3/README.md 与 制作步骤文档.md §6.4 都按文件名引用它们，必须入库。
 # 这里用显式 negation 而不是 git add -f：-f 之后文件仍被规则忽略，重新生成时改动不会出现在 git status 里，证据会和仓库副本悄悄分叉。
 !docs/gate/**/*.log
+# 运行期隐私导出包（PIPL 用户数据本体，含对话原文，绝不入库）
+backend/data/
+
+# 证伪/改写留下的源码备份，只留本机（与上面的 *.bak 同族）
+*.pre

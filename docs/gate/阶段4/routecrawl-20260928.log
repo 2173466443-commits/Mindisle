@@ -1,0 +1,34 @@
+PASS [cold /feed] 广场冷启动就画出真实帖子卡片（≥5 张），不是骨架屏也不是空列表   <- path=/feed cards=27 canvas=0/0 inputs=14 textarea=1 conv=0 chartErr=0 bodyChars=3401
+PASS [cold /feed] 这一段没有未捕获异常、也没有 4xx/5xx 或取不到的资源（动态 import 失败就死在这里）
+PASS [cold /search] 搜索页进来就有可输入的关键词框（三个 Tab 共用同一个输入框）   <- path=/search cards=1 canvas=0/0 inputs=8 textarea=0 conv=0 chartErr=0 bodyChars=527
+PASS [cold /search] 这一段没有未捕获异常、也没有 4xx/5xx 或取不到的资源（动态 import 失败就死在这里）
+PASS [cold /publish] 发布页直达即可发帖：正文 textarea 与话题/可见性控件都在   <- path=/publish cards=2 canvas=0/0 inputs=8 textarea=1 conv=0 chartErr=0 bodyChars=554
+PASS [cold /publish] 这一段没有未捕获异常、也没有 4xx/5xx 或取不到的资源（动态 import 失败就死在这里）
+PASS [cold /ai] 对话页有输入框且有历史会话（刻意不发消息，免得把危机分级记录写进演示库）   <- path=/ai cards=4 canvas=0/0 inputs=0 textarea=1 conv=48 chartErr=0 bodyChars=2442
+PASS [cold /ai] 这一段没有未捕获异常、也没有 4xx/5xx 或取不到的资源（动态 import 失败就死在这里）
+PASS [cold /emotion] 情绪档案四图直链打开就都画出来（≥4 张有尺寸的 canvas），且没有渲染异常横幅   <- path=/emotion cards=4 canvas=6/6 inputs=10 textarea=1 conv=0 chartErr=0 bodyChars=1243
+PASS [cold /emotion] 这一段没有未捕获异常、也没有 4xx/5xx 或取不到的资源（动态 import 失败就死在这里）
+PASS [cold /me] 个人中心有资料卡与「我的帖子 / 情绪档案」入口，读数不是空壳   <- path=/me cards=3 canvas=0/0 inputs=5 textarea=0 conv=0 chartErr=0 bodyChars=1181
+PASS [cold /me] 这一段没有未捕获异常、也没有 4xx/5xx 或取不到的资源（动态 import 失败就死在这里）
+PASS [cold /help] 求助页把三条热线 + 120/110 + 「不是医疗诊断」一起摆出来（缺一即挂，与字数无关）   <- path=/help cards=1 canvas=0/0 inputs=0 textarea=0 conv=0 chartErr=0 bodyChars=207
+PASS [cold /help] 这一段没有未捕获异常、也没有 4xx/5xx 或取不到的资源（动态 import 失败就死在这里）
+PASS [click 搜索] 点顶栏那个字，地址真的变成了 /search   <- path=/search cards=1 canvas=0
+PASS [click 搜索] 点击过程中没有新冒出异常 / 4xx·5xx / console error（504 Outdated Optimize Dep 就落在这条）
+PASS [click 发布] 点顶栏那个字，地址真的变成了 /publish   <- path=/publish cards=2 canvas=0
+PASS [click 发布] 点击过程中没有新冒出异常 / 4xx·5xx / console error（504 Outdated Optimize Dep 就落在这条）
+PASS [click 屿屿] 点顶栏那个字，地址真的变成了 /ai   <- path=/ai cards=4 canvas=0
+PASS [click 屿屿] 点击过程中没有新冒出异常 / 4xx·5xx / console error（504 Outdated Optimize Dep 就落在这条）
+PASS [click 情绪] 点顶栏那个字，地址真的变成了 /emotion   <- path=/emotion cards=4 canvas=6
+PASS [click 情绪] 点击过程中没有新冒出异常 / 4xx·5xx / console error（504 Outdated Optimize Dep 就落在这条）
+PASS [click 我的] 点顶栏那个字，地址真的变成了 /me   <- path=/me cards=3 canvas=0
+PASS [click 我的] 点击过程中没有新冒出异常 / 4xx·5xx / console error（504 Outdated Optimize Dep 就落在这条）
+PASS [click 需要帮助？] 点顶栏那个字，地址真的变成了 /help   <- path=/help cards=1 canvas=0
+PASS [click 需要帮助？] 点击过程中没有新冒出异常 / 4xx·5xx / console error（504 Outdated Optimize Dep 就落在这条）
+PASS [feed] 「后端尚未实现的接口」那张卡片里不再出现 POST /api/emotions/checkin —— 这条接口已经落地并且真出图了，写在表里就是假话   <- 命中=false
+PASS [feed] 推荐流占位卡把排期说准了：只有阶段 7，不再捎上一个并不做推荐的阶段 6   <- 命中「阶段 7 未实现」=true 残留「阶段 6/7」=false
+PASS [nav] 顶栏入口叫「屿屿」，与 system prompt 里那个同伴名字同一个（屿灵是旧名，两处不同名会被问）   <- 广场 搜索 发布 屿屿 情绪 我的 隐私 需要帮助？
+PASS [emotion] 情绪档案四图都真的画出来了（≥4 张有尺寸的 canvas），且页面没有「数据到了但图没画出来」那条横幅   <- canvas=6 inked=6 chartErr=[]
+PASS [ai] 对话页有输入框且有会话列表（不发消息，避免把危机分级记录写进演示库）   <- textarea=1 conv=48
+PASS [help-anon] 不带 token 直开 /help 也不被踢回登录页，热线照样显示（FR10 硬要求）   <- path=/help 含12356=true
+---- 汇总：32 项，失败 0 项
+# 全程 bad: console=0 pageerror=0 http=0 reqfail=0

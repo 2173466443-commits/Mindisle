@@ -82,7 +82,7 @@
       </template>
     </section>
 
-    <!-- 3 推荐流：后端仍是 90001，占位说明保留（阶段 6/7 才接真逻辑） -->
+    <!-- 3 推荐流：后端仍是 90001，占位说明保留（召回 T7.2/T7.5 与情绪加权 T7.4 都在阶段 7） -->
     <section class="mi-card">
       <div class="sec-head">
         <h2>为你推荐</h2>
@@ -90,7 +90,7 @@
       </div>
       <p class="formula">排序目标 emotion_match(u, i) = 1 − | valence_now(u) − comfort_valence(i) |，仅在当前心情为负向时启用（需求 §1.5 创新点 2）。</p>
       <stage-notice v-if="codes.recommend" :code="codes.recommend" :stage="RECOMMEND_STAGE" api-name="GET /api/feed/recommend" />
-      <el-empty v-else-if="!recList.length" description="暂无推荐结果（召回与加权分别排在阶段 3 / 阶段 4）" />
+      <el-empty v-else-if="!recList.length" description="暂无推荐结果：召回（T7.2/T7.5）与情绪加权（T7.4）都排在阶段 7；阶段 4 交付的是它们要用的情绪档案，不是这条流本身" />
       <ul v-else class="lines">
         <li v-for="(r, i) in recList" :key="i">{{ r.title || r.name || JSON.stringify(r) }}</li>
       </ul>
@@ -206,14 +206,14 @@ const activeType = ref('')
 const busy = reactive({ topics: false, recommend: false })
 
 /* 推荐流的两件事，分开看：
-   1) 后端 GET /api/feed/recommend 在阶段 6/7 之前**恒返 90001 / HTTP 501**（这是刻意的诚实占位，不用假数据糊弄演示）；
+   1) 后端 GET /api/feed/recommend 在阶段 7 之前**恒返 90001 / HTTP 501**（这是刻意的诚实占位，不用假数据糊弄演示）；
    2) 前端过去在 onMounted 里就调它一次，为一个**已经知道答案的问题**发请求，代价是每次进广场
       DevTools 都多一条红色 501 —— Gate3 第 4 条要「无 console 红字」，而这条红字既不是故障也没带来新信息。
    所以：占位说明改成由 RECOMMEND_LANDED 这个开关决定的静态状态，页面照常把「为什么这里没内容」讲清楚；
    「刷新」按钮仍然真调这个接口，后端哪天接上，点一下就出真数据，不需要改回前端。
    协同过滤落地时把 RECOMMEND_LANDED 置 true（并把 RECOMMEND_STAGE 里的「未实现」文案改掉）。 */
 const RECOMMEND_LANDED = false
-const RECOMMEND_STAGE = '6/7'
+const RECOMMEND_STAGE = '7' // 与手册 §15 阶段 7 表、api/auth.js 同一口径：召回与加权都在 T7.x
 const codes = reactive({ topics: null, recommend: RECOMMEND_LANDED ? null : 90001 })
 // 创建话题弹窗的状态。done 与 error 在每次敲字时清掉：留着一份旧回执，
 // 用户会以为「第二次提交的结果」就是屏幕上那一块，而它其实是上一次的。

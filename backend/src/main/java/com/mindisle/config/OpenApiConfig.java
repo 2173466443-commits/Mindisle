@@ -14,7 +14,7 @@ import org.springframework.context.annotation.Configuration;
  * OpenAPI 分组（springdoc-openapi 3.1.1，见手册 §5.3）。
  *
  * <p>分组口径与 Gate 2 验收一致：在 /doc.html 的下拉里能看到分组列表——阶段 2 为 5 个，阶段 3 先加「06-audit 内容安全」
- * 与「07-file 文件与上传」到 7 个，任务 T3.11-b 再加「08-notify 站内通知」到 8 个，任务 T3.9 加「09-search 站内搜索」到 9 个；
+ * 与「07-file 文件与上传」到 7 个，任务 T3.11-b 再加「08-notify 站内通知」到 8 个，任务 T3.9 加「09-search 站内搜索」到 9 个，任务 T4.2/T4.5 加「10-ai AI 对话」到 10 个（阶段 4 的全部 6 条路径都在这一组）；
  * 接口总数不少于 20，论文第 6 章接口清单按同一口径统计，避免答辩时数字对不上。</p>
  *
  * <p><b>分组数没有被任何脚本写死</b>：手册 v1.2.0 之前有一句「Swagger 的 @Tag 分组数被 docs/openapi-check
@@ -90,5 +90,31 @@ public class OpenApiConfig {
     public GroupedOpenApi searchApi() {
         return GroupedOpenApi.builder().group("09-search 站内搜索")
                 .pathsToMatch("/api/search/**").build();
+    }
+
+    /**
+     * 情绪域分组（任务 T4.9 / T4.10 / T4.20）。
+     *
+     * <p>单独成组而不并进「10-ai」：这四条路径一个模型调用都不发（周报是唯一例外，
+     * 它发一次且不阻塞），闸门也不同——AI 对话要过同意闸 + 预算闸 + 限流 6 次/分，
+     * 情绪打卡只要「登录 + 同意」。混在一组，文档上就看不出这两套闸门差在哪。</p>
+     */
+    @Bean
+    public GroupedOpenApi emotionApi() {
+        return GroupedOpenApi.builder().group("11-emotion 情绪与档案")
+                .pathsToMatch("/api/emotions/**").build();
+    }
+
+    /**
+     * AI 对话分组（任务 T4.2 / T4.5 / T4.19）。
+     *
+     * <p>它必须单独存在：本域的 {@code POST /api/ai/chat/stream} 出参是 text/event-stream，
+     * 整批新路径如果漏了这里的 pathsToMatch，在 /doc.html 上会一条都看不见，
+     * 而答辩要演示的恰好是这一域（类注释里的「新增路径必须同步加分组」就是这个意思）。</p>
+     */
+    @Bean
+    public GroupedOpenApi aiApi() {
+        return GroupedOpenApi.builder().group("10-ai AI 对话")
+                .pathsToMatch("/api/ai/**").build();
     }
 }

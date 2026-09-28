@@ -45,6 +45,23 @@ public class User {
   /** ACTIVE / MUTED / BANNED / DELETED。 */
   private String status;
 
+  /**
+   * 提交注销的时刻（任务 T4.21 状态机 active → cooling → purged 的 cooling 入口时间戳）。
+   *
+   * <p>冷静期内登录即视为撤回注销、本列置回 null（见 {@code CoolingState#restore}）。
+   * 列的 DDL 在 sql/15_stage4_backfill.sql 第 3 条，可重入。</p>
+   */
+  private LocalDateTime deactivateAt;
+
+  /**
+   * 物理清除的到期时刻 = deactivateAt + 冷静期天数 的物化冗余（需求 BR11）。
+   *
+   * <p>之所以冗余成一列而不是每次现算：{@code DataRetentionJob} 的扫描条件是
+   * {@code status = ? AND purge_at <= now}，只有实列才能吃到 sql/15 建的 idx_status_purge；
+   * 写成 {@code deactivate_at + INTERVAL 30 DAY} 就是函数比较，索引失效、每天全表扫。</p>
+   */
+  private LocalDateTime purgeAt;
+
   /** USER / ADMIN / SUPER，权限唯一来源（需求 A9 可审计）。 */
   private String role;
 

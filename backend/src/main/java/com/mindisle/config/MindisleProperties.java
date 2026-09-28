@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import lombok.Data;
+import lombok.ToString;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -42,15 +43,99 @@ public class MindisleProperties {
     private Search search = new Search();
     /** 话题创建与关注（任务 T3.8 · 手册 §6.1 行 3.8）。 */
     private Topic topic = new Topic();
+    /**
+     * 定时任务（任务 T4.20 情绪周报 · T4.21 数据保留清除）。
+     *
+     * <p>cron 与开关全部外置：手册 §7.5 给的是「周日晚 21:00」这一条口径，但它是运维口径
+     * 而不是业务逻辑 —— 演示时想当场跑一批，改配置或传参即可，不必发版。
+     * 名字用 {@code Schedule} 而不是 {@code Report}：{@code Report} 在本类里已被「举报」占用
+     * （{@link Report} = 需求 FR4.7 的举报阈值），两个语义共用同一个键会让 yml 里
+     * {@code mindisle.report.*} 同时属于两件事。</p>
+     */
+    private Schedule schedule = new Schedule();
+    /**
+     * 隐私中心（任务 T4.21 · 需求 FR1.6、NFR8、BR11、D11）。
+     *
+     * <p>单独一个子节而不是塞进 {@link Schedule}：{@code Schedule} 装的是「什么时候跑」，
+     * 这里装的是「跑到什么程度、产物放哪、留几天」，两件事的变更理由不同 ——
+     * 前者随运维窗口改，后者随合规口径改。键名用 {@code mindisle.privacy.*}，
+     * 与 {@code /api/privacy/**} 这组端点同名，排查时一眼能对上。</p>
+     */
+    private Privacy privacy = new Privacy();
 
     @Data
     public static class Cache {
         private String mode = "local";
     }
 
+    /**
+     * 大模型接入（任务 T4.1 三实现开关 + T4.3 上下文预算 + T4.13 成本熔断）。
+     *
+     * <p><b>api-key 与 spring.ai.deepseek.api-key 是同一个环境变量的两次绑定，不是两份真值</b>：
+     * Spring AI 那条给 SpringAiLlmClient 用（它自己读 spring.ai.* 装配 ChatModel bean），
+     * 这一条给 RawHttpLlmClient 用（它不经过 Spring AI，必须自己拿 Key）。
+     * 两处都写 {@code ${DEEPSEEK_API_KEY}}，所以轮换密钥只改 .env 一个地方。
+     * 之所以要绑两次而不是一方引用另一方：{@code spring.ai.*} 是第三方命名空间，
+     * 让我们的代码去读它，等于把「配置从哪来」这件事写进业务代码里。</p>
+     *
+     * <p><b>{@code @ToString.Exclude} 是硬要求</b>：这个类是 {@code @Data}，
+     * Lombok 会把每个字段编进 toString()。而 MindisleProperties 是 bean，
+     * 任何一次「顺手把配置对象打进日志」的调试语句都会把密钥写进日志文件——
+     * 而日志盘是可读的吗？是。排除掉这一位，事故就不可能发生。</p>
+     *
+     * <p>{@code thinkingEnabled} 默认 <b>false</b>，是 dev-log 记的「事实 B」的直接后果：
+     * deepseek-flash 是思考型模型，请求里不带 {@code thinking:{type:"disabled"}} 时，
+     * 实测首包 484 个字符全在 reasoning_content 里、content 长度为 0，
+     * 于是 SSE 一个字都上不了屏，界面表现是「转圈转到超时」。
+     * 关掉之后 firstContentMs=601ms。这个字段必须由单测钉住（见 SpringAiLlmClientThinkingTest），
+     * 因为它是那种「改回默认值就静默失效」的配置——没有异常、没有日志、只有白屏。</p>
+     */
     @Data
     public static class Llm {
+        /** spring-ai | raw-http | mock。见 {@code LlmClientConfiguration} 的装配分支。 */
         private String provider = "spring-ai";
+        private String baseUrl = "https://api.deepseek.com";
+        /** 只从环境变量来，仓库内不出现明文；同时被排除出 toString，见类注释。 */
+        @ToString.Exclude
+        private String apiKey;
+        /** 默认模型名。deepseek-flash 为思考型，必须配 thinkingEnabled=false 才能流式上屏。 */
+        private String model = "deepseek-flash";
+        private double temperature = 0.7;
+        /** 单次生成上限（FR2.2 的回复本来就要求短，800 token 足够，多给只会多花钱）。 */
+        private int maxTokens = 800;
+        /** 思考链开关，默认关，理由见类注释。 */
+        private boolean thinkingEnabled = false;
+        private int connectTimeoutMs = 5000;
+        /** 读超时：单帧之间最长可容忍的空窗（DeepSeek 思考时可能几秒不吐字）。 */
+        private int readTimeoutMs = 60000;
+        /** SseEmitter 的总时长上限，手册 T4.5 写的 30s。 */
+        private int sseTimeoutMs = 30000;
+        /** 每 1k input token 的单价，单位「分」。上线前必须按官网核对（见 dev-log）。 */
+        private double priceInCentPer1k = 0.1d;
+        /** 每 1k output token 的单价，单位「分」。 */
+        private double priceOutCentPer1k = 0.2d;
+        /** 单用户保留的活跃会话数上限（任务 T4.2「超出逻辑删除最旧」）。 */
+        private int keepConversations = 50;
+        /** 会话标题取首条用户消息的前 N 字（T4.2）。 */
+        private int titleMaxChars = 20;
+        /** 上下文带最近几轮（T4.3，一轮 = 一问一答）。 */
+        private int contextRounds = 8;
+        /** 超过这个轮数触发摘要压缩（T4.3）。 */
+        private int summaryTriggerRounds = 12;
+        /** 摘要字数上限（T4.3，落库前再截一次，因为模型不总是听话）。 */
+        private int summaryMaxChars = 200;
+        /** 上下文的 token 预算，估算是超了就截断并置 truncated=true（T4.3）。 */
+        private int contextMaxTokens = 6000;
+        /** BR12：置信度低于这个值的记录不进趋势线。 */
+        private double emotionConfidentMin = 0.6d;
+        /** 级联闸门：词典通道置信度低于这个值就升级送 LLM（需求 §8.1、创新点 1）。 */
+        private double emotionLlmFallbackBelow = 0.55d;
+        /** 风险双通道的模型侧总开关（T4.11）。关掉时只走词面规则，工单照建，论文可对照。 */
+        private boolean riskLlmEnabled = true;
+        /** 连续失败几次进熔断（T4.13）。 */
+        private int circuitFailThreshold = 3;
+        /** 熔断后多久放行一次试探（半开），毫秒。 */
+        private long circuitHalfOpenMs = 60000;
     }
 
     @Data
@@ -281,5 +366,89 @@ public class MindisleProperties {
          * 这里默认关是「别让默认配置走一条已知会抛异常的路」，而不是「全文没做」。</p>
          */
         private boolean fulltext = false;
+    }
+
+    /**
+     * 定时任务配置（任务 T4.20 · 手册 §7.5）。
+     *
+     * <p>这里每一个批次上限都是<b>钱闸</b>：跑一次周报 = 一次 LLM 调用。上限放在配置里，
+     * 是为了让「今天先少跑点」这种决定不需要改代码，也让 FR2.10 的日预算有一条能被调的闸。
+     * cron 用 Spring 六段式（秒 分 时 日 月 周）。</p>
+     */
+    @Data
+    public static class Schedule {
+        /**
+         * 情绪周报批次的 cron，缺省「每周日 21:00:00」。
+         *
+         * <p>{@code ? * SUN} 里那个 {@code ?} 是 Spring/Quartz 六段式的写法：「日」与「周」
+         * 不能同时指定，用 {@code ?} 占住「日」这一位。把它换成 {@code *} 会让每个既是 1 号
+         * 又是周日的日子多命中一次；写成五位则直接解析失败。这一串由 {@code WeeklyReportJobTest}
+         * 用 {@code CronExpression.parse} 真算了一次下一个触发时刻来钉住 —— 光断言字符串相等
+         * 挡不住「语法合法但跑错日子」。</p>
+         */
+        private String weeklyReportCron = "0 0 21 ? * SUN";
+        /** 周报批次总开关。关掉时任务入口打一条 INFO 说明本次跳过，而不是沉默。 */
+        private boolean weeklyReportEnabled = true;
+        /**
+         * 单批最多重算多少个用户的周报（手册 §7.5「单批 ≤ 200 人」）。
+         *
+         * <p>它只能把上界调小：{@code WeeklyReportJob.MAX_BATCH} 是代码里的硬上限，
+         * 配置写 10000 也会被夹回 200。理由是这条约束的存在理由（一次批次别把日预算吃穿）
+         * 不随环境改变 —— 能被配置突破的闸不是闸。</p>
+         */
+        private int weeklyReportBatchLimit = 200;
+        /**
+         * 数据保留清除的 cron，缺省「每天 03:30:00」。
+         *
+         * <p>消费方是 T4.21 的 {@code DataRetentionJob}（冷静期届满后的物理清除）。
+         * 选凌晨三点：与周报的周日 21:00 错开，且这段时间在线人数最低 ——
+         * 清除是一次跨多表的大批 DELETE，撞在演示时间会当场把库锁住。</p>
+         */
+        private String retentionCron = "0 30 3 * * ?";
+        /** 清除任务开关。关掉 = 冷静期永远不到期、注销用户的数据一直留着（演示期可以，交付不行）。 */
+        private boolean retentionEnabled = true;
+        /**
+         * 单批最多物理清除几个账号（手册 §7.5「到期清除」）。
+         *
+         * <p>缺省 50 而不是 200：清除一个账号 = 一次跨 20 多张表的 DELETE 事务，
+         * 比周报的一次 LLM 调用重得多，批次开大了会把库锁在演示时间之外的一整段时间里。
+         * 与周报同一个纪律：这个值只能把上界调小，{@code DataRetentionJob.MAX_BATCH} 才是上界。</p>
+         */
+        private int retentionBatchLimit = 50;
+    }
+
+    /**
+     * 隐私中心配置（任务 T4.21）。四个键分别管一件事：产物落哪、链接活多久、
+     * 冷静期多长、单表最多导出多少行。
+     */
+    @Data
+    public static class Privacy {
+        /**
+         * 导出产物目录。缺省相对路径 {@code ./data/privacy-export}，
+         * 与上传目录同一套「相对启动目录」的口径（见 {@code FileController}）。
+         *
+         * <p>产物是<b>全库最敏感的一批文件</b>：一个 zip 里装着某个人的全部聊天、情绪、
+         * 帖子与授权流水。所以它不在静态资源目录里（否则任何人拼得出路径），
+         * 只能通过 {@code GET /api/privacy/export/file} 带 JWT 与口令取。</p>
+         */
+        private String exportDir = "./data/privacy-export";
+        /** 下载链接有效期（小时），需求 FR1.6 原文是「24h 失效」。 */
+        private int linkTtlHours = 24;
+        /**
+         * 注销冷静期（天）。手册 §7.5 给 30 天：期内登录即自动撤回注销。
+         *
+         * <p>{@code <= 0} 会被 {@code CoolingState#purgeTime} 夹回 1 天，
+         * 因为「配成 0 = 提交即清除」是把主体权利做成了自毁开关。</p>
+         */
+        private int coolingDays = 30;
+        /**
+         * 单表单次最多导出的行数。
+         *
+         * <p>它挡的是「导出把堆吃穿」这一件事：chat_message 与 ai_call_log 是最容易长到几十万行的表，
+         * 一次全量读进内存做 JSON 序列化，演示机上会先 OOM 再谈合规。
+         * 截断不是静默行为 —— 读到 limit 行时 {@code truncated} 会记进 {@code row_counts} 的对账，
+         * 概览页与导出包都能看到「这一域被截断了」。</p>
+         */
+        private int maxRowsPerTable = 5000;
     }
 }

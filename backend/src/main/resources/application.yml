@@ -49,6 +49,22 @@ spring:
         options:
           model: ${DEEPSEEK_MODEL:deepseek-flash}
           temperature: 0.7
+    # ── v1.2.7（阶段 4 · 续 13）框架重试必须收敛在自建 SSE 预算之内 ─────────────────
+    # Spring AI 2.0.1 的 spring.ai.retry 默认值是 max-attempts=10、backoff 2s × multiplier=5，
+    # 一次断网最坏会退避到分钟级，直接吃穿下面 mindisle.llm.sse-timeout-ms=30000 的 SseEmitter 预算。
+    # 实测症状（_cache/009_mindisle/backend-8081-offline.log + degrade_r17.log）：
+    #   SpringAiRetryAutoConfiguration "Retry error. Retry count:5..13" → 30s 到点
+    #   → AsyncRequestTimeoutException → HTTP 503 / 0 帧 → 前端只报「发送失败」，
+    #   离线兜底话术根本没机会上屏；recordFailure 也等不到返回 ⇒ 熔断器永远打不开。
+    # 本项目已有「有限重试 + 熔断 + 离线话术库」三层自研降级（T4.13），框架层重试只留一次瞬断补偿。
+    # 判据：断网后从发出请求到离线话术上屏 < 10s（Gate4 §7.4 断网演示）。
+    retry:
+      max-attempts: 2                # 1 次原始调用 + 1 次重试
+      backoff:
+        initial-interval: 200ms
+        multiplier: 2
+        max-interval: 1s
+      on-client-errors: false        # 401（密钥错）不是瞬断，重试只会把预算烧光
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss.SSS
     time-zone: Asia/Shanghai
@@ -98,8 +114,34 @@ mindisle:
   cache:
     # 用占位符而非裸 local：.env 里的 MINDISLE_CACHE_MODE 经 EnvLoader 变成系统属性后才生效（偏差已记 dev-log）
     mode: ${MINDISLE_CACHE_MODE:local}     # local | redis
-  llm:
-    provider: spring-ai          # spring-ai | raw-http | mock（T4.1 三实现开关）
+  llm:                           # 任务 T4.1/T4.3/T4.13，键位含义见 MindisleProperties.Llm 的 javadoc
+    provider: ${MINDISLE_LLM_PROVIDER:spring-ai}   # spring-ai | raw-http | mock
+    base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    # 与上面 spring.ai.deepseek.api-key 是同一个环境变量的两次绑定，不是两份真值（理由见 Llm 类注释）
+    api-key: ${DEEPSEEK_API_KEY:}
+    model: ${DEEPSEEK_MODEL:deepseek-flash}
+    temperature: 0.7
+    max-tokens: 800
+    # ⚠ 事实 B（dev-log 阶段 4）：deepseek-flash 是思考型模型，这一位改成 true
+    #   就会让 SSE 一个字都不上屏（content 恒空、reasoning 有内容），界面表现为转圈到超时。
+    #   由 SpringAiLlmClientThinkingTest 钉住，改动会先让那条测试变红。
+    thinking-enabled: false
+    connect-timeout-ms: 5000
+    read-timeout-ms: 60000
+    sse-timeout-ms: 30000        # 手册 T4.5 的 SseEmitter(30_000)
+    price-in-cent-per-1k: 0.1    # 每 1k 输入 token 的分价，上线前按官网核对
+    price-out-cent-per-1k: 0.2   # 每 1k 输出 token 的分价
+    keep-conversations: 50       # T4.2 单用户活跃会话上限
+    title-max-chars: 20          # T4.2 标题取首条用户消息前 N 字
+    context-rounds: 8            # T4.3 带最近几轮
+    summary-trigger-rounds: 12   # T4.3 超轮数触发摘要压缩
+    summary-max-chars: 200       # T4.3 摘要字数上限
+    context-max-tokens: 6000     # T4.3 上下文 token 预算，超了截断并记 truncated
+    emotion-confident-min: 0.6   # BR12 低于此置信度不进趋势
+    emotion-llm-fallback-below: 0.55   # 创新点 1 的级联闸门
+    risk-llm-enabled: true       # T4.11 风险模型侧开关
+    circuit-fail-threshold: 3    # T4.13 连续失败进熔断的次数
+    circuit-half-open-ms: 60000  # T4.13 熔断后半开探测间隔
   env-file: ../.env              # 相对 backend/ 工作目录，见 §5.7
   upload:
     dir: ./uploads               # dev 落在 backend/uploads（已被 .gitignore 排除）
@@ -169,6 +211,26 @@ mindisle:
     # 所以自动化冒烟拿不到它 —— 只有本地开发/CI 才显式设 MINDISLE_CAPTCHA_ENABLED=false，
     # 关掉后启动会打一条 WARN（生产误关能被看见）。
     enabled: ${MINDISLE_CAPTCHA_ENABLED:true}
+
+  schedule:                        # 任务 T4.20 情绪周报定时批次（手册 §7.5 · NFR10 不写死）
+    # cron 是 Spring 六段式（秒 分 时 日 月 周）；? * SUN = 每周日。「日」与「周」不能同时指定，
+    # 用 ? 占住「日」这一位。这一串由 WeeklyReportJobTest 用 CronExpression.parse 真算过一次
+    # 下一个触发时刻来钉住 —— 改坏它（比如把 SUN 写成 SAT）会当场跑红。
+    weekly-report-cron: "0 0 21 ? * SUN"   # 周日晚 21:00：手册 §7.5 给的就是这一条口径
+    weekly-report-enabled: ${MINDISLE_WEEKLY_REPORT_ENABLED:true}   # 关掉时任务入口打一条 INFO 说明本次跳过，不静默
+    weekly-report-batch-limit: 200         # 钱闸：一次周报 = 一次 LLM 调用。只能调小，代码里 MAX_BATCH=200 是上界
+    # T4.21 数据保留清除（注销冷静期届满后的物理删除）。凌晨三点：与周报错开，且在线人数最低
+    retention-cron: "0 30 3 * * ?"
+    retention-enabled: ${MINDISLE_RETENTION_ENABLED:true}
+    retention-batch-limit: 50            # 清除一个账号 = 跨 20 多张表的 DELETE 事务，比一次 LLM 调用重得多，故上界比周报小
+
+  privacy:                        # 任务 T4.21 隐私中心（需求 FR1.6 导出与注销 · NFR8 · BR11 · D11）
+    # 产物目录：全库最敏感的一批文件（一个人的全部聊天+情绪+帖子+授权流水）。
+    # 不放在静态资源目录下 —— 那样任何人拼得出路径；只能经 GET /api/privacy/export/file 带 JWT 与下载口令取。
+    export-dir: ${MINDISLE_PRIVACY_EXPORT_DIR:./data/privacy-export}
+    link-ttl-hours: 24            # FR1.6 原文口径「下载链接 24h 失效」
+    cooling-days: 30              # 手册 §7.5：冷静期内登录即自动撤回注销；配成 0 会被代码夹回 1 天（见 CoolingState#purgeTime）
+    max-rows-per-table: 5000      # 单表行数闸：挡住「把 chat_message 全量读进内存序列化」把堆吃穿；被截断会记进导出对账，不静默
 
 logging:
   pattern:

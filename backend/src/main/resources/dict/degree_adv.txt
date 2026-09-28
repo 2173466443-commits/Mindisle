@@ -1,0 +1,59 @@
+# 心屿 MindIsle · 程度副词乘子表（T4.7 ③修正）· degree-v1.0
+# 本文件由人工整理，与 dut_emotion.tsv 一样带版本标识，运行时写进 emotion_record.model_version。
+# 列：word	multiplier	position(pre=词前/post=词后/any)	note
+# 乘子作用于词典基础强度（1-5），结果夹回 [1,5]；单字词只在紧邻情绪词时生效，避免「好处」被算成程度。
+快要	2.0	pre	「快要哭了」：临近态比原级更重
+就要	2.0	pre	
+立马	1.8	pre	
+极其	1.8	pre	
+极为	1.8	pre	
+极度	1.8	pre	
+万分	1.8	pre	
+无比	1.8	post	快乐无比
+透顶	1.8	post	烦透顶
+透	1.6	post	难过透了（单字后置，仅在紧接情绪词后生效）
+死了	1.6	post	烦死了 / 累死了
+极了	1.6	post	
+不行	1.6	post	难受得不行
+要命	1.6	post	
+得不得了	1.8	post	
+非常	1.5	pre	
+特别	1.5	pre	
+格外	1.5	pre	
+分外	1.5	pre	
+尤为	1.5	pre	
+超级	1.5	pre	
+超	1.5	pre	超烦
+巨	1.5	pre	巨难过（校园口语）
+爆	1.5	pre	累爆了
+太	1.5	pre	太难受了
+真的	1.4	pre	
+确实	1.3	pre	
+简直	1.5	pre	
+实在	1.3	pre	
+好	1.3	pre	好烦 / 好难过（单字，仅在紧邻情绪词时生效）
+很	1.3	pre	
+相当	1.4	pre	
+挺	1.2	pre	
+蛮	1.2	pre	
+比较	1.1	pre	
+较为	1.1	pre	
+还算	1.0	pre	
+更	1.5	pre	更烦了
+更加	1.5	pre	
+越发	1.5	pre	
+越来越	1.5	pre	越来越难受
+加倍	1.5	pre	
+最	1.6	pre	
+有点	0.6	pre	
+有些	0.6	pre	
+稍微	0.6	pre	
+稍稍	0.6	pre	
+略微	0.6	pre	
+略	0.6	pre	
+一点点	0.4	pre	
+一点	0.6	pre	
+多少	0.7	pre	
+不太	0.4	pre	不太开心：弱化而非否定，交给 negation 前先试这个
+算不上	0.3	pre	
+几乎	0.7	pre	

@@ -1266,3 +1266,51 @@ D_表行数  user 43 / post 111 / post_like 16 / user_follow 0
 - **现场图直证夹具污染（不再是推断）**：广场首屏两张卡是「探针话题162429920 乙 / 甲」，评论区里连着 6 条「配额验证第 N 条」。**这两张 live 图直接当「干净演示数据集」任务的验收前后对照**，不用再造。
 - 顺带记一条接口形状（本轮我自己猜错过一次）：分页返回是 **`data.list`**（不是 `items`），配 `hasMore` / `nextCursor` / `page` / `size` / `total`；`/api/topics` 那条本轮没量准（`tl[0]` 取空），**留给下次**，不影响上面的结论。
 - **行数自增一条，顺手把「数字漂移」写白**：本小节让 `docs/dev-log.md` **1258 → 1268 行**。`README.md` 与手册 v1.2.5 里印着的「dev-log 1258 行」是**提交 `2be8764` 那一刻**的现量，**不追改**——为了对齐文档去改历史数字，等于把日志写成宣传稿；正确做法是像这样在后面的小节里把新数报出来。
+
+## 2026-09-28 阶段 4（续 13）—— 手册回写：本轮最大的发现不是「还有多少没做」，而是「上一版把手表自己写低了 5 格」
+
+阶段 4（AI 对话 + 多通道情绪）的代码在 09-25 ~ 09-28 之间陆续长完，但 `制作步骤文档.md` 的阶段 4 表一直停在 **v1.2.6（09-24）** 的判断。本轮按上一轮留下的计划准备回写 T4.17–T4.21，**逐行读代码之后发现计划本身就是错的**：那五格不是「欠一项」，是**早已完工**。
+
+### 1. 五格被旧手册文本判低了（本轮逐字取证 + 现查库）
+
+| 格 | 旧手册（v1.2.6）怎么说 | 代码/库里实际是什么 |
+|---|---|---|
+| **T4.17** | 「仍欠两项：Markdown 渲染未做（全文 `v-html` 命中 0）、断流重试未做」 | `ChatView.vue` 现 **1010 行**；`frontend/src/utils/markdown.js` **220 行**自研安全渲染（`renderChatHtml` 216，L4 注释专门写「为什么不引 `markdown-it` + `DOMPurify`」）；断流重试 = `<p v-if="m.dropped">` 的「重新生成这一句」(127–129) + `retryLast(m)`(694) + `msg.retryText`(803)，且注释明写「这一句没有落库、也不计入今日配额」 |
+| **T4.18** | 「`docs/gate/阶段4/prompt-injection.md` —— **该文件不存在**，样例一条未跑」 | 该文档 **199 行**都在，`frontend/probe/injection.mjs` **PASS 95 / FAIL 0**（26 条语料 = 12 攻击 + 3 漏检回归 + 11 零误伤，另有对账「起跑 16 → 收尾 31 ⇒ 新增 15 = 期望 15」与三次证伪 A/B/C） |
+| **T4.19** | 「`user_action` 全仓零写入方，卡在 T3.10」 | `track/` 三件套 `UserActionCatalog`(210)/`UserActionRecorder`(235)/`UserActionStoreAdapter`(63) 齐全，`ConversationService` 206–208 注释原文「**欠账已还**，上调 `UserActionRecorder#recordAiFeedback`」；库里 `user_action` **1,294 行、其中 `ai_feedback` 7 条** |
+| **T4.20** | 「全仓 `@Scheduled` **命中 0 处**，批量与分享未做」 | `emotion/WeeklyReportJob.java`(**167 行**) 的 `@Scheduled`(108) 就是第二处（第一处 `privacy/DataRetentionJob` 96 行）；`MAX_BATCH=200` + `Summary(…,generated,failed,truncated,…)`) + `WeeklyReportShareService`(197) + `ShareStore`(107)；库里 `weekly_report` **7 行** |
+| **T4.21** | 「`web/` 全域 grep `export`/`deactivate`/`privacy` **命中 0 处**，D11 因此不可签」 | `privacy/` **10 个类**（`PrivacyDomains` 244 行 / 34 域 = exportable 25 + forbidden 9）、`PrivacyController`(200 行 / **9 条端点**)、前端 `PrivacyView.vue`(485 行) 四块齐全、单测 4 个、`export_task` 库里 **20 行** |
+
+另外 T4.8（「补标不回改本轮消息」）与 T4.13（「`recordDegraded` 无条件写 `offline-empathy-bank` ⇒ 降级账不可信」）两条「仍欠」也在前几轮修完了：`relabel()`(782–821) 现在真的同时回写 `chat_message` 与 `emotion_record`；`degraded=1` 由 **0 → 16 行**，断网演示 15/15 才有意义。
+
+🔑 **本轮最值钱的一条，不是任何一个功能**：这五格的「欠」全都是**上一版手册自己写的字**，而我上一轮的核对方式是「读手册文本 → 定待办」。**读文档判状态 = 把过期文本当成事实**；只有读代码 + 现查库才判得准。已把这条写进手册收工口径，并在全局日志里立成规矩。
+
+### 2. 两条「假红」的根因（都在探针侧，不在产品侧）
+
+- **429 是共享身份限流**：两条重探针（`domprobe` + `shootgate`）同一分钟内起跑会撞同一个桶。判据：**先看是不是自己上一轮留下的窗口**，别急着改产品代码；复跑清单里加一条「两条写库探针不同分钟起跑」。
+- **`SIDEBAR_MAX=50` 会把最老的会话软删掉**：`ConversationService.create()`(107–122) 末尾调 `softDeleteBeyondQuota(userId, keep-conversations=50)`，于是「新建一条会话之后侧栏应该 +1」这类判据**只在未触达配额时成立**（库里现在 live 50 / 软删 67，正好压在闸口）。修法不是放宽断言，而是**把前提写进判据并在 PASS 行打印 `conv=` 读数** —— 已加守卫。
+- 顺带纠正一条记录口径：**D1 是 15 条判据，不是 14 条**（14 条是证伪轮 `--no-consent` 的读数）。这两数在上一版纪要里混过一次，本轮以 `docs/d1-onboarding.mjs` 打印的行为准。
+
+### 3. `er_passive` 那条「查不到被动识别数据」是**我 SQL 写错**，不是产品缺数据
+
+上一轮记：「`emotion_record` live 151 行，但 `SELECT … WHERE source='passive'` 返回 0 行 ⇒ 与 151 对不上，待复查」。本轮现查 `DISTINCT source`：**枚举只有 `checkin` / `chat` / `post`**，实际分布 **checkin 18 / chat 133 / post 0**。`passive` 是**接口层的折叠口径**（`EmotionProfileService` 126–127：`bySource.put("passive", total - checkin)`），库里从来没有这个值。**结论：被动识别 133 行一直都在，是查询条件用错了名字**；已在手册 T4.9 与 §7.4 D8 两处把这个「接口口径 ≠ 库枚举名」写白，避免下一轮再当成缺数据。
+
+### 4. 本轮产出的三份文档与手册回写
+
+- `docs/gate/阶段4/README.md`（120 行，**本轮之前已在**）：十条取证线读数 + §7.4 逐条签 + §3「这一目录**没有**证明的」边界清单 + §4 复跑顺序纪律。
+- `docs/gate/阶段4/prompt-injection.md`(199) / `emotion-channel-agreement.md` / `emotion_latency` 相关产物在 `论文材料/experiments/output/`（两份 .txt 每次 `mvn test` 重写 ⇒ 引用前看文件头生成时间）。
+- **手册 `制作步骤文档.md` → v1.2.8**：改写 1 行标题 + 修订日期 + T4.2/T4.8/T4.9/T4.13/T4.15/T4.16/T4.17/T4.18/T4.19/T4.20/T4.21 十一行 + 收工口径段 + §7.4 七条勾选；回写后由脚本重数得 **☑ 19 / ◐ 2 / ☐ 0**（◐ = T4.15 数据集三表两图、T4.16 D3 半条）。**口径**：`§7.3` 四条 ☐ 一条不签；**D3 整条不签**（只在前半打勾、后半明写结转 T6.1）——不为变绿而放宽。
+- 🔴 两个「行数」口径同时存在且都对：`[IO.File]::ReadAllLines` 给 **1863**、JS `split(/\r?\n/)` 给 **1864**（尾部换行多一个空元素）。本轮又差点把它当成「文件被写坏」，**下次先确认口径再下结论**。
+
+### 5. 十条线本轮现量（PASS 也要打印读数）
+
+`mvn -o -B test` **529/0/0/1 skipped**（BUILD SUCCESS 11.94s）· `npm run build` **✓ 2380 modules / exit 0** · `smoke.mjs` **312 项 / 294 断言 / 0 失败** · `stage4gate.mjs` **pass=63 / fail=0** + 11 图 · `aichat.mjs` **74/0**（TTFT 353ms、停止两次读数 31=31）· `injection.mjs` **95/0** · `offline-demo.mjs` **15/15** · `d1-onboarding.mjs` **15/15（3.2s）** · `domprobe.mjs` **121/0** · `routecrawl.mjs` **32/0**。环境：8080 真 DeepSeek / 8081 离线实例 / 5173 前端 / 3306 MySQL；**6379 无监听 ⇒ Caffeine 兜底**（不影响任何判据，但要写明白）。
+
+### 6. 仍未做（截至本轮，结转不藏）
+
+- **阶段 5 私信全链路零实现**：`private_message` 表已建 **0 行**；STOMP 端点、握手鉴权、目的地、未读/在线、私信风险建单、U9/U10 前端全未开工；通知中心整页（T3.16 U13）仍只有顶栏铃铛。
+- **阶段 6 管理端**：`AuditController`/`AdminController` 是壳 ⇒ 举报「能收不能办」（`content_report` **96 行全 PENDING**，已拖 7 轮）、话题预审 **36 个 PENDING**（话题圈「能建不能用」）、D3 后半「30 秒内看到工单」。
+- **阶段 7 推荐**：`recommend_result`/`item_similarity` **0 行**、Feed 推荐 Tab 是占位、六组对照与消融未跑。
+- **阶段 8**：AI 侧并发压测、12 个 ai/emotion service 里 `AiUsageService` 已有测试而 `RiskScorer` 等仍缺、可重入 seed（一次性账号 `d1_gate`470 / `d1_gate_nc`471 / `probe_*` / `smoke_*` 一批）、安全自查。
+- 🔴 **库里不许删的取证资产**：帖 42/140/141/1094/1103/1215/1231、domprobe 造的 1232–1237、会话 59/60、`alert_ticket` 148 行；被配额回收的 conversation 65/66/67 是**软删**（`deleted=1` 可还原）。
+- **红线自查**：本轮新增文本 0 处口令明文；提交前照例 `scan-pw2.ps1` 扫工作树 + `git diff --cached` 各 0 命中才 commit；`_cache/009_mindisle/*.java.pre`（证伪备份）与仓库外大日志**不入库**。
