@@ -37,7 +37,12 @@ export const NOTIFY_TYPES = [
   { value: 'like', label: '赞', ref: 'post' },
   { value: 'comment', label: '评论', ref: 'post' },
   { value: 'follow', label: '关注', ref: 'user' },
-  { value: 'pm', label: '私信', ref: 'conversation' },
+  // 私信这一格在写第一版跳转表时是 'conversation'，那是错的：后端 NotifyMessage 有两个不同常量，
+  // REF_CONVERSATION = "conversation" 只被 notifyCrisisAdmin（AI 会话工单）使用；
+  // 私信走的是 REF_PM = "pm"，且 ref_id 存的是**对方用户 id**（不是消息 id，见 NotifyService#notifyPm）。
+  // 这一格写错的症状不是报错，而是「点私信通知跳不过去」—— 跳转全靠 refType 查表，
+  // 表里没有的值永远匹配不上，所以这张表必须逐字对着后端常量类读一遍。
+  { value: 'pm', label: '私信', ref: 'pm' },
   { value: 'system', label: '系统', ref: null },
   { value: 'audit', label: '审核结果', ref: 'post' },
   { value: 'crisis', label: '危机关怀', ref: null },
@@ -55,7 +60,10 @@ export function notifyIcon(type) {
  * 一条通知该跳到哪儿。
  *
  * 只认 refType + refId，不猜文案：文案是给人读的，改一个字就该跳转照旧；
- * 而 ref 是后端承诺过的契约（post / comment / user / report / conversation）。
+ * 而 ref 是后端承诺过的契约（post / comment / user / report / conversation / pm）。
+ * pm 与 crisis 要一起看：crisis 的 ref 有两种，AI 会话工单是 conversation、私信风险工单是 pm
+ * （NotifyService#notifyPmCrisisAdmin 的 ref_id 是**发信方用户 id**），所以这里只按 refType 分支，
+ * 不按通知类型分支 —— 同一条 crisis 通知会因为 ref 不同跳到完全不同的地方，这才是对的。
  * comment 类的通知仍然跳帖子——楼中楼藏在帖子详情页里，单跳评论 id 反而看不到上下文，
  * 这个取舍与后端 NotifyService#notifyReply 的注释是同一句。
  */
@@ -63,5 +71,8 @@ export function notifyRoute(item) {
   if (!item) return null
   if (item.refType === 'post' && item.refId) return { name: 'post-detail', params: { id: item.refId } }
   if (item.refType === 'user' && item.refId) return { name: 'user-home', params: { id: item.refId } }
+  // 私信类跳转：refId 就是对方用户 id，正好是 chat-detail 的路由参数（/chat/:uid）。
+  // 不做「定位到那一条消息」：后端没有按消息 id 深链的接口，线程第一页取回的就是最新一段。
+  if (item.refType === 'pm' && item.refId) return { name: 'chat-detail', params: { uid: item.refId } }
   return null
 }

@@ -62,6 +62,14 @@ public class SecurityConfig {
             "/swagger-ui/**",
             "/webjars/**",
             "/ws/**",
+            // 🔴 裸 STOMP 端点必须单独列："/ws/**" 匹配不到 "/ws-native"（AntPathMatcher 的
+            // /** 只在后面还有路径段时才吃空段，形如 /ws、/ws/xxx 命中，/ws-native 是一个全新段）。
+            // 漏掉它的症状不是 403 而是握手直接 401 10002：Spring Security 的 EntryPoint 把
+            // Upgrade 请求当普通接口拦了，浏览器/探针侧只剩「WebSocket 连接失败」一句无正文的报错，
+            // 看起来极像令牌没传对。握手鉴权本来就不靠这一层——它由
+            // {@code WsAuthHandshakeInterceptor} 按 ?token / ?access_token / Authorization 三选一定，
+            // 这条 permitAll 只是把「协议升级」放行，不给任何匿名读写业务数据的能力。
+            "/ws-native",
             "/uploads/**",
             "/actuator/health",
             "/actuator/health/**",

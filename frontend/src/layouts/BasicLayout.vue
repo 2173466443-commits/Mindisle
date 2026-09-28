@@ -14,6 +14,12 @@
         <router-link to="/search">搜索</router-link>
         <router-link to="/publish">发布</router-link>
         <router-link to="/ai">屿屿</router-link>
+        <!-- 私信（任务 T5.5 · 界面 U9）：入口要常驻，理由和铃铛是同一句 —— 「别人找你说话」这件事
+             不该藏在「我的」页面第三层按钮后面。角标直接读 store 的 unreadTotal，不在这颗角标上另开请求：
+             它跟着下面那个 30s 心跳一起刷，而 WS 活着的时候 store 自己就会被帧推着更新。 -->
+        <el-badge :value="pm.unreadTotal" :max="99" :hidden="!pm.unreadTotal" class="mi-nav-badge">
+          <router-link to="/chat">私信</router-link>
+        </el-badge>
         <router-link to="/emotion">情绪</router-link>
         <router-link to="/me">我的</router-link>
         <!-- 隐私中心（任务 T4.21）放进入口，是因为「导出自己的数据 / 注销账号」这类权利，
@@ -85,12 +91,14 @@ import { useRouter } from 'vue-router'
 import { systemInfo } from '@/api/system'
 import { logout } from '@/api/auth'
 import { notifyIcon, notifyRoute } from '@/api/notify'
+import { usePmStore } from '@/stores/pm'
 import { fromNow } from '@/utils/format'
 import { useUserStore } from '@/stores/user'
 import { useNotifyStore } from '@/stores/notify'
 
 const user = useUserStore()
 const notify = useNotifyStore()
+const pm = usePmStore()
 const router = useRouter()
 const backendUp = ref(false)
 const sys = ref(null)
@@ -164,6 +172,8 @@ async function doLogout() {
   }
   user.clear()
   notify.clear()
+  // 私信的内容比通知更敏感：不清的话「退出再登录」会先闪一下上一个人的聊天记录（详见 stores/pm.js#clear）。
+  pm.clear()
   router.replace({ name: 'login' })
 }
 
@@ -173,14 +183,24 @@ onMounted(() => {
   timer = setInterval(function () {
     check()
     // 复用同一个 30s 心跳去刷红点：再开一个 interval 就是给同一件事两份漂移的时钟。
-    if (user.isLogged) notify.refreshUnread()
+    // 私信角标走的是 store 里同一个 refreshUnread —— 它在 WS 断开时才该被定时器叫醒，
+    // 而 WS 活着时 store 由 bindWs 的帧自己推动更新，这里多调一次也只是幂等地重读同一个数。
+    if (user.isLogged) {
+      notify.refreshUnread()
+      pm.refreshUnread()
+    }
   }, 30000)
 })
 
 // 登录态一变，通知状态必须跟着归零：不这么做的后果是「退出再登录，红点还挂着上一个人的未读」。
 watch(() => user.isLogged, (logged) => {
-  if (logged) notify.refreshUnread()
-  else notify.clear()
+  if (logged) {
+    notify.refreshUnread()
+    pm.refreshUnread()
+  } else {
+    notify.clear()
+    pm.clear()
+  }
 })
 onUnmounted(() => timer && clearInterval(timer))
 </script>
@@ -200,6 +220,9 @@ onUnmounted(() => timer && clearInterval(timer))
 .mi-nav a { color: var(--mi-text-dim); text-decoration: none; font-size: 14px; }
 .mi-nav a.router-link-active, .mi-nav a:hover { color: var(--mi-primary); }
 .mi-nav .mi-help { color: var(--mi-anger); }
+/* el-badge 的默认角标是按「包一个按钮」定的位置，包在 14px 的导航文字外面会压到下一项，这里收紧一格。 */
+.mi-nav-badge :deep(.el-badge__content) { font-size: 10px; height: 15px; line-height: 15px; padding: 0 4px; }
+.mi-nav-badge :deep(.el-badge__content.is-fixed) { top: 4px; right: 4px; }
 .mi-status { display: flex; align-items: center; gap: 14px; }
 .mi-bell { font-size: 18px; line-height: 1; }
 .mi-notify { display: flex; flex-direction: column; gap: 6px; }

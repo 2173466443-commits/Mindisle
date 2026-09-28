@@ -1,5 +1,9 @@
 // 后端 com.mindisle.common.ErrorCode 的前端镜像表（制作步骤文档 §5.8 第 2 条）。
-// 共 34 项，与后端枚举逐条核对（2026-09-18 实读 ErrorCode.java 确认）；两者不一致时以后端为准。
+// 与后端枚举逐条核对（2026-09-28 实读 backend/src/main/java/com/mindisle/common/ErrorCode.java：
+// 非零码 39 个 + SUCCESS(0)，本表 40 键）。两者不一致时以后端为准，判据用下面这条，别凭记忆数（它数的是含
+//   SUCCESS 的全部枚举常量，2026-09-28 实测输出 40）：Select-String -Path backend/src/main/java/com/mindisle/common/ErrorCode.java -Pattern '^\s{4}[A-Z_]+\(' | Measure-Object -Line
+// 阶段 5 补进的正是上次漏掉的那 6 个（30005/30006 私信、70001–70004 上传），
+// 漏一个的症状不是报错，而是弹层显示「服务异常（code=30005）」这种没人看得懂的话。
 export const ERROR_TEXT = {
   0: '成功',
 
@@ -27,6 +31,8 @@ export const ERROR_TEXT = {
   30002: '该内容不可见',
   30003: '今日评论次数已达上限',
   30004: '话题正在审核中',
+  30005: '对方已开启隐私保护，无法发送私信',
+  30006: '消息不存在',
 
   // 4xxxx AI 与情绪
   40001: 'AI 服务暂时不可用，请稍后再试',
@@ -40,6 +46,12 @@ export const ERROR_TEXT = {
 
   // 6xxxx 推荐
   60001: '暂无可推荐内容',
+
+  // 7xxxx 文件与上传
+  70001: '图片超过单张 5MB 上限，请压缩后再试',
+  70002: '只接受 jpg / png / gif 图片，且文件内容要与扩展名一致',
+  70003: '图片无法读取，可能已损坏，换一张再试试',
+  70004: '图片保存失败，请稍后重试',
 
   // 9xxxx 系统与降级
   90001: '该功能尚未实现',
@@ -69,6 +81,10 @@ export const CODE = {
   PRIVACY_CONSENT_REQUIRED: 20004,
   SENSITIVE_CONSENT_REQUIRED: 20005,
   POST_NOT_FOUND: 30001,
+  USER_DISABLED: 20003,
+  POST_FORBIDDEN: 30002,
+  PM_BLOCKED: 30005,
+  PM_NOT_FOUND: 30006,
   // 30004 是本表里唯一「不是失败」的码：话题还在审核中，用户能做的是等。
   // 前端必须单独认出它，因为话题详情页要为此换一整套措辞（见 TopicDetailView 的 cardExtra），
   // 而 textOf 那句「话题正在审核中」在 StageNotice 之上还要补一句「阶段 3 没有放行通道」。

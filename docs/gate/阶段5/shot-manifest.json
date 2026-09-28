@@ -1,0 +1,21 @@
+{
+  "at": "2026-09-28T18:42:27.291Z",
+  "base": "http://127.0.0.1:5173",
+  "api": "http://127.0.0.1:8080",
+  "chrome": "C:/Users/Drbrain/AppData/Local/Google/Chrome/Application/chrome.exe",
+  "noUi": true,
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "pace": 350,
+  "accounts": {
+    "sender": "demo02",
+    "receiver": "demo04"
+  },
+  "runTs": 1790620926403,
+  "pass": 60,
+  "fail": 0,
+  "failures": [],
+  "shots": []
+}

@@ -1314,3 +1314,40 @@ D_表行数  user 43 / post 111 / post_like 16 / user_follow 0
 - **阶段 8**：AI 侧并发压测、12 个 ai/emotion service 里 `AiUsageService` 已有测试而 `RiskScorer` 等仍缺、可重入 seed（一次性账号 `d1_gate`470 / `d1_gate_nc`471 / `probe_*` / `smoke_*` 一批）、安全自查。
 - 🔴 **库里不许删的取证资产**：帖 42/140/141/1094/1103/1215/1231、domprobe 造的 1232–1237、会话 59/60、`alert_ticket` 148 行；被配额回收的 conversation 65/66/67 是**软删**（`deleted=1` 可还原）。
 - **红线自查**：本轮新增文本 0 处口令明文；提交前照例 `scan-pw2.ps1` 扫工作树 + `git diff --cached` 各 0 命中才 commit；`_cache/009_mindisle/*.java.pre`（证伪备份）与仓库外大日志**不入库**。
+
+## 2026-09-29 阶段 5（续 14）—— 16 张真浏览器图把 Gate5 钉死，顺手修掉两个真缺陷；并且第一次把「判据红」和「产品红」分开定性
+
+用户这一轮的原始痛点是一句很具体的话：「AI 对话那部分还没做好，显示第四阶段还没弄好」→ 修完之后又追一句「私信/实时看起来没做好」。所以本轮的交付不是新功能列表，而是**能被眼睛看见的证据**：`docs/gate/阶段5/` 里 16 张 Chrome 截图 + 一份 README，把 §8.3 的四条判据和 §8.4 的 T5.8 逐条签掉。
+
+### 1. 五条取证线（PASS 也打印读数，只贴结论的取证不算取证）
+
+| 线 | 命令 | 读数 |
+|---|---|---|
+| Gate5 全量（REST + STOMP + 真浏览器） | `PACE=1050 GATE_SENDER=demo02 GATE_RECEIVER=demo04 GATE_THIRD=demo05 node probe/pmgate.mjs` | **PASS 103 / FAIL 0 / 图 16 张 / exit 0**（仓库外 `_cache\mindisle-dbtmp\gate5ui50.out` 157 行） |
+| Gate5 协议层 | 同上 + `NOUI=1`（`PACE=350`） | **PASS 96 / FAIL 0 / 图 0**（`gate5no48.out` 114 行） |
+| 前端 DOM 回归闸 | `node probe/domprobe.mjs` | **121 项 / 失败 0**（`domprobe49b.out` 170 行；改判据之前是 121/1） |
+| A16 禁言补跑 | `node probe/a16mute.mjs --phase=login` → 库里置 MUTED → `--phase=send` | **PASS 7 / FAIL 0**（login 阶段另 2 条 ⇒ 合计 9 条） |
+| 后端新单测 | `mvn -o -B test -Dtest=AuthServiceSignInTest` | **Tests run 12 / Failures 0 / Errors 0 / Skipped 0，12.996 s**（`mvn-a16fix.log`） |
+
+16 张图对应 §8.3 的四条：01/02 双窗口实时送达、03 未读红点与 T5.8 的 `/user/queue/notify`、04–08 落库优先与幂等（刷新不重）、09–11 已读回执与顶栏角标归零、12–14 拉黑与解除（历史不丢）、15 举报私信、16 **断网 11 秒重连后两条各只出现一颗气泡**（不丢不重）。产物目录现量：README **168 行 / 20,335 B**、16 张 PNG（68,626–131,231 B）、`pmgate.log` **72 行**（写盘的那份是精简版，全量在仓库外）、`shot-manifest.json`。
+
+### 2. 🔴 本轮四个坑，前两个是「方法论」，后两个是「真代码」
+
+- **C17 那条断网判据差点被我自己判成产品缺陷**。截图显示离线期间乙发的两条「只到了一条」。定性方法不是盯着前端猜，而是**一条 SQL 数同一文本在库里出现几行**：`private_message` 里两条都在 ⇒ 落库没丢，丢的是前端的补拉窗口判断 ⇒ 产品绿、判据侧红。**「判据红」和「产品红」必须分开定性，分开写进文档**，否则下一轮会把力气花在错的地方。顺带一条纪律：**正文类断言（比对文本内容的）必须带本轮唯一标记串**，否则复跑时被上一轮的夹具命中，PASS 是假的。
+- **domprobe 第 [7] 组红 = 判据过期，不是回归**。阶段 5 在资料卡操作区**故意**加了「私信」按钮，而 domprobe 还钉着 `btns.length === 1`。改成「关注在第一颗、总数 ≤2」后 121/0。**教训：加功能那一轮要顺手把所有旧闸门里同一判据扫一遍**，别留给下一轮去「查 bug」。
+- **`AuthService` 的 MUTED 登录缺陷（真代码缺陷，已修）**：账号处于禁言期时 `signIn` 直接抛 `USER_DISABLED(20003)`，于是 A16「禁言期仍可读会话列表 / 发消息才被拒」这条业务规则**在权限闸门处就变成了不可达**——人被挡在门外，后面那条 403 永远不会发生。修法是登录放行、写操作处按 `mute_until` 拒（`10003 账号处于禁言期，可以看和点赞，暂时不能发布内容`），并补 `AuthServiceSignInTest` 12 例把这条钉住。**规律：权限/闸门类代码写错，会把上层业务规则整条抹掉。**⚠️ 修复已进源码，**8080 上跑的还是旧类**，复跑 A16 的「MUTED 直接登录」这条路需要重启后端。
+- **探针 POST 漏 `Content-Type` ⇒ HTTP 500 / 90004**：`fetch` 裸字符串 body 不带 `application/json;charset=utf-8`，Spring 根本不反序列化，报的是「服务开小差了」。本轮误看了半天「登录挂了」。**规律：90004 这种兜底码先怀疑请求形状，别先怀疑业务代码。**
+
+### 3. 命令与文件纪律（本轮踩到的，写下来免得下次重学）
+
+- `approval policy = Never` ⇒ **绝不传 `sandbox_permissions`/`justification`**，传了直接被拒。
+- **补丁脚本的断言失败必须让写盘不发生**。本轮血案：改写手册的函数里用 `$err += ...`，PowerShell 函数内的 `$err` 是**局部变量**，调用方看不到 ⇒ 错误静默丢失 ⇒ 打印 OK 但其实没改。第二条：`break` 在函数里只命中**第一条**，而 `| T5.8 |` 这个前缀在 §8.4 表和 §15 任务表**各出现一次** ⇒ 静默改了错的那一行。**规律：多行改动按行号从大到小 Insert；搜行必须带下限索引；改完要回读自证 + 打印计数。**
+- pmgate.mjs 是 **CRLF**、domprobe.mjs 是 **LF**，同一目录两种 newline，写回时要按原文件的来。
+- 大文档核验用 `[IO.File]::ReadAllLines` 的口径（JS `split` 会 +1）；本轮末又发现版本表里 **v1.2.6 与 v1.2.7 之间夹了一个空行** ⇒ Markdown 表格从中间断开，删掉之后 `| v1.2.` 行数 **10**、文档 **1882 行**。
+
+### 4. 结转（截至本轮，不藏）
+
+- **阶段 5 已过 Gate5**（待 `git tag stage-5-pm`）；库里新增两行夹具 `gate5_muted`(id=484) / `gate5_mute2`(id=485)，已还原 ACTIVE **未删**（它们还是 A16 的夹具）。库侧现量：`private_message` 129→**172**、`audit_task` 73→**94**、`alert_ticket` 166→**183**。
+- **阶段 6 十一件事**已在本手册「下一步（v1.2.9）」列成队列 ①–⑪，第一件事是 `sql/17_stage6_alter.sql`（`user.mute_until` + `audit_task/audit_record.target_type` 加 `'topic'`），因为 `admin_op_log` 有表无实体、A6 禁言无处可存。
+- ⚠️ 需要用户配合两条：**重启 8080**、**起 5174 管理端**。
+- 🔴 **红线自查**：本轮所有新增文本（README / dev-log / 手册 / commit msg）**0 处口令明文**，DB 只走 `sql.ps1 -SqlFile`（内部 `--defaults-extra-file`）。

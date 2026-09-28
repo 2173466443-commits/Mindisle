@@ -63,6 +63,15 @@ public class MindisleProperties {
      */
     private Privacy privacy = new Privacy();
 
+    /**
+     * 站内私信（任务 T5.1–T5.6 · 需求 FR6、§7.2 #15 · 手册 §8）。
+     *
+     * <p>单独成一节而不是塞进 {@link Post}：帖子是「对所有人说的话」，私信是「对一个人说的话」，
+     * 两者的限制条件来源不同 —— 前者受内容治理与推荐约束，后者受 FR6.7 的拉黑与 FR6.6 的
+     * 危机转介约束。同一个「最多多少字」在两个域里是两个不同的决定，合在一处迟早互相覆盖。</p>
+     */
+    private Pm pm = new Pm();
+
     @Data
     public static class Cache {
         private String mode = "local";
@@ -450,5 +459,82 @@ public class MindisleProperties {
          * 概览页与导出包都能看到「这一域被截断了」。</p>
          */
         private int maxRowsPerTable = 5000;
+    }
+
+    /**
+     * 私信域的可调项。每个默认值都写清理由，因为阶段 7 的消融实验会拨这些旋钮，
+     * 拨的人必须知道自己在动什么。
+     */
+    @Data
+    public static class Pm {
+
+        /**
+         * 一条私信最多多少字。列宽是 2000，取 1000 留一半，三条理由：
+         * ① 1000 字的私信在手机上约三屏，已经超出「一句话说得完」的对话直觉，
+         * 再长就该走帖子或反馈表；② 400 太短 —— 危机求助场景要把自己的处境讲清楚，
+         * 400 字会在最需要说完整的时候把人截在半句上；③ 不把上限贴到列宽，
+         * 是为了让「超长」在 Java 侧就返回 400，而不是依赖 MySQL 的截断行为
+         * （严格模式下是报错，非严格模式下是静默丢字，两种都不该出现在业务口径里）。
+         */
+        private int maxContentChars = 1000;
+
+        /** 会话列表与消息分页的默认页大小，与帖子域的阅读节奏对齐。 */
+        private int defaultSize = 20;
+
+        /** 单页上限：前端传 size=10000 也不能把整张表拉走。 */
+        private int maxSize = 50;
+
+        /**
+         * 断线重连后一次补拉的上限（FR6.3 要的是「补齐」而不是「重放」）。
+         * 不把它放到 maxSize 之上：一次补拉超过一页，说明前端与服务端的账已经对不上，
+         * 那种情况该走整页刷新而不是继续增量拉。
+         */
+        private int fetchMax = 100;
+
+        /** 客户端幂等号的长度上限，与 private_message.client_msg_id 列宽一致。 */
+        private int clientMsgIdMaxChars = 64;
+
+        /**
+         * 私信内容是否再走一遍模型风险通道（默认关）。
+         *
+         * <p>关掉的理由是额度而不是效果：私信是每发一条就过一次评分，活跃用户的私信量
+         * 会比陪伴对话更高，每条一次 LLM 调用会把 {@code mindisle.ai-budget} 在半天内吃光，
+         * 挤掉真正在等回复的陪伴对话。关掉它<b>不改变建单判据</b> —— 危机仍然由规则通道
+         * （DFA + 自伤词表）命中并建单，只是少了模型那一路的补充召回。
+         * 阶段 7 的消融实验要验证「多通道比单通道召回更高」，拨的就是这一项。</p>
+         */
+        private boolean riskModelEnabled = false;
+
+        /** 在线状态（FR6.5）总开关；关掉之后所有 presence 查询返回空集合，前端只读不写。 */
+        private boolean presenceEnabled = true;
+
+        /** 定时重投每轮最多处理多少条 sent 状态的消息（防止一次堆积把内存和带宽打满）。 */
+        private int retryBatchLimit = 50;
+
+        /**
+         * 重投的宽限秒数：只重投 created_at 早于 now-grace 的行。
+         * 不给这一秒，会把「对方正在读、送达回执还没回来」的在途消息再推一次；
+         * 前端按 clientMsgId 去重，结果就是同一条消息在屏幕上闪两下。
+         */
+        private int retryGraceSeconds = 3;
+
+        /**
+         * 定时重投的扫描间隔（毫秒），对应 {@code PmDeliveryRetryJob} 的
+         * {@code @Scheduled(fixedDelayString=...)}。
+         *
+         * <p>写成配置而不是常量，是因为这一个数字同时决定两件事：私信「晚多久能被看到」
+         * 和「空闲时每秒多少次无用的 DB 扫描」。5s 是两者都能接受的折中；
+         * 压测和答辩演示时想让它立刻见效，改这一项比改代码重打包快。</p>
+         */
+        private int retryIntervalMillis = 5000;
+
+        /** 举报私信时写进 audit_task.remark 的字数上限，与 ReportService.TASK_REMARK_MAX 同值。 */
+        private int reportRemarkMax = 500;
+
+        /** 拉黑理由的长度上限（只进管理端，被拉黑的人永远看不到这一栏）。 */
+        private int blockReasonMax = 200;
+
+        /** 我的黑名单一次最多返回多少条。 */
+        private int blockListMax = 200;
     }
 }

@@ -28,10 +28,17 @@
         </div>
       </div>
       <div class="card-op">
-        <el-button v-if="!card.self" size="small" round :type="card.following ? 'default' : 'primary'"
-                   :plain="card.following" :disabled="followBusy" @click="actFollow">
-          {{ card.following ? '已关注' : '关注' }}
-        </el-button>
+        <template v-if="!card.self">
+          <el-button size="small" round :type="card.following ? 'default' : 'primary'"
+                     :plain="card.following" :disabled="followBusy" @click="actFollow">
+            {{ card.following ? '已关注' : '关注' }}
+          </el-button>
+          <!-- 私信（任务 T5.5 · 界面 U10）：跳到 /chat/:uid，与顶栏角标、通知点击共用同一条路由
+               （后端把私信通知的 ref_id 存成对方用户 id，见 NotifyMessage#REF_PM）。
+               这一页不预判「能不能发」：拉黑、禁言、词库都在 PmService#send 的闸序里，
+               界面自己猜一次就多一处会说谎的地方。 -->
+          <el-button size="small" @click="goChat">私信</el-button>
+        </template>
         <span v-else class="dim">这是你自己的主页</span>
       </div>
     </section>
@@ -68,9 +75,14 @@
         年级、院系、性别、risk_flag 不出参，获赞数只统计公开非匿名帖。
       </p>
       <p class="para">
-        仍然没有的两样：私信入口（后端接口排在阶段 4 之后）与「关注列表 / 粉丝列表」页。
-        后者不是顺手就能加的 —— 一旦能顺着关系逐跳，匿名与马甲的可关联性就得先过一遍评审，
+        仍然没有的一样：「关注列表 / 粉丝列表」页。它不是顺手就能加的 ——
+        一旦能顺着关系逐跳，匿名与马甲的可关联性就得先过一遍评审，
         所以这里只给一个按钮，不给一张可以顺着点下去的关系网。
+      </p>
+      <p class="para">
+        私信入口（任务 T5.5）已经是真的了：那颗「私信」按钮通向 /chat/:uid。
+        上一版这一段写的是「私信入口仍然没有」，那句话说的是当时的事实，
+        但界面自述是最容易过期的一种文字 —— 按钮加上而不改这段，屏幕上就会同时存在一个按钮和一句「没有按钮」。
       </p>
       <p class="para">
         列表里的点赞收藏同样是真接口：在这张主页上点过的赞，回广场看同一张卡片还是亮的，
@@ -130,6 +142,20 @@ async function loadCard() {
     // 401 不在这里处理：http 层已经把未登录的人带去登录页了。这里只保证「卡片没了，列表还在」
     cardNote.value = '资料卡暂时取不到（' + ((e && e.code) || 'network') + '），帖子列表照常显示。'
   }
+}
+
+/**
+ * 发起私信。这里只有一条判断值得写：未登录先带去登录页并记住原地址。
+ * 不自发拦截（targetId 等于自己）—— 资料卡的 card.self 已经把那种情况换成了一句「这是你自己的主页」，
+ * 而 chat-detail 里还有一道：后端 PmService#send 对自发直接 10001，界面无需重复把门。
+ */
+function goChat() {
+  if (!targetId.value) return
+  if (!userStore.isLogged) {
+    router.replace({ name: 'login', query: { redirect: route.fullPath } })
+    return
+  }
+  router.push({ name: 'chat-detail', params: { uid: String(targetId.value) } }).catch(function () {})
 }
 
 /** 关注 / 取关：与点赞同一套「先改界面、以回执覆盖、失败回滚」，理由见 usePostInteract 的注释。 */

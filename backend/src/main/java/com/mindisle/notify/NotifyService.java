@@ -185,6 +185,26 @@ public class NotifyService {
     }
 
     /**
+     * 「有人给我发了一条私信」（任务 T5.1 · 需求 FR6.1、FR9.1）。
+     *
+     * <p><b>它和消息送达是两回事</b>：私信本体经
+     * {@link com.mindisle.pm.PmRealtimeListener} 走 STOMP 直接落到对方的
+     * {@code /user/queue/private}，那条路径不经过本类；本方法只负责通知中心里那条
+     * 「X 给你发来一条私信」的红点。所以 {@link #shouldSkip} 的同文案幂等命中时，
+     * 少掉的只是重复的红点，不会少一条消息——这句话要写在这里，
+     * 否则下一个读代码的人会以为把私信接进 NotifyService 就实现了实时下发。</p>
+     *
+     * <p>{@code refId} 是<b>对方用户 id</b>（见 {@link NotifyMessage#REF_PM}），
+     * 摘录用 {@link #excerpt} 而不是原文：通知中心是列表页，一条 800 字的私信
+     * 会把整页撑开；点开进会话才看到全文。</p>
+     */
+    public void notifyPm(long recipientId, String actorName, long peerId, String contentText) {
+        write(recipientId, NotifyMessage.TYPE_PM,
+                actorName + " 给你发来一条私信", excerpt(contentText),
+                NotifyMessage.REF_PM, peerId);
+    }
+
+    /**
      * 唯一的写入口：判空 → 截断 → 幂等 → 落库 → 触发推送口。
      *
      * <p><b>不吞异常</b>（理由见类注释第 3 条）；{@code recipientId <= 0} 直接跳过——
@@ -261,6 +281,43 @@ public class NotifyService {
                 continue;
             }
             write(adminId, NotifyMessage.TYPE_CRISIS, title, body, NotifyMessage.REF_CONVERSATION, conversationId);
+        }
+    }
+
+    /**
+     * 私信命中危机词时弹给管理员（任务 T5.5 / T5.7 · 需求 FR6.6、FR10.6）。
+     *
+     * <p>与 {@link #notifyCrisisAdmin} 是<b>两条独立的线</b>，不能复用：那条的 ref 是会话 id、
+     * 点击跳 AI 会话审核；这里的 ref 必须是<b>发信方用户 id</b>，管理员点开后落在
+     * 与该用户的私信线程里（{@code NotifyMessage#REF_PM} 的语义在整个仓库里都是
+     * 「对方用户 id」，改成消息 id 会让前端路由跳错，所以这里宁可多带一个 messageId 参数只进文案）。</p>
+     *
+     * <p><b>幂等口径</b>：同 ref_id + 同 title（含等级）才去重，因此同一个发信人
+     * 对<b>不同收件人</b>连发十条危机私信只会留一条未读红点 —— 管理员要处理的是「这个人」，
+     * 不是十条消息。等级从 L2 升到 L3 时 title 变了，会再打烊一次。</p>
+     *
+     * @param adminIds     接收人；空集合只记 warn，不抛异常（私信已经发出去了，不能因为通知失败回滚）
+     * @param senderUserId 发信方用户 id，作为通知的 ref（点击跳私信线程）
+     * @param messageId    命中的私信 id，只进文案，便于在审核台里定位那一条
+     * @param level        L2 / L3
+     * @param excerpt      证据摘录（调用方已按码点截过），可为 null
+     */
+    public void notifyPmCrisisAdmin(List<Long> adminIds, long senderUserId, long messageId,
+                                    String level, String excerpt) {
+        if (adminIds == null || adminIds.isEmpty()) {
+            log.warn("私信危机通知没有接收人（管理员列表为空）messageId={} sender={} level={}",
+                    messageId, senderUserId, level);
+            return;
+        }
+        String safeLevel = level == null || level.isBlank() ? "L2" : level;
+        String title = "【" + safeLevel + " 危机】私信命中风险词，消息 #" + messageId;
+        String body = "热线 " + CRISIS_HOTLINE_HINT + "。证据摘录："
+                + (excerpt == null || excerpt.isBlank() ? "（无）" : excerpt);
+        for (Long adminId : adminIds) {
+            if (adminId == null) {
+                continue;
+            }
+            write(adminId, NotifyMessage.TYPE_CRISIS, title, body, NotifyMessage.REF_PM, senderUserId);
         }
     }
 

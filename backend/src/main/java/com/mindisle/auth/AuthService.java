@@ -225,7 +225,7 @@ public class AuthService {
    * @return true 放行；false 由调用方抛 {@code USER_DISABLED}
    */
   private boolean allowCoolingOrReject(User user) {
-    if (CoolingState.ACTIVE.equals(user.getStatus())) {
+    if (allowsSignIn(user.getStatus())) {
       return true;
     }
     LocalDateTime now = LocalDateTime.now();
@@ -328,6 +328,26 @@ public class AuthService {
     AuthResponse.UserBrief brief = new AuthResponse.UserBrief(user.getId(), user.getUsername(),
         user.getNickname(), user.getAvatar(), user.getRole(), user.getAiStyle(), user.getStatus());
     return new AuthResponse(pair.accessToken(), pair.refreshToken(), pair.expiresIn(), brief);
+  }
+
+  /** 与 user.status 的 ENUM 逐字一致（sql/01_account.sql:20）；禁言态。 */
+  static final String MUTED = "MUTED";
+
+  /**
+   * 账号态能不能建立新会话（登录与刷新共用这一道闸门）。
+   *
+   * <p><b>为什么 MUTED 必须放行</b>：需求 BR6 写的是「用户被禁言期间：可读、可点赞，不可发帖/评论/私信；
+   * 封禁期间全不可」。「可读」的前提是他能把自己登进来；取利权的是 {@link PostingQuotaService}那一道写
+   * 入闸门（10003），不是登录闸门（20003）。第 49 轮把 gate5_mute2 置 MUTED 后实测：旧令牌读会话列表一切正常
+   * （code=0）、发私信与发帖都是 403/10003，但重新登录直接 403/20003 —— 那时候这个人连「可读」都拿不到，
+   * 等于把禁言做成了临时封号，也等于阶段 6 A6 的「禁言 1/7/30 天」一点就把人挤出产品。
+   * BANNED 仍然拒绝（它是全不可），DELETED 走下面的冷静期分支。
+   *
+   * <p>包级可见与 normalizeGrade 同样的理由：能被单测直接调用，不用把八个 bean 全 mock 一遍。
+   */
+  static boolean allowsSignIn(String status) {
+    String s = status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
+    return CoolingState.ACTIVE.equals(s) || MUTED.equals(s);
   }
 
   /**

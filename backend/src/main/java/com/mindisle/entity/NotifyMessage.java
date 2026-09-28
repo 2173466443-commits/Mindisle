@@ -44,6 +44,15 @@ public class NotifyMessage {
   public static final String REF_REPORT = "report";
   public static final String REF_CONVERSATION = "conversation";
 
+  /**
+   * 私信通知的跳转指针。<b>ref_id 存的是对方用户 id（会话号），不是消息 id</b>：
+   * 点通知要落进「和这个人的会话」（U10），而不是某一条消息——私信列表按人对账，
+   * 未读数也按人算，跳进单条消息反而看不到上下文。
+   * 前端 {@code api/notify.js#notifyRoute} 的 {@code pm -> pm-detail{peerId}} 与本行是一对，
+   * 改这一侧必须同时改那一侧，两处注释互相引用。</p>
+   */
+  public static final String REF_PM = "pm";
+
   @TableId(value = "id", type = IdType.AUTO)
   private Long id;
 

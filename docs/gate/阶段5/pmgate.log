@@ -1,0 +1,72 @@
+
+===== Gate5 私信/实时通道收口取证 =====
+后端实例 http://127.0.0.1:8080   前端 http://127.0.0.1:5173   UI 跳过(NOUI=1)
+PASS S0-1 该实例已装载私信模块（/api/pm/* 恰好 9 条）   <- totalPaths=68 pmPaths=9 /api/pm/block/{userId} /api/pm/blocks /api/pm/conversations /api/pm/online /api/pm/read /api/pm/report /api/pm/send /api/pm/thread/{peerId} /api/pm/unread
+S0-2 实例自述 profiles=dev cacheMode=local llmProvider=spring-ai java=17.0.19 serverTime=2026-09-29T02:42:05.611713
+S0-3 夹具 uid 甲=3(屿02) 乙=5 丙=6
+
+---- A 组：REST 十条线 ----
+PASS A1 GET /conversations：list/hasMore/unreadTotal 必给，可空的 nextCursor 按 non_null 契约允许缺席   <- code=0 keys=list,nextCursor,hasMore,unreadTotal listLen=1 unreadTotal=0 hasMore=false nextCursor=173
+PASS A1b GET /unread 返回 {total,byPeer,peers}   <- total=0 byPeer={}
+PASS A2 POST /send 落库并回视图（id/mine/from/to）   <- code=0 id=174 mine=true status=sent
+PASS A2b 视图内容与类型逐字回显，createdAt 非空（REST 与 WS 帧同一份 view，气泡时间不能靠前端兜本地时钟）   <- createdAt=2026-09-29T02:42:07.4011475 riskLevel=L0 status=sent keys=id,fromUserId,toUserId,mine,msgType,content,riskLevel,status,createdAt
+PASS A2c 普通私信不带求助卡（non_null 契约下 alert 这个键压根不存在）   <- alert=undefined key-present=false
+PASS A3 clientMsgId 重发返回同一条 id（INSERT IGNORE 撞键后回查）   <- 第一次 id=174 重发 id=174
+PASS A3b 重发没有多落一行（按本轮那句唯一正文数一遍，会话里只有那一条）   <- 命中 1 条 ids=174 会话总长=77
+PASS A4 GET /thread/{peerId} 返回九字段会话页   <- code=0 peerName=屿04 blocked=false peerOnline=false listLen=20
+PASS A4d 历史是时间正序，且本轮新落的那三条恰好是最新的三条（前端直接 append 到气泡数组上方，不再排序）   <- len=79 尾部三条=174,176,177 本轮=174,176,177
+PASS A4e 发信方视角 mine 全为 true（只认本轮那三条：旧行里乙发来的当然是 false，混在一起判就是判据自己出错）   <- 命中=3 mine=true,true,true
+PASS A4f 同一批消息在乙的会话里 mine 全为 false（视角是参数而不是字段）   <- 会话总长=79 本轮命中=3 mine=false,false,false
+PASS A5 size=2 取最新两条、游标=该页最旧一条、hasMore 跟着「还有更旧的」走   <- ids=176,177 期望=176,177 nextCursor=176 hasMore=true 全量=79
+PASS A5b beforeId 游标往旧翻：恰好是再往前的两条，不重叠也不跳号   <- ids=173,174 期望=173,174 hasMore=true
+PASS A5c size=999 不报错（normalizeSize 夹到 fetch-max=100，不是一行 500）   <- listLen=1
+PASS A6-1 空内容 → 10001   <- HTTP=400 code=10001 msg=私信内容不能是空的
+PASS A6-2 码点>1000 → 10001   <- HTTP=400 code=10001 msg=私信最多 1000 个字，这条有 1001 个
+PASS A6-3 clientMsgId>64 → 10001   <- HTTP=400 code=10001 msg=幂等键最多 64 个字符
+PASS A6-4 msgType 非白名单 → 10001   <- HTTP=400 code=10001 msg=消息类型只能是文字或图片
+PASS A6-5 image 指向站外 → 10001   <- HTTP=400 code=10001 msg=图片私信只能指向站内上传的图片
+PASS A6-6 发给自己 → 10001   <- HTTP=400 code=10001 msg=不能给自己发私信，写给自己可以用草稿箱
+PASS A6-7 peerId=0（非法会话对象）→ 10001   <- code=10001
+PASS A6-8 查自己的会话 → 10001   <- code=10001
+PASS A6-9 查无此人的会话 → 20001（不是空昵称 200）   <- code=20001 msg=对方不存在或已注销
+PASS A7 发给不存在的收件人 → 20001   <- code=20001 msg=对方不存在或已注销，这条私信没有收件人
+PASS A8 命中黑词（政治违法组 BLOCK）→ 50001 CONTENT_REJECTED   <- code=50001 msg=私信内容包含违规信息，已拦截
+PASS A8b 被拦截的内容没有落库（最新 100 条里查不到那句黑词原文；会话条数会跟着判据一起长，所以判「查不到」而不是判总数）   <- 命中=0 会话总长=79
+PASS A9-0 现场上传一张图，拿到 uploads/yyyy/MM/dd 三层 url（不是扁平日期目录）   <- HTTP=200 code=0 种子=3271B data={"url":"/uploads/2026/09/29/ab6096d2fbfc49ca84386913665ea2cf.png","kind":"png","width":120,"height":40,"bytes":3271}
+PASS A9-0b 这个 url 真的取得回图片字节（浏览器 img 标签吃的就是它，扁平写法 404 就是这么暴露的）   <- HTTP=200 content-type=image/png bytes=3271
+PASS A9 图片私信落库（msgType=image，内容为 /uploads 路径）   <- id=178 content=/uploads/2026/09/29/ab6096d2fbfc49ca84386913665ea2cf.png code=0
+PASS A9b 会话列表把图片摘要成「[图片]」（正文不许漏在列表页）   <- lastContent=[图片] lastMsgType=image
+PASS A10 乙回发两条成功   <- ids=179,180
+PASS A10b 甲的未读汇总含乙（byPeer 只带未读>0 的人）   <- total=2 byPeer={"5":2} peers=0
+PASS A10c 已读上报返回 ack{kind,count,unread}，unread 归零   <- count=2 unread=0 peerId=5 code=0
+PASS A10d 已读之后 byPeer 里不再有乙（0 不发送）   <- total=0 byPeer={}
+PASS A10e 重复上报已读翻 0 行（第二份标签页不会重播已读动画）   <- count=0 code=0
+PASS A10f 把别人的 id 当 upToId 也只是 0 行（谁的数据谁能改，判据在 SQL 里）   <- count=0 code=0
+PASS A11 GET /online?peerIds=1&peerIds=2（逗号方括号写法会被 Spring 拒，必须重复键）   <- online=[] userId=null
+  …拉黑前该会话已有 50 条：128,129,130,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,176,177,178,179,180
+PASS A12-0 拉黑自己 → 10001   <- code=10001 msg=不能拉黑自己
+PASS A12-1 拉黑生效 {targetId,action=block,changed=true,blocked=true}   <- code=0 data={"targetId":5,"action":"block","changed":true,"blocked":true}
+PASS A12-2 名单里列得出这一条（含原因与时间）   <- size=1 item={"peerId":5,"peerName":"屿04","peerAvatar":"","reason":"Gate5 取证：暂时不想被打扰","blockedAt":"2026-09-29T02:42:20.339"}
+PASS A12-3 被拉黑的一方再发 → 30005 PM_BLOCKED   <- code=30005 msg=对方已开启隐私保护，无法发送私信
+PASS A12-4 会话页 blocked=true（双向判定，输入框该禁用）   <- blocked=true code=0
+PASS A12-5 拉黑不抹历史（前后 id 清单逐字相同，需求 FR6.7 的落地口径）   <- 拉黑前 50 条 / 拉黑后 50 条 同序=true
+PASS A12-6 被拉黑之后的求助消息仍然被拦（私信这一半拦住了）   <- code=30005
+PASS A12-7 被拦的危机私信没有落库（按本轮唯一标记查 = 0 行；建单走库侧核对，见 README 增量）   <- A12-7 那条被拦的危机私信没有落库（建单走库侧核对，见 README 的行数增量）
+PASS A12-8 重复拉黑 changed=false（不重复建行）   <- changed=false code=0
+PASS A12-9 解除拉黑 {action=unblock,blocked=false}   <- data={"targetId":5,"action":"unblock","changed":true,"blocked":false}
+PASS A12-10 解除之后发信恢复（不是永久封死）   <- code=0 id=181
+PASS A13-1 举报受理 → {taskId,status=PENDING,tip}   <- data={"taskId":92,"status":"PENDING","tip":"已收到，我们会在 24 小时内看完这条私信。"}
+PASS A13-2 同一目标的待审任务只有一张（uk_target_pending 兜住）   <- 第一次 taskId=92 第二次 taskId=92
+PASS A13-3 第三人举报别人的私信 → 30006（拿自增 id 塞不进别人的会话）   <- code=30006
+PASS A13-4 举报不存在的消息 → 30006   <- code=30006
+PASS A13-5 理由不在白名单 → 10001（下拉六项之外的值进不了备注）   <- code=10001 msg=举报理由只能是：spam / abuse / sexual / privacy / self-harm / other
+PASS A13-6 缺 messageId → 10001   <- code=10001
+PASS A14-1 含 L3 词（结束生命/割腕）→ riskLevel=L3   <- code=0 riskLevel=L3
+PASS A14-2 发信方看到的是「自己」那套求助话术，且含热线 12356   <- alert=你写的这句话让屿安很在意。已经悄悄帮你把这条留在待审队列里，也可以直接拨打 12356（24 小时有人接）。 code=0
+PASS A14-3 收信方看到的是「对方可能需要支持」那套文案（同一行两套话术，按视角拼）   <- alert=对方此刻可能很需要支持。你不需要一个人扛，也可以拨打 12356。
+PASS A14-4 risk 组但不含 L3 方式/计划词 → L2（同样出求助卡，词面通道输出域只有 L0/L2/L3）   <- riskLevel=L2
+PASS A15 无令牌读私信 → 10002 / HTTP 401   <- HTTP=401 code=10002
+FATAL 顶层异常：登录 gate5_muted 没拿到 token（HTTP 403 code=20003）
+  stack: Error: 登录 gate5_muted 没拿到 token（HTTP 403 code=20003） |     at login (file:///E:/codex%20workspace/009_%E5%BF%83%E5%B1%BFAI%E5%BF%83%E7%90%86%E9%99%AA%E4%BC%B4%E7%A4%BE%E5%8C%BA/frontend/probe/pmgate.mjs:157:11) |     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) |     at async file:///E:/codex%20workspace/009_%E5%BF%83%E5%B1%BFAI%E5%BF%83%E7%90%86%E9%99%AA%E4%BC%B4%E7%A4%BE%E5%8C%BA/frontend/probe/pmgate.mjs:621:17
+
+---- Gate5 取证汇总：PASS 60 / FAIL 0 / 图 0 张 ----

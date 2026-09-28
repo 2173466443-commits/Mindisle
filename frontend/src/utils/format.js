@@ -54,6 +54,35 @@ export function fmtDateTime(value) {
     + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes())
 }
 
+/** 气泡右下角的时刻：只到分钟。会话里同一天来回十几条，带上日期会把气泡撑得比正文还长。 */
+export function fmtChatTime(value) {
+  const d = toDate(value)
+  if (!d) return ''
+  const pad = (n) => (n < 10 ? '0' + n : String(n))
+  return pad(d.getHours()) + ':' + pad(d.getMinutes())
+}
+
+/**
+ * 聊天记录里的日期分隔条：今天 / 昨天 / 9月26日 / 2025年12月3日。
+ *
+ * 为什么不用 fromNow：相对时间（「3 分钟前」）在气泡流里逐条出现时，读者没法回答
+ * 「我们是从哪天开始聊的」，而这正是回看聊天记录时唯一想知道的事。所以这里要的是
+ * 「分组用的绝对日期」，只在跨天时打印一次。昨天单独说，是因为私信场景里
+ * 「昨天」比「9月27日」更接近人的说法，而跨年才补年份（与 fromNow 同一口径）。
+ */
+export function fmtChatDay(value, now) {
+  const d = toDate(value)
+  if (!d) return ''
+  const base = toDate(now) || new Date()
+  const dayStart = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const diffDays = Math.round((dayStart(base) - dayStart(d)) / DAY)
+  if (diffDays === 0) return '今天'
+  if (diffDays === 1) return '昨天'
+  if (diffDays === 2) return '前天'
+  const md = (d.getMonth() + 1) + '月' + d.getDate() + '日'
+  return d.getFullYear() === base.getFullYear() ? md : d.getFullYear() + '年' + md
+}
+
 /** 计数过万折成 1.2万：列表里一个 7 位数字会把卡片撑变形。 */
 export function fmtCount(n) {
   const v = Number(n)

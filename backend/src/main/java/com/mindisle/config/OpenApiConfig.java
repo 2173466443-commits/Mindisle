@@ -15,6 +15,7 @@ import org.springframework.context.annotation.Configuration;
  *
  * <p>分组口径与 Gate 2 验收一致：在 /doc.html 的下拉里能看到分组列表——阶段 2 为 5 个，阶段 3 先加「06-audit 内容安全」
  * 与「07-file 文件与上传」到 7 个，任务 T3.11-b 再加「08-notify 站内通知」到 8 个，任务 T3.9 加「09-search 站内搜索」到 9 个，任务 T4.2/T4.5 加「10-ai AI 对话」到 10 个（阶段 4 的全部 6 条路径都在这一组）；
+ * 任务 T4.20 补「12-privacy 隐私中心」、任务 T5.4 加「13-pm 站内私信」到 13 个（11-emotion 在 T4.9 单独成组，所以 10/11 是错开的两段业务而不是编号用错）；
  * 接口总数不少于 20，论文第 6 章接口清单按同一口径统计，避免答辩时数字对不上。</p>
  *
  * <p><b>分组数没有被任何脚本写死</b>：手册 v1.2.0 之前有一句「Swagger 的 @Tag 分组数被 docs/openapi-check
@@ -116,5 +117,30 @@ public class OpenApiConfig {
     public GroupedOpenApi aiApi() {
         return GroupedOpenApi.builder().group("10-ai AI 对话")
                 .pathsToMatch("/api/ai/**").build();
+    }
+
+    /**
+     * 隐私中心（任务 T4.20 · 需求 FR11）。阶段 4 收工时漏配的一个分组：
+     * {@code PrivacyController} 的 @Tag 当时就叫「12 隐私中心」，但这里没有对应的
+     * pathsToMatch，于是 /doc.html 下拉里看不到它 —— 分组编号 12 因此空了一段。
+     * 补在这一行而不是插到 11 前面：编号一旦对外（前端文档、论文接口清单）引用过就不再改。
+     */
+    @Bean
+    public GroupedOpenApi privacyApi() {
+        return GroupedOpenApi.builder().group("12-privacy 隐私中心")
+                .pathsToMatch("/api/privacy/**").build();
+    }
+
+    /**
+     * 私信（任务 T5.4/T5.6/T5.9 · 需求 FR6）。
+     *
+     * <p>只收 REST 侧 {@code /api/pm/**}；{@code /app/private}、{@code /app/read}、{@code /app/ping}
+     * 是 STOMP 目的地，不经过 HTTP 控制器映射，springdoc 抓不到，也不该抓 ——
+     * 手册 §8.4 的「REST 与 STOMP 同一套判据」靠单测保证，不靠 OpenAPI 清单。</p>
+     */
+    @Bean
+    public GroupedOpenApi pmApi() {
+        return GroupedOpenApi.builder().group("13-pm 站内私信")
+                .pathsToMatch("/api/pm/**").build();
     }
 }

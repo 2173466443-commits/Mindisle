@@ -232,6 +232,21 @@ mindisle:
     cooling-days: 30              # 手册 §7.5：冷静期内登录即自动撤回注销；配成 0 会被代码夹回 1 天（见 CoolingState#purgeTime）
     max-rows-per-table: 5000      # 单表行数闸：挡住「把 chat_message 全量读进内存序列化」把堆吃穿；被截断会记进导出对账，不静默
 
+  pm:                             # 任务 T5.1–T5.6 站内私信（需求 FR6 · 手册 §8）
+    max-content-chars: 1000       # 列宽 2000 取一半：超长在 Java 侧返 400，不依赖 MySQL 截断（见 MindisleProperties.Pm）
+    default-size: 20              # 会话列表/消息分页默认条数，与帖子阅读节奏对齐
+    max-size: 50                  # 单页上限闸：前端传再大也夹回来，防止整表拉走
+    fetch-max: 100                # 断线重连一次补拉的上限（补齐而不是重放），超过它就该整页刷新
+    client-msg-id-max-chars: 64   # 与 private_message.client_msg_id 列宽一致，幂等号由前端生成、服务端不自造
+    risk-model-enabled: ${MINDISLE_PM_RISK_MODEL:false}   # 私信每条一次 LLM 会把 AI 额度吃光并挤掉陪伴对话；关掉不改变危机建单判据，阶段 7 消融拨这一项
+    presence-enabled: ${MINDISLE_PM_PRESENCE:true}        # FR6.5 在线状态总开关；关掉后所有 presence 返回空集合
+    retry-batch-limit: 50         # T5.3 定时重投单轮条数上界，防止一次堆积把带宽打满
+    retry-grace-seconds: 3        # 只重投早于 now-3s 的 sent 行，避开「对方在读、回执没回来」的在途消息
+    retry-interval-millis: 5000   # PmDeliveryRetryJob 的 @Scheduled fixedDelay：太小就是空转扫库，太大就是「对方晚看到」
+    report-remark-max: 500        # 举报私信写进 audit_task.remark 的上限，与 ReportService.TASK_REMARK_MAX 同值
+    block-reason-max: 200         # 拉黑理由长度：只进管理端，被拉黑人永远看不到
+    block-list-max: 200           # 我的黑名单一次最多返回条数
+
 logging:
   pattern:
     console: "%d{HH:mm:ss.SSS} %-5level [%X{traceId:-}] %logger{20} - %msg%n"

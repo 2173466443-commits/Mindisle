@@ -316,12 +316,15 @@ async function runProbe(bundleCode, accessToken) {
     // 而资料卡要等一次 GET 才回来。拿标题当信号就会判到「上一个人的卡片」上 —— 第一版就是这么假失败的。
     const btnSeen = await until(function () {
       const b = Array.prototype.slice.call(w.document.querySelectorAll('.card-op button'))
-      return b.length === 1 && b[0].textContent.replace(/\s+/g, '') === '关注'
+      // 第 49 轮改判据：阶段 5 在资料卡操作区永芯加了一颗「私信」（Gate5 C7/C8 已经拿截图证过），
+      // 这里再去认 b.length === 1 就永远不可能成立——只钉住第一颗，后面有几颗交给下面那条判据去管。
+      return b.length >= 1 && b[0].textContent.replace(/\s+/g, '') === '关注'
     }, 10000, 'other-home-follow-btn')
     const btns = Array.prototype.slice.call(w.document.querySelectorAll('.card-op button'))
       .map(function (e) { return e.textContent.replace(/\s+/g, '').trim() })
     check('7', '别人主页出现一颗「关注」按钮（未关注态文案，且不是自己的主页）',
-      btnSeen && btns.length === 1 && btns[0] === '关注', 'id=' + otherId + ' btns=' + JSON.stringify(btns))
+      btnSeen && btns.length <= 2 && btns[0] === '关注',
+      'id=' + otherId + ' btns=' + JSON.stringify(btns) + ' (关注在前，私信允许在后：阶段 5 U9 入口)')
     check('7', '别人主页资料卡取到了才画按钮：没有「资料卡暂时取不到」的降级行，统计行也在',
       docText().indexOf('资料卡暂时取不到') < 0 && docText().indexOf('获赞') >= 0)
     // 这一条断言的是「当前是未关注态」，顺带说明本探针的边界：全程只发 GET，一颗按钮也没点过，

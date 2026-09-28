@@ -35,7 +35,15 @@ const routes = [
       // 隐私中心（任务 T4.21 · 需求 FR2.10 与个保法第 45/47 条）。只要登录，不加 requiresConsent：
       // 这一页是「查自己的数据、导出、注销、撤回授权」的地方，没勾敏感同意的人恰恰最需要走进来 ——
       // 给他加一道同意闸，等于把撤回授权的入口锁在授权之后。
-      { path: 'privacy', name: 'privacy', component: () => import('@/views/privacy/PrivacyView.vue'), meta: { requiresAuth: true } }
+      { path: 'privacy', name: 'privacy', component: () => import('@/views/privacy/PrivacyView.vue'), meta: { requiresAuth: true } },
+      // U9 私信会话列表 / U10 会话详情（任务 T5.5 · 需求 FR6）。只要登录，不加 requiresConsent：
+      // 私信读的是「别人发给我的内容」，和通知、评论同一性质；给它加一道敏感信息同意闸，
+      // 等于让「撤回授权的人」连自己的收件箱都打不开 —— 那既不是同意的本意，也会把危机提醒一起挡在门外
+      // （私信里的 L2/L3 风险提示就长在这条链路上，见 stores/pm.js#applyAlertFrame）。
+      // 详情用 :uid（对方用户 id）而不是消息 id 或自造会话号：后端 PmController 的入参就是对端 user id，
+      // 而 NotifyMessage#REF_PM 的 ref_id 也是它 —— 通知跳转和私信入口因此能共用同一条路由。
+      { path: 'chat', name: 'chat', component: () => import('@/views/chat/ChatListView.vue'), meta: { requiresAuth: true } },
+      { path: 'chat/:uid', name: 'chat-detail', component: () => import('@/views/chat/ChatDetailView.vue'), meta: { requiresAuth: true } }
     ]
   },
   { path: '/:pathMatch(.*)*', name: 'notfound', component: () => import('@/views/NotFound.vue'), meta: { public: true } }
