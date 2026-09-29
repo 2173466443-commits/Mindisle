@@ -17,6 +17,17 @@ export const actOnPost = (id, action) => http.post('/posts/' + id + '/actions', 
 // 而不是在正文上面盖一条全局红条。写接口刻意不 silent —— 被限流（10010）、被当日配额
 // 挡住（30003）时，后端那句 msg 就是给用户看的下一句话，没必要让页面再翻译一遍。
 export const listComments = (id, params) => http.get('/posts/' + id + '/comments', { params, silent: true })
+// 「看了又看」相似帖推荐（任务 T7.16 的前端消费方 · 手册 §10.6 · 需求 FR5.6）。
+// 后端那条端点的注释写在 com.mindisle.web.PostController#similar，两边口径以它为准。
+// 三个和别的读接口不一样的口径，都是现查 PostController#similar 得到的，不是照猫画虎：
+// 1) 出参是 List<FeedItem>，**不是 PageResult** —— 它一次给完、不分页，所以前端没有 beforeId/page 可传，
+//    也别拿 usePagedPosts 去驱动它（那个 composable 判「翻到底」靠的是 data.hasMore，这里根本没有这个键）。
+// 2) size 上限 12、默认 6，超了不报错而是被夹住；传 0 或负数同样夹回默认值。
+// 3) 源帖本身不可见时回 30001/404，因此调用方必须先确认这张详情页已经正常打开再发这一枪。
+// silent 与详情主接口一致：这一栏是「锦上添花」，取不到就在原位写一句为什么，不许盖全局红条。
+export const similarPosts = (id, size) =>
+  http.get('/posts/' + id + '/similar', { params: size ? { size } : {}, silent: true })
+
 export const addComment = (id, payload) => http.post('/posts/' + id + '/comments', payload)
 
 // ---------------- 停留时长上报（任务 T4.17 · 需求 FR5.1「停留 ≥3s 才算一次浏览」）----------------

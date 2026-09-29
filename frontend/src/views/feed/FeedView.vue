@@ -82,18 +82,55 @@
       </template>
     </section>
 
-    <!-- 3 推荐流：后端仍是 90001，占位说明保留（召回 T7.2/T7.5 与情绪加权 T7.4 都在阶段 7） -->
-    <section class="mi-card">
+    <!-- 3 推荐流（任务 T7.9/T7.10 接通 · 手册 §10.2 7.9/7.10 · 需求 FR5.6、FR5.8、D6）。
+         2026-09-29 之前这一节是一张「阶段 7 未实现」的占位卡，现在是真数据：
+         卡片仍然复用广场那张 PostCard（D6 要的就是「同一形状」），多出来的只有 #reason 插槽那一行。
+         刻意不加 v-show="source === 'plaza'"：这一节不属于「读哪条流」那个切换，
+         它既不是广场也不是关注，切到关注 Tab 时把它一起藏起来没有任何依据（手册 §6.2 U3 没这么写）。 -->
+    <section class="mi-card recommend">
       <div class="sec-head">
         <h2>为你推荐</h2>
-        <el-button size="small" text :loading="busy.recommend" @click="loadRecommend">刷新</el-button>
+        <div class="sec-ops">
+          <span class="hint">{{ recLine }}</span>
+          <el-button class="btn-rec-swap" size="small" text :loading="recLoading" @click="swapRecommend">换一批</el-button>
+          <el-button class="btn-rec-refresh" size="small" text :loading="recLoading" @click="reloadRecommend">刷新</el-button>
+        </div>
       </div>
-      <p class="formula">排序目标 emotion_match(u, i) = 1 − | valence_now(u) − comfort_valence(i) |，仅在当前心情为负向时启用（需求 §1.5 创新点 2）。</p>
-      <stage-notice v-if="codes.recommend" :code="codes.recommend" :stage="RECOMMEND_STAGE" api-name="GET /api/feed/recommend" />
-      <el-empty v-else-if="!recList.length" description="暂无推荐结果：召回（T7.2/T7.5）与情绪加权（T7.4）都排在阶段 7；阶段 4 交付的是它们要用的情绪档案，不是这条流本身" />
-      <ul v-else class="lines">
-        <li v-for="(r, i) in recList" :key="i">{{ r.title || r.name || JSON.stringify(r) }}</li>
-      </ul>
+      <p class="formula">排序目标 emotion_match(u, i) = 1 − | valence_now(u) − comfort_valence(i) |，仅在当前心情为负向时启用（需求 §1.5 创新点 2）。这条流读的是离线批次预计算的 recommend_result 缓存，缓存见底或整批不可见时退热读兜底。</p>
+
+      <!-- 未登录、后端报错、真的没缓存，是三件不同的事，分三处说（手册 §5.8 第 1 条：不许静默失败）。 -->
+      <p v-if="!user.isLogged" class="hint empty">
+        推荐流要先登录才读得到：它的第一件事是问「你读过什么」，游客没有行为矩阵。
+        给游客一条长得像推荐的东西，等于把对照组当实验组卖（需求 §9.1 六组对照就是这么废的）。
+      </p>
+      <stage-notice v-else-if="recErrorCode" :code="recErrorCode" stage="7" api-name="GET /api/feed/recommend" :extra="recExtra" />
+      <template v-else>
+        <div v-for="item in recItems" :key="item.id" class="row rec-row">
+          <post-card class="rec-card" :item="item" @dismiss="dismissRecommend(item)">
+            <template #reason>
+              <div class="rec-why">
+                <span class="rec-reason">{{ item.recReason || recReasonFallback(item) }}</span>
+                <el-popover placement="top-start" :width="300" trigger="click">
+                  <template #reference>
+                    <el-button class="btn-rec-why" size="small" text @click.stop="">为什么推给我</el-button>
+                  </template>
+                  <div class="why-pop">
+                    <p><b>为什么推给我</b></p>
+                    <p>召回通道：{{ channelLabel(item.recChannel) }}（<code>{{ item.recChannel || '未知' }}</code>）</p>
+                    <p>离线打分：<code>{{ fmtRecScore(item.recScore) }}</code></p>
+                    <p>这条流为什么有它：{{ item.recReason || recReasonFallback(item) }}</p>
+                    <p class="hint">上面三行都是 GET /api/feed/recommend 原样给的字段（recall_channel / score / reason）。页面不自己算分，也不自己编理由。</p>
+                  </div>
+                </el-popover>
+              </div>
+            </template>
+          </post-card>
+        </div>
+        <div class="rec-foot">
+          <el-button v-if="recHasMore" class="btn-rec-more" size="small" :loading="recLoading" @click="loadRecommendMore">加载更多</el-button>
+          <span v-else class="hint">{{ recEndLine }}</span>
+        </div>
+      </template>
     </section>
 
     <!-- 4 官方话题墙（GET /api/topics，游客可逛）。点任意一张卡进话题详情页（任务 T3.8 · 需求 FR4.5）。
@@ -169,7 +206,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { topics, recommend, followingFeed } from '@/api/feed'
+import { topics, recommend, dislike, followingFeed } from '@/api/feed'
 import { createTopic, TOPIC_NAME_MAX, TOPIC_DESC_MAX, TOPIC_CREATE_PER_DAY, topicLength } from '@/api/topic'
 import { NOT_IMPLEMENTED_YET } from '@/api/auth'
 import { useFeedStore } from '@/stores/feed'
@@ -200,21 +237,164 @@ const router = useRouter()
 const feed = useFeedStore()
 const user = useUserStore()
 const topicList = ref([])
-const recList = ref([])
 const pending = NOT_IMPLEMENTED_YET
 const activeType = ref('')
-const busy = reactive({ topics: false, recommend: false })
+const busy = reactive({ topics: false })
 
-/* 推荐流的两件事，分开看：
-   1) 后端 GET /api/feed/recommend 在阶段 7 之前**恒返 90001 / HTTP 501**（这是刻意的诚实占位，不用假数据糊弄演示）；
-   2) 前端过去在 onMounted 里就调它一次，为一个**已经知道答案的问题**发请求，代价是每次进广场
-      DevTools 都多一条红色 501 —— Gate3 第 4 条要「无 console 红字」，而这条红字既不是故障也没带来新信息。
-   所以：占位说明改成由 RECOMMEND_LANDED 这个开关决定的静态状态，页面照常把「为什么这里没内容」讲清楚；
-   「刷新」按钮仍然真调这个接口，后端哪天接上，点一下就出真数据，不需要改回前端。
-   协同过滤落地时把 RECOMMEND_LANDED 置 true（并把 RECOMMEND_STAGE 里的「未实现」文案改掉）。 */
-const RECOMMEND_LANDED = false
-const RECOMMEND_STAGE = '7' // 与手册 §15 阶段 7 表、api/auth.js 同一口径：召回与加权都在 T7.x
-const codes = reactive({ topics: null, recommend: RECOMMEND_LANDED ? null : 90001 })
+/* 推荐流（任务 T7.9 / T7.10 接通 · 手册 §10.2 7.9-7.10 · 需求 FR5.6、FR5.8 · Gate7 判据 D6）。
+   2026-09-29 之前这一节是一张「阶段 7 未实现」的静态占位卡，当时的理由是「为一个已经知道答案的问题
+   发请求，只会让每次进广场多留一条红色 501」。那个前提已经不成立了，所以占位开关
+   （RECOMMEND_LANDED / RECOMMEND_STAGE）连同 codes.recommend 一起删掉：
+   留着它们，下一次接口出错时页面会永远显示那张假占位卡，而不是错误码 —— 那是把「不许静默失败」反着做。 */
+
+/**
+ * 一屏 6 条，不是广场那个 20。两条依据：
+ * 1) 后端每用户每批只写 knobs.cacheRowsPerUser = RecConstants.FEED_MAX_SIZE = 50 条缓存，
+ *    于是「换一批 ×3」＝18 条仍落在同一批次内，Gate7 D6 要的「刷新三次内容不重复」才量得准
+ *    —— 若一屏 20 条，第三屏就跨批次了，届时重复不重复混着「批次换血」一起发生，判据作废；
+ * 2) 这一节夹在广场与话题墙中间，不是整页主角，20 条会把话题墙推到两屏之外。
+ */
+const REC_SIZE = 6
+const codes = reactive({ topics: null })
+
+/**
+ * 推荐接口的出参是三层：{list:[{post:{id,…}, reason, recallChannel, score}]}，
+ * 而 PostCard 与 usePagedPosts 认的都是广场那个扁平形状（顶层就有 id）。
+ *
+ * <p><b>这一层扁平化不是图省事，是正确性</b>：usePagedPosts 按 row.id 去重，
+ * 少了这一步 row.id 恒为 undefined —— 第一条被收下、后面每一条都被判成
+ * 「和已见过的 undefined 重复」，于是第一屏之后所有翻页静默丢光数据，
+ * 界面上表现成「点加载更多什么都不发生」，而且控制台一声不响。
+ * 三个附加字段统一带 rec 前缀，是为了不和 post 自己的字段（如 status）撞名。</p>
+ */
+async function recommendPage(params) {
+  const data = await recommend(params)
+  const rows = data && Array.isArray(data.list) ? data.list : []
+  const flat = rows.map(function (row) {
+    const post = (row && row.post) || {}
+    return Object.assign({}, post, {
+      id: post.id,
+      recReason: row ? row.reason : null,
+      recChannel: row ? row.recallChannel : null,
+      recScore: row ? row.score : null
+    })
+  })
+  return Object.assign({}, data, { list: flat })
+}
+
+/** 与关注流同样的解构写法（理由见上面 folItems 那段注释：模板只自动解包顶层绑定）。 */
+const {
+  items: recItems,
+  loading: recLoading,
+  hasMore: recHasMore,
+  errorCode: recErrorCode,
+  reload: recReload,
+  loadMore: recLoadMore,
+  swapToNext: recSwapToNext
+} = usePagedPosts(recommendPage, { pager: 'page', size: REC_SIZE })
+
+/**
+ * 召回通道的中文名。key 是后端 RecConstants / ColdStart 的通道常量的值，
+ * 一个都不许自己发明：这张表读错一次，「为什么推给我」那三行就全成了前端编的话。
+ * 未知通道回「未标注通道」而不是留空 —— 空会被读成「后端坏了」，而真正该问的是这条数据。
+ */
+const CHANNEL_LABELS = {
+  hot: '热读榜兜底',
+  itemcf: '你读过的帖子的相似帖',
+  usercf: '口味相近的屿民在看',
+  content: '你关注的话题',
+  emotion: '今天的心情加权',
+  explore: '探索位（推一条你没读过的）'
+}
+
+function channelLabel(ch) {
+  return CHANNEL_LABELS[ch] || '未标注通道'
+}
+
+/**
+ * 离线分数的显示口径。热读兜底通道的 score 后端恒为 null（FeedService#hotFallback 明写「reason 留空、不给分」），
+ * 所以这里不能写成 (v||0).toFixed(4) —— 那会把「没有打分」显示成「0.0000」，
+ * 用户读成「这条相关性极低」，而事实是它压根没参与相关性计算。
+ */
+function fmtRecScore(v) {
+  if (v === null || v === undefined || v === '') return '未打分（热读兜底通道不给相关性分）'
+  const n = Number(v)
+  return Number.isFinite(n) ? n.toFixed(4) : String(v)
+}
+
+/** reason 为 null 时说什么：只说「后端没给理由」这一件事实，绝不代它编一句像是个性化出来的话（需求 D6 的下半句）。 */
+function recReasonFallback(item) {
+  if (item && item.recChannel === 'hot') {
+    return '这条来自热读兜底：你的协同过滤缓存这一轮没覆盖到它，后端因此没给个性化理由。'
+  }
+  return '后端这一条没返回理由（reason 为空）。这一栏宁可空着，也不替你编一句。'
+}
+
+const recLine = computed(() => {
+  const rows = recItems.value
+  if (!rows.length) return ''
+  const personalized = rows.filter(function (x) { return x.recChannel && x.recChannel !== 'hot' }).length
+  return '已加载 ' + rows.length + ' 条 · 其中协同过滤/内容/情绪等个性化通道 ' + personalized
+    + ' 条，热读兜底 ' + (rows.length - personalized) + ' 条'
+})
+
+const recEndLine = computed(() => {
+  if (!recItems.value.length) {
+    return '后端这一轮没有可推的内容：推荐缓存为空，热读兜底池也没凑出一屏。这不是错误，稍后点「刷新」再看。'
+  }
+  return '这一批 ' + recItems.value.length + ' 条已全部看到（每用户每批缓存上限 50 条，见底之后再往后翻必然是空页）。'
+    + '点「换一批」会退回第一屏重新给一批 —— 明说这一点，是为了不让人以为「换一批」永远换得出新东西。'
+})
+
+// 三种「这一栏为什么没内容」分开说：登录态失效 / 库挂了 / 真的没缓存。最后那种不是错误，走模板空态与上面的 recEndLine。
+const recExtra = computed(() => {
+  const code = Number(recErrorCode.value)
+  if (code === CODE.UNAUTHORIZED || code === CODE.TOKEN_EXPIRED || code === CODE.TOKEN_INVALID) {
+    return '登录态已经不成立了：推荐流读的是你自己的行为矩阵与 recommend_result 缓存，'
+      + '这条路径不能退化成「那就给你看热读榜」——那等于把对照组当实验组卖（需求 §9.1）。请重新登录。'
+  }
+  if (code === CODE.DB_UNAVAILABLE) {
+    return '数据库暂不可用：推荐流要读 recommend_result 与 post 两张表，后端已按「库挂了也让页面活着」的口径降级，'
+      + '这里是空态而不是白屏。'
+  }
+  return ''
+})
+
+async function reloadRecommend() {
+  await recReload()
+}
+
+async function swapRecommend() {
+  await recSwapToNext()
+}
+
+async function loadRecommendMore() {
+  if (!recHasMore.value || recLoading.value) return
+  await recLoadMore()
+}
+
+/**
+ * 推荐位上的「不感兴趣」（T7.7 · POST /api/feed/dislike · Gate7 D6「当场点当场没」）。
+ *
+ * <p>回执里两个数的口径抄后端 FeedService#dislike：removed = 本批次缓存里被逻辑删掉的这条的行数，
+ * removedSimilar = 沿 item_similarity 一起被压掉的邻居行数。两者都是「数据库受影响行数」，
+ * 不是「你屏幕上少了几条」，所以提示里分开写，不合并成一个总数糊在一起。</p>
+ */
+async function dismissRecommend(item) {
+  if (!item || item.id === undefined || item.id === null) return
+  try {
+    const data = await dislike(item.id)
+    recItems.value = recItems.value.filter(function (x) { return x.id !== item.id })
+    const removed = Number((data && data.removed) || 0)
+    const removedSimilar = Number((data && data.removedSimilar) || 0)
+    ElMessage.success('这条已从本批缓存里删掉（' + removed + ' 行），并压掉与它相似的 '
+      + removedSimilar + ' 条下一屏候选'
+      + (removedSimilar ? '' : '：这一条暂时取不到邻居，只驳回本尊'))
+  } catch (e) {
+    // 失败不在这里补文案：dislike() 刻意不加 silent，http 层已经把后端那句原因弹成红条（10002 未登录等）。
+    // 这里再弹一条就成了同一件事说两遍。
+  }
+}
 // 创建话题弹窗的状态。done 与 error 在每次敲字时清掉：留着一份旧回执，
 // 用户会以为「第二次提交的结果」就是屏幕上那一块，而它其实是上一次的。
 const create = reactive({ open: false, name: '', desc: '', busy: false, done: null, error: null })
@@ -384,19 +564,6 @@ async function doCreateTopic() {
   }
 }
 
-async function loadRecommend() {
-  busy.recommend = true
-  codes.recommend = null
-  try {
-    const data = await recommend()
-    recList.value = Array.isArray(data) ? data : []
-  } catch (e) {
-    codes.recommend = e.code || 'network'
-  } finally {
-    busy.recommend = false
-  }
-}
-
 async function reload() {
   await feed.fetchPage({ replace: true })
 }
@@ -423,9 +590,25 @@ function onPublished(data) {
   }
 }
 
-function dismiss(id) {
-  feed.dismiss(id)
-  ElMessage.info('已从当前界面移除（真正的「不感兴趣」反馈要等阶段 7 写进召回过滤）')
+/**
+ * 广场卡片上的「不感兴趣」（手册 §6.2 U3 那颗按钮，任务 T7.7 接的真逻辑）。
+ *
+ * <p>这里刻意<b>不做乐观剔除</b>：过去是「本地先删掉、再弹一句『真正的反馈要等阶段 7』」。
+ * 阶段 7 落地之后如果保留那套写法，会出现最难查的一种不一致 ——
+ * 后端拒了（未登录 10002 / 库挂了），帖却已经从界面上消失，刷新又全部回来，
+ * 而用户刚才那一秒相信的是「我已经告诉平台不推它了」。
+ * 所以现在改成先等回执、成功后才让 store 剔除，失败就一条都不动（错误文案由 http 层弹，
+ * dislike() 不带 silent）。剔除同时落到 recommend_result：广场这一条也会从推荐缓存里被压掉，
+ * 这个 scene 口径的简化写在 api/feed.js 的注释里，不在这儿重复一遍。</p>
+ */
+async function dismiss(id) {
+  if (id === undefined || id === null) return
+  const data = await feed.dismiss(id)
+  if (data) {
+    ElMessage.success('这条已从本批推荐缓存里删掉（' + Number(data.removed || 0) + ' 行），'
+      + '与它相似的下一屏候选也压掉了 ' + Number(data.removedSimilar || 0) + ' 条；'
+      + '这条负反馈同时记进你的行为流，下一次离线重算照样生效')
+  }
 }
 
 // 无限滚动用 IntersectionObserver 而不是 scroll 事件：列表用 flex 布局，
@@ -456,9 +639,10 @@ function bindFollowingObserver() {
 
 onMounted(async () => {
   loadTopics()
-  // 见上面 RECOMMEND_LANDED 的注释：没落地就别去问，问了只会留一条红字
-  if (RECOMMEND_LANDED) loadRecommend()
+  // 登录了才拉一屏推荐：这条流不做游客态（后端 recommend 未登录直接 10002），
+  // 所以这里先判一次 user.isLogged，而不是发一个注定失败的请求再把红条弹给用户看。
   if (user.isLogged) {
+    recReload()
     await reload()
     await nextTick()
     bindObserver()
@@ -484,6 +668,18 @@ h2 { margin: 0; font-size: 16px; color: var(--mi-mist); letter-spacing: 1px; }
 .empty { padding: 18px; }
 .hint { font-size: 12px; color: var(--mi-text-dim); }
 .formula { font-size: 12px; color: var(--mi-text-dim); font-family: Consolas, monospace; margin: 0 0 8px; }
+/* 推荐流那一节（T7.9/T7.10）。卡片本体沿用 PostCard，这里只管「多出来的那一行」与其容器。 */
+.recommend .rec-row { margin-top: 12px; }
+.recommend .rec-card { border: 1px solid var(--mi-border); border-radius: 12px; padding: 12px 14px; background: rgba(127, 167, 196, 0.04); }
+.rec-why { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0 0; padding-top: 8px; border-top: 1px dashed var(--mi-border); }
+.rec-reason { font-size: 12px; line-height: 1.7; color: var(--mi-mist); }
+.btn-rec-why { flex: none; }
+.rec-foot { display: flex; justify-content: center; align-items: center; min-height: 40px; margin-top: 10px; }
+.rec-foot .hint { text-align: center; line-height: 1.7; }
+.why-pop { font-size: 12px; line-height: 1.8; }
+.why-pop p { margin: 4px 0; }
+.why-pop code { font-family: Consolas, monospace; color: var(--mi-primary); }
+.why-pop .hint { color: var(--mi-text-dim); }
 .topics { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .topic { border: 1px solid var(--mi-border); border-radius: 10px; padding: 12px 14px; background: rgba(127, 167, 196, 0.06); }
 .t-name { font-weight: 700; color: var(--mi-primary); }

@@ -308,6 +308,56 @@ public class PostQueryService {
                 intValue(post.getCollectCnt()));
     }
 
+    /**
+     * 推荐流 / 相似位的卡片组装（任务 T7.9 · 手册 §10.1 在线侧）。
+     *
+     * <p><b>入参顺序就是出参顺序</b>：调用方（{@code FeedService}）拿到的 id 列表来自
+     * {@code recommend_result} 按 position 排序，那已经是离线融合打分的最终次序。
+     * SQL 里 {@code IN (...)} 回来的行是主键序，必须再按入参重排一次 —— 否则「position」
+     * 这一列等于白算，用户第一屏看到的是数据库碰巧先取到的那条。</p>
+     *
+     * <p><b>为什么不新建一个 lean DTO</b>：前端 {@code PostCard.vue} 要的是 PostListItem
+     * 的全部字段（作者展示名、话题、图片、匿名标记、是否已赞、审核提示、危机热线提示…）。
+     * 为推荐流单开一个精简卡片等于同一张卡片两套字段契约，前端要么两套模板要么默默少渲染，
+     * 而「推荐流里的卡片和广场里的长得不一样」是需求 D6 明确不要的。</p>
+     *
+     * <p><b>为什么复用 {@link #applyVisible} 而不是信任候选池</b>：候选池是 30 分钟前算的，
+     * 这半小时里帖子可能被下架、被举报转 TAKEDOWN、树洞到期销毁、作者注销。
+     * 缓存里还留着它的行，但界面上一条都不能露 —— 可见性的唯一判据必须在读侧生效一次。</p>
+     *
+     * <p>回来的条数可能<b>少于</b>入参条数（被过滤），这是正常状态：调用方按实际返回的条数
+     * 记曝光，并把差额当作「需要补下一屏」的信号，而不是报错。</p>
+     *
+     * @param viewerId   看这条流的人（审核提示与「是否已赞」都以他为准）
+     * @param orderedIds 已排好序的帖子 id；null / 空直接返回空列表，不发 SQL
+     * @param now        当前时间，透传给销毁判据与审核提示
+     */
+    public List<PostListItem> feedCards(long viewerId, List<Long> orderedIds, LocalDateTime now) {
+        if (orderedIds == null || orderedIds.isEmpty()) {
+            return List.of();
+        }
+        LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
+        wrapper.in(Post::getId, orderedIds);
+        applyVisible(wrapper, viewerId, null, now);
+        applyAuthorActive(wrapper);
+        List<Post> rows = postMapper.selectList(wrapper);
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, Post> byId = new LinkedHashMap<>();
+        for (Post row : rows) {
+            byId.put(row.getId(), row);
+        }
+        List<Post> ordered = new ArrayList<>(rows.size());
+        for (Long id : orderedIds) {
+            Post row = byId.remove(id);
+            if (row != null) {
+                ordered.add(row);
+            }
+        }
+        return toListItems(viewerId, ordered, now);
+    }
+
     // ================================================================ 详情
 
     /**

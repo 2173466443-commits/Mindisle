@@ -1,5 +1,5 @@
 <template>
-  <article class="mi-card post" @click="goDetail">
+  <article class="mi-card post" :data-post-id="item.id" @click="goDetail">
     <header class="head">
       <el-tag v-if="item.type === 'hole'" size="small" type="warning" effect="dark">树洞</el-tag>
       <el-tag v-else-if="item.type === 'help'" size="small" type="danger" effect="dark">求助</el-tag>
@@ -25,6 +25,13 @@
     <div v-if="item.topics && item.topics.length" class="topics">
       <span v-for="t in item.topics" :key="t" class="topic"># {{ t }}</span>
     </div>
+
+    <!-- 推荐位专属的那一行（任务 T7.7 · 手册 §10.2 7.7 · 需求 FR5.8）。
+         刻意做成插槽而不是 reason 属性：需求 D6 要「推荐位卡片与广场同一形状」，
+         而「同一形状」的意思正是——同一张卡片、多出来的一行由调用方决定内容。
+         没有这个插槽时它一行 DOM 都不产生（广场 / 关注 / 主页 / 我的帖子四处都不传），
+         比在组件里写 if (item.reason) 少一处「前端得自己记得哪些接口带 reason」。 -->
+    <slot name="reason"></slot>
 
     <el-alert v-if="item.auditTip" type="warning" :closable="false" show-icon class="tip" :title="item.auditTip" />
     <crisis-card v-if="item.hotline" :hotline="item.hotline" level="inline"

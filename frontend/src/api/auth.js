@@ -32,6 +32,15 @@ export const logout = () => http.post('/auth/logout', {}, { silent: true })
  * 也已从本表删掉：它们不再是「点了没反应」，/emotion 页在真浏览器里出图、写库、回看均已实测。
  * 后两批是 2026-09-23 按 web 包里的 @*Mapping 反推核对的。搜索这条不存在「从表里删掉旧的一行」，
  * 因为需求 §9.1 那条单接口 /search 后端从来没映射过 —— 它一落地就是三条路径。
+ * <b>2026-09-29 阶段 7 收口时又删掉两行</b>（同样按 web 包里的 @*Mapping 逐条反推核对，不凭印象）：
+ * ① GET /api/feed/recommend —— 桩已在 T7.9 拆掉，改读 recommend_result 缓存，首页「为你推荐」那张卡就是它的消费方；
+ * ② WS /ws/pm —— 这一行原本连路径都是错的：真实端点是 WebSocketConfig 里的 /ws（SockJS）与 /ws-native，
+ *    阶段 5 就随私信一起上线了，挂着「→ 阶段 5」是把已交付的东西继续标成欠账。
+ * 新增的 POST /api/feed/dislike（T7.7）与 GET /api/posts/{id}/similar（T7.16）从上线那天起就不在这张表里：
+ * 它们不是「点了没反应」，是「点了有反应」。
+ * 顺手记一句同一天新出现的<b>假话风险</b>：这张表如果哪天又长出一行「阶段 X 未实现」，
+ * 除了删这一行，还得回前端把「钉这句话存在」的探针判据一起改 ——
+ * routecrawl.mjs 第 152 行那条就吃过这个亏（判据要求屏上有「阶段 7 未实现」，功能落地后它必红）。
  * 独立的「通知中心」整页仍属任务 3.16 —— 那是同一批接口的第二个消费者，不是接口没做，
  * 所以它不进这张表：这张表列的是「点了会没反应」，不是「还没长成设计稿那样」。</p>
  *
@@ -41,7 +50,5 @@ export const logout = () => http.post('/auth/logout', {}, { silent: true })
  * 「该功能尚未实现」，所以前端照旧要把那句话显示出来，不许当成保存成功。</p>
  */
 export const NOT_IMPLEMENTED_YET = [
-  'GET  /api/feed/recommend（情绪感知协同过滤推荐）→ 阶段 7（T7.2/T7.5 召回 · T7.4 EmotionBoost），接口在但直接返 90001',
-  'PATCH/DELETE /api/posts/{id}（编辑进重审、树洞到期销毁）→ 任务 3.15',
-  'WS /ws/pm（私信实时推送）→ 阶段 5'
+  'PATCH/DELETE /api/posts/{id}（编辑进重审、树洞到期销毁）→ 任务 3.15'
 ]

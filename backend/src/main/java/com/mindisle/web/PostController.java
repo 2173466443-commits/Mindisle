@@ -2,6 +2,7 @@ package com.mindisle.web;
 
 import com.mindisle.entity.Comment;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -37,6 +38,8 @@ import com.mindisle.post.dto.ReadProgressView;
 import com.mindisle.post.dto.ReportView;
 import com.mindisle.track.UserActionCatalog;
 import com.mindisle.track.UserActionRecorder;
+import com.mindisle.recommend.FeedService;
+import com.mindisle.recommend.SimilarPostService;
 import com.mindisle.security.AuthUser;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -83,17 +86,19 @@ public class PostController {
   private final CommentService commentService;
   private final ReportService reportService;
   private final UserActionRecorder recorder;
+  private final SimilarPostService similarPostService;
 
   public PostController(PostService postService, PostQueryService postQueryService,
                         PostInteractionService postInteractionService,
                         CommentService commentService, ReportService reportService,
-                        UserActionRecorder recorder) {
+                        UserActionRecorder recorder, SimilarPostService similarPostService) {
     this.postService = postService;
     this.postQueryService = postQueryService;
     this.postInteractionService = postInteractionService;
     this.commentService = commentService;
     this.reportService = reportService;
     this.recorder = recorder;
+    this.similarPostService = similarPostService;
   }
 
   @PostMapping
@@ -118,9 +123,10 @@ public class PostController {
     }
     PageResult<PostListItem> result =
         postQueryService.list(current.id(), type, page, LocalDateTime.now());
-    // 曝光埋点挂在这里，不挂在 /api/feed/recommend（任务 T3.10 · 手册 §6.1 行 3.10）。
-    // 那个推荐流端点至今是 90001 的桩，钩子上去就是死代码；广场与关注流才是现在真在跑的
-    // 两条「服务端把一批帖子交给用户」的路径，阶段 7 推荐流落地时复用同一次 recordExposure 即可。
+    // 曝光埋点挂在这里（任务 T3.10 · 手册 §6.1 行 3.10）：广场是「服务端把一批帖子交给用户」
+    // 的路径，scene 用 plaza。推荐流（T7.9 落地）不共用这一句——它要带 AB 分组 mode 才能判对
+    // 去重窗口，所以由 FeedService 在发出那一屏时自己记，scene 用 feed。两条流的曝光分开算分母，
+    // §6.4 的消融对比才有干净的口径。
     recordExpose(current.id(), result, UserActionCatalog.SCENE_PLAZA);
     return Result.ok(result);
   }
@@ -133,6 +139,35 @@ public class PostController {
       throw new BizException(ErrorCode.UNAUTHORIZED);
     }
     return Result.ok(postQueryService.detail(current.id(), id, LocalDateTime.now()));
+  }
+
+  /**
+   * 「看了又看」相似帖（任务 T7.16 · 手册 §10.6 · 需求 FR5.6）。
+   *
+   * <p><b>形状与推荐流同一条契约</b>（{@code List<FeedItem>}）：卡片、理由、召回通道三件套
+   * 与首页完全一致，前端复用同一张 {@code PostCard}。差别只在两处：这里是<b>整页返回、不分页</b>
+   * （相似位是详情页的一个区块，不是无限流），以及理由文案另写一套
+   * （「和这篇一样…」而不是「因为你…」，手册 §10.6 第 3 条要求两者分开）。</p>
+   *
+   * <p>错误码用 30001/404 而不是 200 空列表：源帖本身不可见时，「不可见」与「不存在」
+   * 必须同形（与 {@link #detail} 同一口径），否则这个端点会退化成一枚探测别人私密帖的探针。
+   * 源帖可见但确实没有相似内容时，兜底通道会补出内容来，所以这里几乎不会出现空数组
+   * （手册 §10.6 第 1 条：不返回空列表）。</p>
+   *
+   * <p>{@code size} 越界不报错，夹到区间内（默认 6、上限 12，见
+   * {@link SimilarPostService#clampSize}）：它只是一个区块的展示条数，
+   * 传 999 的动机是「多要一点」，不是攻击面，没必要为此回一个 400 打断详情页。</p>
+   */
+  @GetMapping("/{id:\\d+}/similar")
+  @Operation(summary = "详情页相似帖（ItemCF 邻居 + 同话题兜底 + 质量分榜补位，整页返回）")
+  public Result<List<FeedService.FeedItem>> similar(@PathVariable("id") long id,
+      @Parameter(description = "返回条数，默认 6，最多 12")
+      @RequestParam(name = "size", required = false) Integer size,
+      @AuthenticationPrincipal AuthUser current) {
+    if (current == null) {
+      throw new BizException(ErrorCode.UNAUTHORIZED);
+    }
+    return Result.ok(similarPostService.similar(current.id(), id, size, LocalDateTime.now()));
   }
 
   /**

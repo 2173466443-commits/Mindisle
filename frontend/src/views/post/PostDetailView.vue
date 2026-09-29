@@ -61,7 +61,8 @@
 
       <!-- 点赞/收藏已经接上真接口（T3.6），这条互动条就是它的落点：
            详情页是「一个人反复进出同一帖」的地方，所以按钮态一律用后端回执初始化，不做本地记忆。
-           相似帖推荐（FR5.6 / 阶段 6）确实还没有接口，这里留空而不是摆假数据。 -->
+           相似帖（FR5.6）已于 2026-09-29 接上，但它不在这条互动条里 —— 正文下面另有一张「看了又看」卡。
+           这里只放「对这一条的操作」，那张卡回答的是「接下来读什么」，两件事不混在一排按钮上。 -->
       <div class="acts">
         <el-button class="act" :class="{ 'act-on': post.liked }" :type="post.liked ? 'primary' : 'default'"
                    size="small" round :plain="!post.liked" :disabled="isBusy(post, 'like')"
@@ -89,6 +90,44 @@
                      text="你替 TA 担心，也别忘了自己：这个电话 24 小时有人接" />
       </div>
     </article>
+
+    <!-- 「看了又看」（任务 T7.16 的前端消费方 · 手册 §10.6 · 需求 FR5.6）。
+         位置钉在正文之后、评论区之前：读完这条才决定「还要不要继续看」，这是它唯一会被看见的位置。
+         卡片复用广场那张 PostCard（需求 D6「同一形状」），差别只有两处：
+         ① 不给「不感兴趣」按钮 —— POST /api/feed/dislike 的 scene 后端写死 'feed'，
+            从详情页点它会被记成「推荐流的负反馈」，那是把两件事记成一件事（详见 api/feed.js 注释）；
+         ② 理由那一行说的是「两条内容的关系」（和这篇一样…），不是「因为你…」，手册 §10.6 第 3 条要求分开。
+         整页返回、不分页：接口回的是 List<FeedItem>，不是 PageResult，所以这里用本地 ref 而不是 usePagedPosts。 -->
+    <section v-if="post" class="mi-card similar">
+      <div class="sec-head">
+        <h2 class="sim-h">看了又看</h2>
+        <div class="sec-ops">
+          <span class="dim">{{ similarLine }}</span>
+          <el-button class="btn-similar-reload" size="small" text :loading="similarLoading"
+                     @click="loadSimilar(postId)">重新加载</el-button>
+        </div>
+      </div>
+      <p class="dim sim-note">这几条不是「为你推荐」：它们和<b>你刚读完的这条</b>被同一批人连着读过（ItemCF 邻居），
+        邻居凑不够时补同话题的热帖、再补质量分榜。所以理由说的是两条内容的关系，不去猜你的喜好。</p>
+      <p v-if="!userStore.isLogged" class="dim">这一位要登录才加载：后端先要认出「你」，才能按你的可见性把
+        私密帖、审核中的帖从相似位里剔掉（GET /api/posts/{id}/similar 未登录直接 10002，这里就不发这个注定失败的请求了）。</p>
+      <stage-notice v-else-if="similarError" :code="similarError" stage="7"
+                    api-name="GET /api/posts/{id}/similar" :extra="similarExtra" />
+      <template v-else>
+        <div v-for="row in similar" :key="row.id" class="sim-row">
+          <post-card class="sim-card" :item="row" :dismissable="false">
+            <template #reason>
+              <div class="sim-why">
+                <span class="sim-reason">{{ row.recReason || '后端这条没给理由（reason 为空），页面不替它编。' }}</span>
+                <span class="sim-ch">{{ channelLabel(row.recChannel) }}</span>
+              </div>
+            </template>
+          </post-card>
+        </div>
+        <p v-if="!similar.length && !similarLoading" class="dim">这一条暂时找不到能一起看的内容。
+          新帖、冷门话题最容易这样：共读记录还没攒够，兜底池里同话题也没有别的已过审公开帖。</p>
+      </template>
+    </section>
 
     <!-- 评论区（任务 T3.7 · U4）：单独一张卡。未登录、加载失败、空列表三种状态由组件自己画，
          详情页不参与——同一句「看不到评论」在三种情况下的成因完全不同，混在父页面里判就容易判错。 -->
@@ -150,6 +189,7 @@ import {
   reportReadProgress,
   VIEW_MIN_DURATION_MS,
   reportPost,
+  similarPosts,
   POST_REPORT_REASONS,
   REPORT_DESC_MAX,
   REPORT_EVIDENCE_MAX
@@ -163,6 +203,7 @@ import { CODE } from '@/api/errorCode'
 import { fromNow, countdown, fmtCount, fmtDateTime } from '@/utils/format'
 import CrisisCard from '@/components/CrisisCard.vue'
 import CommentSection from '@/components/CommentSection.vue'
+import PostCard from '@/components/PostCard.vue'
 import StageNotice from '@/components/StageNotice.vue'
 
 // U4 详情页。每打开一次就是后端一次真实计数（缓存累加 + 每 5 分钟回写），
@@ -225,6 +266,8 @@ async function load() {
   try {
     post.value = await postDetail(id)
     beginDwell()
+    // 相似位跟着正文一起换，但不 await：它是详情页的旁支，不该把「正文出来」这件事再往后拖一个 RTT。
+    loadSimilar(id)
   } catch (e) {
     post.value = null
     if (Number(e.code) === CODE.POST_NOT_FOUND) notFound.value = true
@@ -368,6 +411,84 @@ const evidenceBusy = ref(false)
 const reportTip = ref('')
 const reportHotline = ref('')
 
+// ---------------- 相似位「看了又看」（任务 T7.16 前端消费方 · 手册 §10.6 · 需求 FR5.6） ----------------
+// 这一整块必须待在 watch 之前：那条 watch 带 { immediate: true }，是在 setup 里当场就跑一遍的，
+// 而它一路会走到 loadSimilar() 去读写下面这几个 ref。放后面就是 TDZ ——
+// 上面那条「举报七个 ref」的注释记的正是同一件事怎么把首屏悄悄打成永久空态的。
+
+/**
+ * 相似位一屏几条。后端夹在 1..12、默认 6（SimilarPostService#clampSize），这里就取默认的 6：
+ * 详情页的主体是正文与评论区，相似位一超过 6 条就会把评论输入框顶到两屏之外，
+ * 而「看完想说一句」恰恰是这条页面上最高频的下一步。
+ */
+const SIMILAR_SIZE = 6
+const similar = ref([])
+const similarLoading = ref(false)
+/** null 表示上一次成功；否则是后端码或 'network'（手册 §5.8 第 1 条：不许静默失败）。 */
+const similarError = ref(null)
+
+/**
+ * FeedItem = {post:{…}, reason, recallChannel, score} 压成 PostCard 认的扁平形状。
+ * 与首页 recommendPage 里那一步是同一件事：卡片的点击跳转、点赞回执都按顶层 id 找对象，
+ * 不压平的话 row.id 为 undefined，点卡片会跳到 /post/undefined。
+ */
+function flattenFeedItem(row) {
+  const p = (row && row.post) || {}
+  return Object.assign({}, p, {
+    id: p.id,
+    recReason: row ? row.reason : null,
+    recChannel: row ? row.recallChannel : null,
+    recScore: row ? row.score : null
+  })
+}
+
+// 只列后端真会给的三条通道（相似位走不到 usercf/explore/emotion）；其余一律「未标注通道」，不替后端编。
+const SIMILAR_CHANNELS = { itemcf: '共读相似', content: '同话题', hot: '热读补位' }
+function channelLabel(ch) {
+  return SIMILAR_CHANNELS[ch] || '未标注通道'
+}
+
+const similarLine = computed(() => {
+  if (!userStore.isLogged) return ''
+  if (similarLoading.value) return '加载中…'
+  if (similarError.value) return '这次没取到'
+  return similar.value.length ? SIMILAR_SIZE + ' 条以内 · 已取 ' + similar.value.length + ' 条' : '还没攒出可一起读的内容'
+})
+
+const similarExtra = computed(() => {
+  const code = Number(similarError.value)
+  if (code === CODE.UNAUTHORIZED || code === CODE.TOKEN_EXPIRED || code === CODE.TOKEN_INVALID) {
+    return '登录态已经不成立了：这条接口要先认出「你」，才能按你的可见性把私密帖、审核中的帖从相似位里剔掉。请重新登录。'
+  }
+  if (code === CODE.DB_UNAVAILABLE) {
+    return '数据库暂不可用：相似位要读 item_similarity 与 post 两张表，后端按「库挂了也让页面活着」的口径降级 ——'
+      + '这里只是这一块空着，正文与评论区不受影响。'
+  }
+  if (code === CODE.POST_NOT_FOUND) {
+    return '源帖对你不可见或已经不在了：这条接口刻意回 30001/404 而不是 200 空列表 ——'
+      + '「不可见」与「不存在」必须同形，否则它会变成一枚探测别人私密帖的探针。'
+  }
+  return ''
+})
+
+async function loadSimilar(id) {
+  // 先清再拉：换帖时若不清，会有一屏的时间「上一条的相似位挂在新帖下面」，那是最容易被判成 bug 的错位。
+  similar.value = []
+  similarError.value = null
+  if (!userStore.isLogged) return // 未登录不发这个注定吃 10002 的请求，界面上那句话说的是原因
+  const target = Number(id)
+  if (!Number.isFinite(target) || target <= 0) return
+  similarLoading.value = true
+  try {
+    const rows = await similarPosts(target, SIMILAR_SIZE)
+    similar.value = (Array.isArray(rows) ? rows : []).map(flattenFeedItem)
+  } catch (e) {
+    similarError.value = e && e.code !== undefined && e.code !== null ? e.code : 'network'
+  } finally {
+    similarLoading.value = false
+  }
+}
+
 // 换帖就重拉一次：路由参数变了，页面必须跟着换。
 //
 // 这一行必须留在它要碰的所有状态都声明完之后（这里就是上面那七个举报 ref）。
@@ -509,6 +630,17 @@ async function submitReport() {
 .acts .act-report { color: var(--mi-text-dim); }
 .acts .act-report:hover { color: var(--mi-primary); }
 .report-receipt { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+/* 「看了又看」这张卡（T7.16）。刻意不做成和正文一样的宽度上限之外的样式：
+   它读起来就是正文的下一段，所以间距、字号都跟着正文那张卡走。 */
+.similar h2.sim-h { margin: 0; font-size: 16px; color: var(--mi-mist); letter-spacing: 1px; }
+.sim-note { margin: 0 0 10px; line-height: 1.8; }
+.sim-row { margin-top: 10px; }
+.sim-card { border: 1px solid var(--mi-border); border-radius: 12px; padding: 12px 14px; background: rgba(127, 167, 196, 0.04); }
+.sim-why { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--mi-border); }
+.sim-reason { font-size: 12px; line-height: 1.7; color: var(--mi-mist); }
+.sim-ch { flex: none; font-size: 12px; color: var(--mi-text-dim); }
+.sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.sec-ops { display: flex; align-items: center; gap: 8px; }
 .dlg-note { margin: 0 0 12px; font-size: 12px; line-height: 1.8; color: var(--mi-text-dim); }
 /* 2026-09-23 真浏览器截图（docs/gate/阶段3/07）抓出来的布局 bug：
    EP 的 .el-radio-group 自带 align-items:center。下面这条把它的排版方向改成 column 之后,

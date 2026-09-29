@@ -1,0 +1,89 @@
+==== Gate7 取证 · RUN=333760 · 本地 2026/9/29 13:05:33 ====
+  后端=http://127.0.0.1:8080 前端=http://127.0.0.1:5173 出图目录=E:\codex workspace\009_心屿AI心理陪伴社区\docs\gate\阶段7
+  SQL 执行器=就绪（DB 侧判据现场只读现查）
+  界面线=开真 Chrome（headless）
+  PASS [P0] 后端 http://127.0.0.1:8080 健康  → status=UP
+  PASS [P1] 前端 http://127.0.0.1:5173 可访问  → HTTP 200
+
+==== A 线（D6 推荐流契约 + 负反馈三层记账）====
+  PASS [A1] 游客打 GET /api/feed/recommend 被拒（不退化成热读榜）  → HTTP 401 code=10002 msg=请先登录
+  -- demo01 userId=2
+  PASS [A2] DB：这一批 recommend_result 够三屏（≥18 行）  → active=50 mode=cf
+  -- 第 1 屏 6 条：1104,923,264,1052,903,1024｜通道 itemcf,itemcf,itemcf,itemcf,explore,itemcf｜hasMore=true total=-1
+  -- 第 2 屏 6 条：1033,1034,1053,892,1064,1084｜通道 itemcf,itemcf,itemcf,explore,itemcf,itemcf｜hasMore=true total=-1
+  -- 第 3 屏 6 条：1124,1133,913,1134,1142,1144｜通道 itemcf,itemcf,explore,itemcf,itemcf,itemcf｜hasMore=true total=-1
+  PASS [A3] 三屏各回 6 条（page=1/2/3 每屏都满）  → p1=6 p2=6 p3=6
+  PASS [A4] D6 核心：三屏 18 条 id 两两不重复  → distinct=18 / 18
+  PASS [A5] 出参 total 恒为 -1（游标分页不承诺总数，前端不许显示「共 N 条」）  → p1.total=-1 p2.total=-1 p3.total=-1
+  PASS [A6] recallChannel 全部落在六通道内  → usercf/itemcf/content/hot/explore/emotion
+  PASS [A7] 每条卡片都带非空 reason（热读兜底通道除外，见 A8）  → 空理由 0 条，通道分布={}
+  PASS [A8] 热读兜底诚实标注：reason 与 score 都为 null（不给对照组编话）  → hot 行数=0
+  PASS [A9] 个性化通道不夹热读文案（ReasonBuilder 早退抢文案那个 bug 的复数判据）  → 检查 18 条，三句热读文案 0 命中
+  PASS [A10] 个性化通道带离线打分（score>0，前端「为什么推给我」有真数可显示）  → 18/18 例=1104:0.669129
+  PASS [A11] 卡片与广场同形（post 里带齐 title/displayName/topics/四个计数）  → 18 字段
+  -- 曝光记账夹具：前三屏 18 条 + 第 4~14 屏 51 条 = 去重后 69 条，其中按取模公式应采中 5 条
+  PASS [A12] DB：缓存行的 is_exposed 被置位（发出的那几条）  → 置位行数=50（本轮共取到 69 条）
+  PASS [A13] DB：expose 行与 floorMod(userId*31+itemId,10)<3 逐条一致（30% 采样可离线复算）  → 69 条夹具中应采中 5 条，实测命中 5 条；表内不符公式 0 行
+  -- 这一批缓存里有 50 个不同帖子；demo01 今天已驳回过 3 个
+  -- 候选 1104：相似位 12 条，其中也在这一批缓存里 6 条
+  -- 目标帖=1104 邻居中同样在缓存里的=1142,1064,1053,1124,1133,1144
+  PASS [A14] POST /api/feed/dislike 成功并回执两个真实计数  → code=0 msg=成功 回执={"removed":1,"removedSimilar":7}
+  PASS [A15] 第一层：本尊被逻辑删，缓存总数正好减少 removed+removedSimilar 行（不是只减 removed）  → removed=1 removedSimilar=7 缓存 50→42 实际减少=8
+  PASS [A16] 第二层：DB 里本尊与被联压的邻居都读不到活跃行了  → 本尊 1104 与邻居 1142,1064,1053,1124,1133,1144 残留活跃行=[]（空数组才算过）
+  PASS [A17] 第三层：行为表落一行 dislike，weight=-3.00、scene=feed（矩阵真的记住了）  → [["-3.00","feed","post"]]｜DDL 注释写 -5、代码常量是 -3，见清单「口径偏离」
+  PASS [A18] 幂等：连点两次不再删行、也不再叠权重（uk_action 带 day_bucket，撞键是覆盖不是累加）  → 第二次 removed=0 removedSimilar=0 行为表=[["-3.00","1"]]
+  PASS [A19] D6 当场没：驳回之后再取三屏，本尊与被联压的邻居一条都不回来  → 三屏 18 条，残留=[]
+  PASS [A20a] dislike postId=0 被拒（10001/400，不是 90004 兜底）  → code=10001 msg=postId 必填且为正整数
+  PASS [A20b] dislike 空请求体被拒（@RequestBody(required=false) 走参数判据）  → code=10001
+  PASS [A20c] 游客打 dislike 被拒（10002/401）  → code=10002
+  PASS [A21] size 越界被夹到上限（PageQuery.MAX_SIZE=50，不报错也不越权）  → 回 42 条
+
+==== B 线（T7.16 相似位三层召回）====
+  PASS [B1] 游客打 /api/posts/{id}/similar 被拒（10002/401，不退化成公开热榜）  → code=10002
+  PASS [B2] 源帖能出 ItemCF 邻居（第 1 层：一起被读过的那批）  → 源帖=1104 通道=itemcf,itemcf,itemcf,itemcf,itemcf,itemcf
+  PASS [B3] 默认 size=6：整页返回、条数 ≤6、不含源帖自己  → 6 条 1142,1064,1053,1063,1114,1124
+  PASS [B4] 相似位通道只许三层（itemcf / content / hot），不混 usercf/explore/emotion  → itemcf,itemcf,itemcf,itemcf,itemcf,itemcf
+  PASS [B5] 相似位每条都带理由（这里的理由由 SimilarPostService 现给，不读缓存）  → 0 条空理由
+  PASS [B6] itemcf 行不披热读补位的文案（第一层有货就不许说「共读记录还太少」）  → 6 条 itemcf 全带邻居话术
+  PASS [B7] size 越界不报错、只夹到区间（999→≤12，0→默认 6，3→≤3）  → 999→12 0→6 3→3
+  PASS [B8] 冷帖（无 ItemCF 邻居）不空窗：兜底两层能补出内容  → 冷帖=881 出6 条 通道=hot,hot,hot,hot,hot,hot
+  PASS [B9] 冷帖的结果里不许出现 itemcf（它压根没有邻居行，出现就是脏缓存）  → hot,hot,hot,hot,hot,hot
+  PASS [B10] 不可见源帖（私密 id=1293）与不存在同形，不许当探针  → HTTP 404 code=30001 msg=内容不存在或已删除
+  PASS [B11] 不可见源帖（审核中/未通过 id=1285）与不存在同形，不许当探针  → HTTP 404 code=30001 msg=内容不存在或已删除
+  PASS [B12] 不存在的源帖 → 30001/404（不是 200 空数组）  → code=30001 HTTP=404
+  PASS [B13] DB：连打三次相似位，expose 行数一动不动（被动区块不灌分母）  → before=9 after=9
+
+==== C 线（D7 离线作业与健康度）====
+  PASS [C1] 普通 USER 打管理端重算被拒（10003，且不是被限流挡的假拒）  → HTTP 403 code=10003 msg=没有该操作权限
+  -- status(前)：{"running":false,"lastFinishedAt":"2026-09-29T13:02:06.3233238","lastSummary":{"qualityRows":616,"topicRows":59,"similarityRows":468,"itemsWithNeighbors":413,"users":90,"resultRows":4500,"mode":"emotion-on","calcMs":6038,"channelShare":{"itemcf":679,"explore":88,"usercf":101,"hot":3632}},"lastSummaryChannelShare":{"itemcf":679,"explore":88,"usercf":101,"hot":3632},"cacheRows":4492,"similarityRows"
+  PASS [C2] 健康度读数齐全（running/lastFinishedAt/cacheRows/similarityRows/cacheMode/resultTtlMinutes）  → cacheRows=4492 similarityRows=413 cacheMode=local ttl=90min
+  PASS [C3] 接口读数与 DB 对得上：cacheRows == recommend_result 活跃行  → 接口=4492 DB=4492
+  -- 重算前：MAX(calc_at)=2026-09-29 13:05:35.456 admin_op_log=179 日志偏移=23210052 字节
+  -- Summary：{"qualityRows":616,"topicRows":59,"similarityRows":468,"itemsWithNeighbors":413,"users":90,"resultRows":4500,"mode":"emotion-on","calcMs":6967,"channelShare":{"itemcf":679,"explore":88,"usercf":102,"hot":3631}}
+  PASS [C4] POST /api/admin/rec/rebuild 同步返回一轮摘要（不是 90001 的桩）  → HTTP 200 code=0 msg=成功 墙钟=6974ms
+  PASS [C5] 摘要六项读数都 >0（质量分/话题热度/相似度/有邻居/用户/结果行）  → q=616 topic=59 sim=468 nb=413 users=90 rows=4500
+  PASS [C6] 耗时可接受（作业 calcMs 与探针墙钟都 <120s，验收现场等得起）  → calcMs=6967ms 墙钟=6974ms
+  PASS [C7] 通道占比的 key 全部属于六通道（ENUM 写错会被静默存成默认值，这条是防线）  → itemcf=679 explore=88 usercf=102 hot=3631
+  PASS [C8] 占比之和 ≥ 结果行数（写库时会跳过未知通道，等号是常态）  → sum=4500 resultRows=4500 差=0
+  PASS [C9] 诚实记录：本轮真正出现了 6 通道里的哪几路（少于六路不是 bug，是这份数据的真实分布）  → 出现 4/6 路：itemcf,explore,usercf,hot｜未出现：content,emotion
+  PASS [C10] DB：MAX(calc_at) 前移了（这一轮真的写过库，不是内存里空转）  → 2026-09-29 13:05:35.456 → 2026-09-29 13:05:45.129
+  PASS [C11] DB：这一批新写的行数 == 摘要 resultRows（接口回的不是自夸数）  → DB=4500 摘要=4500
+  PASS [C12] DB：admin_op_log 行数不变（重算不落审计，这条决策有判据钉住，不是漏项）  → 179 → 179
+  PASS [C13] status 复查：lastFinishedAt 前进、running 落回 false、cacheRows 与 DB 一致  → lastFinishedAt 2026-09-29T13:02:06.3233238 → 2026-09-29T13:05:52.1000755 cacheRows=4500
+  PASS [C14] 重算之后驳回过的那条依然不回来（行为矩阵 -3 生效，不是只删了缓存）  → 三屏命中=0 活跃行=0
+
+==== D 线（真浏览器：U3 推荐流 + U4 看了又看 + 游客闸门）====
+  PASS [D1] 首屏六张卡：DOM 张数=6、标题与接口逐条对得上、每行文字等于接口 reason（页面不替后端编话）  → 接口 6 条 / DOM 6 张 / 标题栏「为你推荐」/ 不符 0
+  PASS [D2] D6 界面版：连点两次「换一批」＝三批 18 条 id 两两不重复，屏上这批与已见过的零交集  → 批1=923,264,1052,1024,903,1033｜批2=1034,1053,1064,892,1084,1124｜批3=1133,1134,913,1142,1144,902 distinct=18｜屏上重复项(按帖子id)=0｜DOM 与第三批同id同序=true｜另按标题数到 2 组重名（种子数据四条同名，不参与判据）
+  PASS [D3] 「为什么推给我」浮层：5 行读数全部来自接口三字段（通道 itemcf / 分数 0.4691 / 理由原文）  → 卡片#1133 通道=itemcf 分数=0.469129｜三行命中=true,true,true｜p 数=5｜文字=为什么推给我召回通道：你读过的帖子的相似帖（itemcf）离线打分：0.4691这条流为什么有它：和你读过的内容很像上面三行都是 GET /api/feed/recommend 原样给的字段（recall_channel / score / reason）。页面不自己算分，也不自己编理由。
+  PASS [D4] D6 当场没：点「不感兴趣」卡片 6→5，被点的那条从屏上消失，提示条把两个真实计数说出来  → 点击=true 张数=5 残留=false｜提示原文="这条已从本批缓存里删掉（1 行），并压掉与它相似的 4 条下一屏候选"｜接口回执=0
+  PASS [D4b] DB：界面这一次驳回在 user_action 里正好一行（weight=-3.00 / scene=feed）  → 帖子=1133 行=[["-3.00","feed"]]
+  PASS [D5] 详情页「看了又看」：6 张卡与接口逐条同序同文字，标题「看了又看」  → 源帖=1104 接口 6 条 / DOM 6 张 / 不符 0｜通道串=共读相似,共读相似,共读相似,共读相似,共读相似,共读相似
+  PASS [D5b] 屏上的「共读相似」条数等于接口的 itemcf 条数，且源帖自己不在列表里  → itemcf DOM=6 接口=6｜源帖 1104 出现在屏上=false｜DOM 通道分布=共读相似,共读相似,共读相似,共读相似,共读相似,共读相似
+  PASS [D6] 冷帖 #881 不空窗：兜底补出 6 条，且一条「共读相似」都不出现（它没有邻居行）  → 接口 6 条 / DOM 6 张｜通道串=热读补位,热读补位,热读补位,热读补位,热读补位,热读补位｜空窗文案=""
+  PASS [D7] 游客打 /feed：被弹回 /login 并带上 redirect，页面上没有推荐流那一节（不退化成热读榜）  → 落地 URL=/login?redirect=/feed｜口令框=true｜推荐节=false｜文字=136 字
+  PASS [D8] 本轮 7 张截图四道闸全过（判据 / 文字量 / 漏白 / 新增红字）  → 通过 7/7｜累计漏白 0 处
+  PASS [D9] 浏览器控制台零红字、零页面异常、零 4xx/5xx 资源（HTTP 429 也算）  → console=0 pageerror=0 http=0
+
+==== C15 补线（后端日志复核：读 C 线记录的偏移 → 当前末尾）====
+  PASS [C15] 后端日志里能查到「通道占比」与「负反馈：用户」两行（D7 的验收物）  → 偏移 23210052 之后新增 3 行推荐类日志：通道占比=true 负反馈=true（GBK 落盘、脚本内解码，原文一字不改地写进 d7-log-excerpt.log）

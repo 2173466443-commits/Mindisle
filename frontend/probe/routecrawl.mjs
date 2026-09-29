@@ -147,11 +147,32 @@ const feed = await page.evaluate(() => document.body.innerText)
 check(feed.indexOf('情绪打卡与档案') < 0,
   '[feed] 「后端尚未实现的接口」那张卡片里不再出现 POST /api/emotions/checkin —— 这条接口已经落地并且真出图了，写在表里就是假话',
   '命中=' + (feed.indexOf('情绪打卡与档案') >= 0))
-// 广场「为你推荐」那张占位卡的排期文案：改之前它写的是「阶段 6/7」，
-// 而手册 §15 阶段 7 表里 T7.2/T7.5 召回与 T7.4 情绪加权全部在阶段 7，阶段 6 是审核台与管理端。
-check(feed.includes('阶段 7 未实现') && !feed.includes('阶段 6/7'),
-  '[feed] 推荐流占位卡把排期说准了：只有阶段 7，不再捎上一个并不做推荐的阶段 6',
+// ⚠ 这条判据在 2026-09-29 整个反过来，是「加功能那一轮要回头扫旧闸门同一判据」的第二次现身：
+// 阶段 7 之前它钉的是「占位卡把排期说准了」（要求屏幕上出现「阶段 7 未实现」），
+// 而推荐流真落地之后，屏幕上再有这句话就是假话了。判据语义反转时必须一起改，
+// 否则下一轮跑出来一条红会先被当成回归去查前端 —— 而真正过期的是判据。
+// 现在钉两件事：① 占位文案必须消失；② 真卡片 + 每张卡那一行「为什么推给我」必须画出来。
+// （本脚本全程带 demo01 的 token，后端这一路走协同过滤，所以理由行必然有内容。）
+const recDom = await page.evaluate(() => {
+  const sec = document.querySelector('section.recommend')
+  const rows = sec ? Array.prototype.slice.call(sec.querySelectorAll('article.post')) : []
+  return {
+    exists: !!sec,
+    rows: rows.length,
+    swap: !!(sec && sec.querySelector('.btn-rec-swap')),
+    insideText: sec ? sec.innerText.replace(/\s+/g, ' ') : '',
+    reasons: rows.map(function (r) { return ((r.querySelector('.rec-reason') || {}).innerText || '').trim() })
+  }
+})
+check(!feed.includes('阶段 7 未实现') && !feed.includes('阶段 6/7'),
+  '[feed] 那张「阶段 7 未实现」的推荐流占位卡已经从页面上消失（留着就是假话）',
   '命中「阶段 7 未实现」=' + feed.includes('阶段 7 未实现') + ' 残留「阶段 6/7」=' + feed.includes('阶段 6/7'))
+check(recDom.exists && recDom.rows > 0 && recDom.swap && recDom.insideText.indexOf('未实现') < 0,
+  '[feed] 推荐流画出真卡片：section.recommend 在、卡数 >0、「换一批」按钮在位、节内无「未实现」字样',
+  JSON.stringify({ exists: recDom.exists, rows: recDom.rows, swap: recDom.swap }))
+check(recDom.rows > 0 && recDom.reasons.length === recDom.rows && recDom.reasons.every(function (t) { return t.length > 0 }),
+  '[feed] 每张推荐卡都带一行可见的推荐原因（需求 D6 就要这一行；热读兜底那几条走的是「后端没给个性化理由」这句诚实文案，不留空白）',
+  'reasons=' + JSON.stringify(recDom.reasons.map(function (t) { return t.slice(0, 26) })))
 const navText = await page.evaluate(() => (document.querySelector('nav.mi-nav') || {}).innerText || '')
 check(navText.indexOf('屿屿') >= 0 && navText.indexOf('屿灵') < 0,
   '[nav] 顶栏入口叫「屿屿」，与 system prompt 里那个同伴名字同一个（屿灵是旧名，两处不同名会被问）',

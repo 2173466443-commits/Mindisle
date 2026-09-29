@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { listPosts } from '@/api/post'
+import { dislike } from '@/api/feed'
 
 /** 每页条数：后端 normalize 夹在 1..50，取 20 与 PageQuery.DEFAULT_SIZE 同口径。 */
 const PAGE_SIZE = 20
@@ -94,9 +95,30 @@ export const useFeedStore = defineStore('feed', {
       this.items.unshift(row)
     },
 
-    /** 「不感兴趣」：阶段 7 才接真过滤逻辑，现在只做本地剔除（手册 §6.2 U3 的既定口径）。 */
-    dismiss(id) {
-      this.items = this.items.filter((x) => x.id !== id)
+    /**
+     * 「不感兴趣」（任务 T7.7 · 需求 FR1.7 / FR5.7 · Gate7 判据 D6「当场点当场没」）。
+     *
+     * <p><b>口径从「本地剔除」改成了「先拿后端回执，再动列表」</b>。旧写法是阶段 3 的既定口径
+     * （那句注释写着「阶段 7 才接真过滤逻辑」），它的前提是接口不存在；现在接口有了，
+     * 继续乐观剔除会做出最难查的一种不一致 —— 后端拒了（10002 未登录 / 10003 库不可用），
+     * 帖却已经从界面上消失，一刷新又全回来，而用户在中间那一秒相信的是
+     * 「我已经告诉平台不推它了」。负反馈尤其不能这样：它承诺的是「以后也不会」。</p>
+     *
+     * <p>后端这一步做三件事（顺序在后端 FeedService#dislike 的注释里）：记 user_action(dislike)、
+     * 逻辑删除 recommend_result 本批这一行、沿 item_similarity 压掉邻居。所以点完之后
+     * 广场少一条、推荐流的下一屏也少一批，这是同一份事实的两种体现，不是两个开关。</p>
+     *
+     * @returns 成功回 {removed, removedSimilar}；失败回 null（列表保持原样，错误文案交给 http 层弹条）
+     */
+    async dismiss(id) {
+      if (id === undefined || id === null) return null
+      try {
+        const data = await dislike(id)
+        this.items = this.items.filter((x) => x.id !== id)
+        return data
+      } catch (e) {
+        return null
+      }
     },
 
     reset() {
