@@ -1351,3 +1351,43 @@ D_表行数  user 43 / post 111 / post_like 16 / user_follow 0
 - **阶段 6 十一件事**已在本手册「下一步（v1.2.9）」列成队列 ①–⑪，第一件事是 `sql/17_stage6_alter.sql`（`user.mute_until` + `audit_task/audit_record.target_type` 加 `'topic'`），因为 `admin_op_log` 有表无实体、A6 禁言无处可存。
 - ⚠️ 需要用户配合两条：**重启 8080**、**起 5174 管理端**。
 - 🔴 **红线自查**：本轮所有新增文本（README / dev-log / 手册 / commit msg）**0 处口令明文**，DB 只走 `sql.ps1 -SqlFile`（内部 `--defaults-extra-file`）。
+
+## 2026-09-29 阶段 6+7（续 15）—— 代码线收口：手册 v1.3.1 纠正 7 处口径、README 补齐四条进度、两条 tag 落地
+
+用户 2026-09-29 的指示没变：**「先查看当前项目完成状态，再按根目录四份文档继续完成项目，目前只需要完成代码这一块，论文材料先不用管」**。所以本轮不是新写功能，而是把阶段 6 与阶段 7 的**代码线**收口：手册四张表逐行签死、README 从「阶段 4 的历史快照」改为反映现状、开发日志与全局踩坑日志补上本轮、最后按阶段拆两次提交并打两条 tag。收口口径：**Gate6 ☑（阶段 6 表 8 ☑）／Gate7 ◐（11 ☑ + 1 ◐ + 4 ☐）** —— ◐ 的唯一原因是 §10.5 **D10 三套论文实验**（T7.11–T7.14）按用户指示没做，**代码线本身已实测通过**。
+
+### 1. 取证线（本轮全部现场复跑，不是抄上一版）
+
+| 线 | 命令／来源 | 现场读数 |
+| --- | --- | --- |
+| 全库单测 | `cd backend; mvn -o -B test` | **Tests run: 882, Failures: 0, Errors: 0, Skipped: 1** ／ BUILD SUCCESS ／ Total time 23.563 s（唯一 skip 仍是 `MindisleApplicationTests`）；日志 `_cache/009_mindisle/mvn-test-r15.log` |
+| 库表数 | ①`sql/` 里要求后跟表名的 `CREATE TABLE` 正则去重 ②`information_schema.TABLES` 现查 | 两条独立证据同为 **34 张**：31 张基线 + `content_report` + `topic_follow` + 第 34 张 `export_task`（`sql/15_stage4_backfill.sql:51`，阶段 4 就落库了、§5.1 连漏三轮没回写） |
+| 阶段 6 | `docs/gate/阶段6/admingate6.json` | `total=149 / pass=149 / fail=0`；D 线 18 张真浏览器截图四道闸全过；证据目录 **22** 个文件（18 PNG + `清单.md` + json + `console-evidence.log` + `shot-manifest.json`） |
+| 阶段 7 | `docs/gate/阶段7/清单.md` + `perf-feed.json` | 判据 **64 条 PASS 64 / FAIL 0 / SKIP 0**（运行号 333760）；7 张截图四道闸全过；`businessWorstP95=156` / `thresholdMs=200` / `pass=true`，🔴 `cacheMode=local`（6379 未起，`cacheModeNote` 原文「Redis 口径待阶段 8 重跑」） |
+| 文件计数 | `Get-ChildItem -Recurse` 现数 | `backend/src/main` **306** 个 .java ／ `backend/src/test` **70** 个 ／ `*Controller.java` **28** 个 ／ `sql/` **18** 个 .sql ／ `frontend/src` **55** 个文件 ／ `admin/src` **25** 个文件 |
+| 库侧夹具 | 仓库外 cnf 只读 SELECT | `user` **509** 行，其中 `username LIKE 'smoke_%'` **314**、`LIKE 'probe%'` **162**（合计 476 = 93.5%）—— 比手册 §17 结转条里旧写的 231/223 又涨了一轮，**「清理夹具」这件事的欠账比文档说的更大** |
+
+### 2. 🔴 本轮最大的坑：文档里每个数字都得现量，**包括上一版刚写下去的那一版**
+
+- **33 张表 → 34 张表**：§5.1 的「合计 N 张表」从 v1.1.3 起连漏两轮（`content_report`、`topic_follow`），本轮又发现阶段 4 建的 `export_task` 漏了第三轮。⇒ 立规矩：**表数唯一真源 = 同一条脚本重跑 + `information_schema` 现查，文档里的「合计 N」只是抄件**。
+- **一处纠正 ≠ 全部纠正**：§11.1 有两处「8 类情绪」，改了一处另一处还留着。真源是 `emotion/EmotionPrior.java:33-34` 与 `DictEmotionEngine.NEGATION_REMAP`（`@57-64`）**7 类**，全仓 `emotion/**` 只有 `CheckinRequest.java:16` 一句「没有 surprise」的注释。⇒ 同一份文档里同一件事常常出现两次，**改完要拿关键词回扫全文**。
+- **±1 漂移 6 处**：`RecommendScaleGuardTest` 426→**425**、`UserManageService` 292→**291**、`LoginView` 145→**144**、`AdminRecController` 145→**144**、`sql/17_stage6_alter.sql` 64→**63**、词云 vendor 1151→**1150**。根源是「按行切分后有没有保留末尾空元素」两种口径混用 ⇒ 手册 §19 已写死统一口径 = `（Get-Content -LiteralPath <文件>）.Count`（等价于末尾有换行时的 `wc -l`）。
+- 🔴 **状态位必须取「那一列的首字符」，不能 `includes('☑')`**：上一版计划把 T7.11 读成 ◐，就是被同一行里的别的符号骗了。按第 5 列首字符重读，T7.11–T7.14 **四条一条没签** ⇒ Gate7 只能 ◐。这条是本轮唯一会**改变结论**的读法修正。
+- **「装了但没用」也算口径债**：`admin/package.json` 没有 wordcloud 依赖（词云是 vendor 手放的 1150 行 esm），而 `frontend/package.json` 声明了 `@echarts-x/custom-word-cloud@^1.0.1` 却在 `frontend/src/**` grep **0 命中** = 死依赖。已进手册 §19 下一步队列 ⑪。
+- 🔴 **补丁器会把 CRLF 文档的末行写成 LF**：本项目的批量改写函数收尾用 `join(eol) + (原文件 endsWith("\n") ? "\n" : "")`，末行漏掉 `\r`，于是「CRLF 数 == 行数」这条不变式被打破（README 与手册各中一次，本任已修）。⇒ **新纪律：每次写盘后必查 `CRLF 数 == 行数`、`LF-only == 0`**。
+- **README 尾部有 24 字节的 UTF-16LE 残留**（`# Mindisle\r\n`），必须先按**字节**截断再做文本补丁 —— 若先以 utf8 读入再写回，NUL 会变成 `\uFFFD` 把文件废掉。
+
+### 3. 命令与文件纪律（本轮继续沿用并已验证有效）
+
+- PowerShell 只做**只读查询**（计数、`Get-Content`、`git log`），**写盘一律走 node_repl**：中文与反引号在 PS 引号嵌套里被吞掉过太多次。
+- `exec_command` **没有 `timeout_ms` 参数**（那是 `wait_agent`／`get_handoff_status` 的参数），要长一点就设 `yield_time_ms`；`mvn -o -B test` 24 秒量级，一次 `yield_time_ms=30000` 就能拿到结果。
+- **`MAVEN_OPTS` 不能带空格路径**：本轮误设 `-Dmaven.repo.local=E:\codex workspace\...` 直接把 JVM 打成「找不到或无法加载主类 workspace\_cache...」。默认本地仓库已可用，别再自找麻烦。
+- DB 只读姿势：先 `cd` 到 `_cache\mindisle-dbtmp` 再 `powershell -NoProfile -File .\sql.ps1 -SqlFile X.sql -OutFile X.out`（`--defaults-extra-file` 指向仓库外的 cnf）；**列别名用 ASCII**，中文别名会被 mysql 当表达式原样吐回来。
+- 提交前 `scan-pw.cjs` 必须 **0 命中**；`git add` **显式列路径，绝不 `-A`**。
+
+### 4. 结转（截至本轮，不藏）
+
+- 两条 tag（`stage-6-admin`、`stage-7-recommend`）**只代表代码收口**，不代表 Gate7 已过。阶段 8 队列：① **U1 首页**（唯一还没动过的核心页面）；② §11.5 **50 并发压测**（本轮只有串行单并发 + `cacheMode=local` 的 P95，两回事）；③ **`rec_run_log` 台账表**（§10.5 要求、库里不存在，本轮没用 `status` 接口冒充它有历史）；④ day×hour **二维热力**面板补全；⑤ Redis 起来后**重跑 P95 口径**；⑥ `rec.weight_profile` **二选一**（接进 `ImplicitScorer` 或删掉死配置，负反馈权重两处 -3.00 / -5 打架）；⑦ `rec.scale_item_cap` 现库 0 行 ⇒ **种子重放**；⑧ D4 那一跳 60388ms（同步作业 cron 一分钟一轮）；⑨ 死依赖清理；⑩ 🔴 **一次性账号与探针夹具清理**（现量 `user` 509 行里 smoke 314 + probe 162）—— 真正欠的不是 DELETE 而是「清完还能一键重建夹具」的 seed 脚本；⑪ **论文三套实验 D10**（T7.11–T7.14，用户指示暂缓，Gate7 因此停在 ◐）。
+- ⚠️ §18 里 **Gate0 / Gate2 仍是 ☐／◐ 的真欠账**（`docs/gate/` 只有阶段 3–7 五个目录，阶段 0/1/2 从未建过证据目录），**这不是本轮漏签，不要为「收口好看」翻签**。
+- 🔴 **红线自查**：本轮所有新增文本（README / dev-log / 手册 / 全局日志 / commit msg）**0 处口令明文**；DB 全部走 `sql.ps1 --defaults-extra-file`，口令既不进日志也不进回复。
+
