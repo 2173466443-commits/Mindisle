@@ -233,7 +233,74 @@ public class NotifyService {
         pushHook.onCreated(row);
     }
 
-    /** 幂等判据：同一个人、同一类、同一目标、<b>连文案都一样</b>且那条还没读，才算重复。 */
+    /**
+     * 人审裁决结果通知作者（任务 T6.1 · 需求 FR7.3「处置结果回写」· 手册 §9.1 第 ③ 步）。
+     *
+     * <p><b>为什么驳回必须带理由</b>：需求 §12 规范 5 写的是「可追溯」，而对作者真正可追溯的
+     * 唯一形式是「一句他能读懂的话」。这里传的 {@code reason} 由调用方从审核备注里取，
+     * 服务层不掺词库原词（那是内部规则，写进用户通知等于把绕过方法公开）。</p>
+     *
+     * <p>{@code refId} 是帖子 id：{@link NotifyMessage#REF_POST} 在整个仓库里的语义都是「点进去看那条帖」，
+     * 待审/已驳回的帖只有作者自己能看见（{@code PostQueryService} 的可见性判据），
+     * 所以这条跳转对作者是有效的，对别人无效——正好。</p>
+     */
+    public void notifyAuditResult(long authorId, long postId, boolean passed, String reason) {
+        String title = passed ? "你的帖子已通过审核" : "你的帖子未通过审核";
+        String body = passed
+                ? "内容已对外可见。如果之前提示过风险，是因为词库的保守判定，欢迎继续记录心情。"
+                : "原因：" + (reason == null || reason.isBlank() ? "内容不符合社区规范" : reason.trim())
+                        + "。你有一次申诉机会，路径在帖子详情页。";
+        write(authorId, NotifyMessage.TYPE_AUDIT, title, body, NotifyMessage.REF_POST, postId);
+    }
+
+    /**
+     * 举报处置结论回执（任务 T3.11 埋的口子 + T6.6 补账 · 需求 FR4.7）。
+     *
+     * <p>类注释第 5 条说过「举报本轮不写通知」，那是在处置方还不存在的时候。
+     * 现在 A7 能处置了，这条就欠着必须还：举报人最需要知道的不是「我报成功了」，
+     * 而是「后来怎么样了」——不然举报按钮等于一个没有回音的电报机。</p>
+     *
+     * <p>{@code refId} 用<b>举报行 id</b>而不是帖子 id（{@link NotifyMessage#REF_REPORT}）：
+     * 同一帖可能被同一个人分两次举报不同内容，按帖去重会把第二条回执吞掉。</p>
+     */
+    public void notifyReportResult(long reporterId, long reportId, long postId,
+                                   boolean accepted, String note) {
+        String title = accepted ? "你的举报已处理：内容已下架" : "你的举报已处理：经复核不违规";
+        String body = (note == null || note.isBlank() ? "" : note.trim() + " ")
+                + "感谢你把边界问题说出来（帖子 #" + postId + "）。";
+        write(reporterId, NotifyMessage.TYPE_REPORT, title, body, NotifyMessage.REF_REPORT, reportId);
+    }
+    /**
+     * 账号处置通知（任务 T6.4 · 需求 FR8.3）：禁言/封禁/恢复都告诉当事人「你现在能做什么、不能做什么」。
+     *
+     * <p>文案里刻意不写判定规则（禁的是发内容还是发评论、多少天）之外的任何内部口径；
+     * 也不写「疑似心理危机」这类定性——管理员不是医生（BR3）。</p>
+     */
+    public void notifyAccountAction(long userId, String title, String body) {
+        write(userId, NotifyMessage.TYPE_SYSTEM, title, body, NotifyMessage.REF_USER, userId);
+    }
+
+    /**
+     * 内容处置通知（任务 T6.5 · 需求 FR4.7）：下架与恢复走同一条，区别只在文案。
+     *
+     * <p>下架必须把「你还能申诉一次」写进去：申诉入口在帖子详情页，用户不会因为收到通知就自己去翻规则。</p>
+     */
+    public void notifyContentAction(long authorId, long postId, boolean takenDown, String reason) {
+        String title = takenDown ? "你的帖子已被管理下架" : "你的帖子已恢复可见";
+        String body = takenDown
+                ? "原因：" + (reason == null || reason.isBlank() ? "违反社区规范" : reason.trim())
+                        + "。帖子在你自己的主页仍可见，你可以发起一次申诉。"
+                : "内容重新对外可见。感谢你对社区规范的理解。";
+        write(authorId, NotifyMessage.TYPE_AUDIT, title, body, NotifyMessage.REF_POST, postId);
+    }
+
+    /** 申诉结果通知（任务 T6.7 · FR7.6「结果回写通知」）：一次申诉只发一条，终态不再重复打扰。 */
+    public void notifyAppealResult(long userId, long postId, boolean accepted, String note) {
+        String title = accepted ? "你的申诉已通过" : "你的申诉未通过";
+        String body = (note == null || note.isBlank() ? "" : note.trim() + " ")
+                + (accepted ? "内容已恢复可见，社区谢谢你把话说清楚。" : "这是本次申诉的最终结论，如需进一步沟通可以在个人中心联系心理委员。");
+        write(userId, NotifyMessage.TYPE_AUDIT, title, body, NotifyMessage.REF_POST, postId);
+    }    /** 幂等判据：同一个人、同一类、同一目标、<b>连文案都一样</b>且那条还没读，才算重复。 */
     private boolean shouldSkip(long userId, String type, String refType, long refId,
                                String title, String content) {
         return store.existsUnreadDuplicate(userId, type, refType, refId, title, content);

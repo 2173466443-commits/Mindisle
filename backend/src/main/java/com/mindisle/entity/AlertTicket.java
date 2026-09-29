@@ -22,6 +22,26 @@ import lombok.Data;
 @TableName("alert_ticket")
 public class AlertTicket {
 
+  /**
+   * 工单六态（与 sql/07_audit.sql 的 ENUM 逐字一致，<b>全小写</b>）。
+   *
+   * <p>这是本表最容易写错的地方：{@code audit_task.status} 是全大写
+   * （PENDING/PROCESSING/...），而 {@code alert_ticket.status} 是全小写
+   * （pending/claimed/...）。阶段 3 的建单代码用字面量躲过去了，阶段 6 的六态状态机
+   * 若还各处写字符串，MySQL 的 ENUM 会把写错的那一条<b>静默降成第一个枚举值</b>
+   * （非严格模式下不报错），于是「已闭环」变成「待认领」。所以常量只在这里定义一次。</p>
+   */
+  public static final String STATUS_PENDING = "pending";
+  public static final String STATUS_CLAIMED = "claimed";
+  public static final String STATUS_DOING = "doing";
+  public static final String STATUS_CLOSED = "closed";
+  public static final String STATUS_FALSE_POSITIVE = "false_positive";
+  public static final String STATUS_EXPIRED = "expired";
+
+  /** 未办结的三态（SLA 超时告警只数这三态，已闭环的不算积压）。 */
+  public static final java.util.List<String> OPEN_STATUSES =
+      java.util.List.of(STATUS_PENDING, STATUS_CLAIMED, STATUS_DOING);
+
   @TableId(value = "id", type = IdType.AUTO)
   private Long id;
 

@@ -82,3 +82,18 @@ http.interceptors.response.use(
 )
 
 export default http
+
+// ---------------------------------------------------------------------------
+// 第二实例：二进制下载专用（A9 的三个 CSV 导出）。
+// 为什么不复用上面那个：响应拦截器拆掉 Result 壳之后返回的是 body 本身，而导出接口
+// 返回的是 ResponseEntity<byte[]>（没有壳）—— 走同一个实例时 Promise 的结果就是 Blob，
+// Content-Disposition 里的文件名跟着整个响应对象一起被丢掉，前端只能自己编一个文件名。
+// 这里只装请求拦截器（带 Authorization），响应原样返回，页面上才能既拿到字节又拿到真文件名。
+// 60s 超时：一次 5000 行的工单导出在本地库上实测 1~2s，但导出走的是分页扫描，不给它 15s 的限制。
+// ---------------------------------------------------------------------------
+export const rawHttp = axios.create({ baseURL: '/api', timeout: 60000 })
+rawHttp.interceptors.request.use((config) => {
+  const token = localStorage.getItem(ADMIN_TOKEN_KEY)
+  if (token) config.headers.Authorization = 'Bearer ' + token
+  return config
+})

@@ -1,11 +1,14 @@
 package com.mindisle.mapper;
 
+import java.time.LocalDateTime;
+
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.mindisle.entity.ContentReport;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 /**
  * 内容举报 Mapper（任务 T3.11 · 需求 FR4.7）。
@@ -44,4 +47,18 @@ public interface ContentReportMapper extends BaseMapper<ContentReport> {
   @Select("SELECT COUNT(DISTINCT reporter_id) FROM content_report "
       + "WHERE target_type = 'post' AND target_id = #{postId} AND deleted = 0")
   long countPostReporters(@Param("postId") long postId);
+  /**
+   * 办结举报（任务 T6.5 · 需求 FR4.7「管理员处理并回执」）：只有 PENDING 行能被改写。
+   *
+   * <p>与 {@link com.mindisle.mapper.PostAppealMapper#adjudicate} 同一套并发语义：两个管理员
+   * 同时点「采纳」，后到的那次影响 0 行，服务层据此拒绝并写 DENIED 审计。<b>不用
+   * {@code updateById}</b>：手里那份快照是本次请求开始时读的，整体回写会把对方刚写进去的
+   * {@code handler_id/handled_at} 一起覆盖，处置留痕就出现了「谁都不认」的行。</p>
+   */
+  @Update("UPDATE content_report SET status = #{toStatus}, handler_id = #{handlerId}, "
+      + "handled_at = #{now}, result_note = #{note}, updated_at = #{now} "
+      + "WHERE id = #{id} AND status = 'PENDING' AND deleted = 0")
+  int handle(@Param("id") long id, @Param("handlerId") long handlerId,
+      @Param("toStatus") String toStatus, @Param("note") String note,
+      @Param("now") LocalDateTime now);
 }

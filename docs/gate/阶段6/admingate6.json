@@ -1,0 +1,784 @@
+{
+ "at": "2026-09-29T07:25:02.283Z",
+ "base": "http://127.0.0.1:8080",
+ "run": "gate6636142",
+ "accounts": {
+  "superId": 486,
+  "adminId": 487,
+  "victimId": 508
+ },
+ "posts": {
+  "greyPostId": 1304,
+  "anonPostId": 1305,
+  "plainPostId": 1307,
+  "crisisPostId": 1306
+ },
+ "ticketId": 19,
+ "d4": {
+  "elapsedMs": 60659,
+  "queueWaitMs": 60388,
+  "adjudicateDoneMs": 60539,
+  "limitMs": 120000,
+  "syncDeadlineMs": 90000,
+  "postId": 1309,
+  "taskId": 186,
+  "authorId": 510,
+  "author2": "gate6a636142"
+ },
+ "total": 149,
+ "pass": 149,
+ "fail": 0,
+ "throttle": {
+  "paced": 0,
+  "retried": 0,
+  "maxWaitMs": 0,
+  "gaveUp": 0
+ },
+ "rows": [
+  {
+   "name": "P1 SUPER 管理端登录",
+   "ok": true,
+   "detail": "http=200 code=0 成功 286ms"
+  },
+  {
+   "name": "P1 登录返回 role=SUPER",
+   "ok": true,
+   "detail": "role=SUPER"
+  },
+  {
+   "name": "P1 ADMIN 管理端登录",
+   "ok": true,
+   "detail": "http=200 code=0 成功 150ms"
+  },
+  {
+   "name": "P1 本轮受害者账号注册成功（一次性夹具，复跑不吃上一轮的行）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 125ms"
+  },
+  {
+   "name": "P1 已存在的 USER 账号走管理端登录必须被拒（角色闸，不是「用户不存在」）",
+   "ok": true,
+   "detail": "http=403 code=10003 没有该操作权限 157ms msg=没有该操作权限"
+  },
+  {
+   "name": "P1 普通用户走社区口登录",
+   "ok": true,
+   "detail": "http=200 code=0 成功 88ms"
+  },
+  {
+   "name": "P1 社区口登录回来的 role 是 USER",
+   "ok": true,
+   "detail": "role=USER"
+  },
+  {
+   "name": "P1 三个账号 uid 都拿到了",
+   "ok": true,
+   "detail": "super=486 admin=487 victim=508"
+  },
+  {
+   "name": "P1 无 token 打管理端必须 401/403",
+   "ok": true,
+   "detail": "http=401"
+  },
+  {
+   "name": "P1 USER token 打管理端必须 403",
+   "ok": true,
+   "detail": "http=403 code=10003"
+  },
+  {
+   "name": "P2 判据前置：黑词在引擎里确实是 BLOCK（红在这里就与发布链路无关）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 13ms {\"hit\":true,\"action\":\"BLOCK\",\"category\":\"政治违法\"}"
+  },
+  {
+   "name": "P2 命中黑词的帖子必须被拦下（status=REJECTED 而不是发出去）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 42ms status=REJECTED id=1303"
+  },
+  {
+   "name": "P2 被拦下的帖子没有 publishedAt（拦内容不拦人：不报错，但也不上线）",
+   "ok": true,
+   "detail": "publishedAt=undefined"
+  },
+  {
+   "name": "P2 被拦下的帖子给用户一句人话提示（不是静默丢弃）",
+   "ok": true,
+   "detail": "tip=内容里有不能公开的部分，这条没有发出去；改一改再发也来得及。"
+  },
+  {
+   "name": "P2 库里那条黑词帖也是 REJECTED（回读，不信出参）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 24ms status=REJECTED"
+  },
+  {
+   "name": "P2 黑词不进人审队列（它已经被机审终审了，进队列等于把决定推给人）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 14ms tasks=[]"
+  },
+  {
+   "name": "P2 命中灰词的帖子能发出来（进队列而不是拒）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 24ms"
+  },
+  {
+   "name": "P2 灰词帖状态进入待审而不是直接上线",
+   "ok": true,
+   "detail": "status=HUMAN_REVIEW"
+  },
+  {
+   "name": "P2 匿名树洞发布成功",
+   "ok": true,
+   "detail": "http=200 code=0 成功 44ms"
+  },
+  {
+   "name": "P2 危机词帖子放行（不能删，删等于把人推回沉默）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 53ms"
+  },
+  {
+   "name": "P2 普通帖发布成功（后面治理线的靶子）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 32ms"
+  },
+  {
+   "name": "P2 四条帖子 id 齐全",
+   "ok": true,
+   "detail": "grey=1304 anon=1305 plain=1307 crisis=1306"
+  },
+  {
+   "name": "P3 应急同步扫描有回执",
+   "ok": true,
+   "detail": "http=200 code=0 成功 237ms {\"scanned\":65,\"created\":1,\"duplicated\":64}"
+  },
+  {
+   "name": "P3 PENDING 队列可分页",
+   "ok": true,
+   "detail": "http=200 code=0 成功 59ms total=177"
+  },
+  {
+   "name": "P3 灰词帖确实进了队列（按作者精确取，不在 169 条的第一页里捞）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 16ms 作者任务=1304/post/PENDING"
+  },
+  {
+   "name": "P3 状态计数是数组",
+   "ok": true,
+   "detail": "http=200 code=0 成功 7ms [{\"cnt\":177,\"status\":\"PENDING\"},{\"cnt\":6,\"status\":\"REJECTED\"}]"
+  },
+  {
+   "name": "P3 ADMIN 认领任务成功",
+   "ok": true,
+   "detail": "http=200 code=0 成功 60ms"
+  },
+  {
+   "name": "P3 二次认领必须失败（认领是原子的，两个人不能同时审一条）",
+   "ok": true,
+   "detail": "http=403 code=10003 该任务已经不是待领取状态（当前 PROCESSING），请刷新队列 32ms"
+  },
+  {
+   "name": "P3 认领后任务落在 PROCESSING 且挂在认领人身上",
+   "ok": true,
+   "detail": "http=200 code=0 成功 34ms rows=184/PROCESSING/487"
+  },
+  {
+   "name": "P3 人工驳回成功",
+   "ok": true,
+   "detail": "http=200 code=0 成功 69ms {\"taskId\":184,\"taskStatus\":\"REJECTED\",\"postId\":1304,\"postStatus\":\"REJECTED\",\"postStatusChanged\":true,\"publishedAtStamped\":false}"
+  },
+  {
+   "name": "P3 驳回把帖子打回 REJECTED",
+   "ok": true,
+   "detail": "http=200 code=0 成功 5ms status=REJECTED"
+  },
+  {
+   "name": "P3 治理链能查到这一步流转（post_status_log 有 operator_id）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 21ms rows=3"
+  },
+  {
+   "name": "P4 作者对 REJECTED 的帖子发起申诉",
+   "ok": true,
+   "detail": "http=200 code=0 成功 57ms {\"appeal\":{\"createdAt\":\"2026-09-29T15:23:57.7784332\",\"deleted\":0,\"id\":14,\"postId\":1304,\"reason\":\"gate6636142我觉得这段是引用室友的玩笑\",\"status\":\"PENDING"
+  },
+  {
+   "name": "P4 申诉出参带上了帖子当时的状态（APPEALING）",
+   "ok": true,
+   "detail": "postStatus=APPEALING"
+  },
+  {
+   "name": "P4 同一帖子不能申诉两次（一次性机会）",
+   "ok": true,
+   "detail": "http=403 code=10003 当前状态不能申诉：APPEALING（只有被驳回或被下架的帖子可以） 22ms"
+  },
+  {
+   "name": "P4 作者能查到自己的申诉历史",
+   "ok": true,
+   "detail": "http=200 code=0 成功 16ms n=1"
+  },
+  {
+   "name": "P4 非作者拿到的是空列表而不是 403（403 会泄露「这帖有治理历史」）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 21ms n=0"
+  },
+  {
+   "name": "P4 申诉把帖子推进 APPEALING",
+   "ok": true,
+   "detail": "http=200 code=0 成功 27ms status=APPEALING"
+  },
+  {
+   "name": "P4 待处置申诉计数 >=1",
+   "ok": true,
+   "detail": "http=200 code=0 成功 17ms count=2"
+  },
+  {
+   "name": "P4 管理端列表能看到这条申诉（剥嵌套 + 翻页翻到命中）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 43ms scanned=2"
+  },
+  {
+   "name": "P4 按帖子查申诉历史",
+   "ok": true,
+   "detail": "http=200 code=0 成功 18ms"
+  },
+  {
+   "name": "P4 驳回申诉",
+   "ok": true,
+   "detail": "http=200 code=0 成功 57ms"
+  },
+  {
+   "name": "P4 驳回后帖子回到进入 APPEALING 之前的状态（REJECTED，不是无脑 PUBLISHED）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 6ms status=REJECTED"
+  },
+  {
+   "name": "P5 ADMIN 下架帖子",
+   "ok": true,
+   "detail": "http=200 code=0 成功 55ms"
+  },
+  {
+   "name": "P5 下架后状态是 TAKEDOWN",
+   "ok": true,
+   "detail": "http=200 code=0 成功 25ms status=TAKEDOWN"
+  },
+  {
+   "name": "P5 非法 flag 取值必须被参数校验挡住",
+   "ok": true,
+   "detail": "http=400 code=10001 flag 只能是 top/feature 28ms"
+  },
+  {
+   "name": "P5 置顶（下架中的帖子也能置开关，因为它只改 is_top 不改状态）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 56ms {\"postId\":1307,\"flag\":\"top\",\"on\":true,\"opLogId\":240}"
+  },
+  {
+   "name": "P5 TAKEDOWN 的帖子也可以申诉",
+   "ok": true,
+   "detail": "http=200 code=0 成功 50ms"
+  },
+  {
+   "name": "P5 申诉成立并恢复",
+   "ok": true,
+   "detail": "http=200 code=0 成功 71ms"
+  },
+  {
+   "name": "P5 恢复后状态是 PUBLISHED",
+   "ok": true,
+   "detail": "http=200 code=0 成功 17ms status=PUBLISHED"
+  },
+  {
+   "name": "P5 人工下架危机帖",
+   "ok": true,
+   "detail": "http=200 code=0 成功 66ms postId=1306"
+  },
+  {
+   "name": "P5 人工恢复危机帖（POST_RESTORE 的正向分支）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 74ms"
+  },
+  {
+   "name": "P5 恢复后危机帖回到 PUBLISHED",
+   "ok": true,
+   "detail": "http=200 code=0 成功 9ms status=PUBLISHED"
+  },
+  {
+   "name": "P5 加精",
+   "ok": true,
+   "detail": "http=200 code=0 成功 29ms"
+  },
+  {
+   "name": "P5 对 PUBLISHED 帖子重复「恢复上架」必须失败（前置态集合生效）",
+   "ok": true,
+   "detail": "http=403 code=10003 只有已下架的帖子能恢复可见，当前状态是 PUBLISHED（驳回帖请走申诉队列） 14ms"
+  },
+  {
+   "name": "P5 治理链至少三条流转（下架→申诉→恢复）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 32ms rows=5"
+  },
+  {
+   "name": "P5 治理链里能区分「人工」和「系统」（operator_id 非空）",
+   "ok": true,
+   "detail": "op=487"
+  },
+  {
+   "name": "P6 由帖子反查别名 id",
+   "ok": true,
+   "detail": "http=200 code=0 成功 30ms 185"
+  },
+  {
+   "name": "P6 别名 id 是个正数（拿不到就说明出参形状又变了）",
+   "ok": true,
+   "detail": "aliasId=185"
+  },
+  {
+   "name": "P6 不填事由必须被拒",
+   "ok": true,
+   "detail": "http=400 code=10001 解匿必须填写书面依据，一个字符都不能少 33ms"
+  },
+  {
+   "name": "P6 ADMIN 解匿必须被拒（只有 SUPER 能做）",
+   "ok": true,
+   "detail": "http=403 code=10003 解匿仅限超级管理员（SUPER） 49ms"
+  },
+  {
+   "name": "P6 SUPER 解匿成功",
+   "ok": true,
+   "detail": "http=200 code=0 成功 46ms {\"aliasId\":185,\"aliasName\":\"匿名屿民·一苇\",\"userId\":508,\"nickname\":\"闸门六作者636142\",\"username\":\"gate6v636142\",\"opLogId\":247,\"notice\":\"解匿属高敏感操作，须有学校书面申请或涉生命安全依据；本次操作已完整留痕"
+  },
+  {
+   "name": "P6 解匿返回了真身并且带提示文案",
+   "ok": true,
+   "detail": "nickname=闸门六作者636142"
+  },
+  {
+   "name": "P6 留痕里同时有 DENIED 和 SUCCESS 两行",
+   "ok": true,
+   "detail": "http=200 code=0 成功 26ms SUCCESS,DENIED,DENIED,SUCCESS,DENIED,DENIED,DENIED,DENIED,DENIED,SUCCESS,DENIED,DENIED,DENIED,DENIED,DENIED,SUCCESS,DENIED,DENIED,SUCCESS,SUCCESS"
+  },
+  {
+   "name": "P6 解匿台账统计有数",
+   "ok": true,
+   "detail": "http=200 code=0 成功 15ms {\"total\":6,\"recent\":[{\"action\":\"REVEAL_ANONYMOUS\",\"createdAt\":\"2026-09-29T15:23:58.73\",\"deleted\":0,\"detail\":\"解匿别名 匿名屿民·一苇 -> user 508|依据=gate6636142危机干预需要联系本人|解"
+  },
+  {
+   "name": "P6 解匿次数计数 >=1",
+   "ok": true,
+   "detail": "http=200 code=0 成功 11ms count=6"
+  },
+  {
+   "name": "P7 禁言靶子账号注册成功",
+   "ok": true,
+   "detail": "http=200 code=0 成功 96ms"
+  },
+  {
+   "name": "P7 禁言靶子 id 拿到且配额是干净的（0 帖）",
+   "ok": true,
+   "detail": "muteeId=509"
+  },
+  {
+   "name": "P7 禁言天数只接受 1/7/30，3 天必须被拒",
+   "ok": true,
+   "detail": "http=400 code=10001 禁言时长只能是 1/7/30 天 19ms"
+  },
+  {
+   "name": "P7 禁言不填事由必须被拒",
+   "ok": true,
+   "detail": "http=400 code=10001 处置用户必须填写理由，理由会写进审计与当事人通知 19ms"
+  },
+  {
+   "name": "P7 禁言 1 天成功",
+   "ok": true,
+   "detail": "http=200 code=0 成功 57ms"
+  },
+  {
+   "name": "P7 库里状态是 MUTED 且写了到期时间",
+   "ok": true,
+   "detail": "http=200 code=0 成功 45ms status=MUTED muteUntil=2026-09-30T15:23:59.022"
+  },
+  {
+   "name": "P7 被禁言的人仍然可以登录（闸门和业务规则分层，否则下面的 403 永远不可达）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 168ms"
+  },
+  {
+   "name": "P7 禁言期间发帖被拒，且拒因是禁言而不是配额",
+   "ok": true,
+   "detail": "http=403 code=10003 账号处于禁言期，可以看和点赞，暂时不能发布内容 22ms"
+  },
+  {
+   "name": "P7 禁言期间读广场照常放行",
+   "ok": true,
+   "detail": "http=200 code=0 成功 152ms"
+  },
+  {
+   "name": "P7 解除禁言",
+   "ok": true,
+   "detail": "http=200 code=0 成功 158ms"
+  },
+  {
+   "name": "P7 恢复后状态 ACTIVE 且 muteUntil 被清空",
+   "ok": true,
+   "detail": "http=200 code=0 成功 26ms status=ACTIVE muteUntil=undefined"
+  },
+  {
+   "name": "P7 对 ACTIVE 用户重复恢复必须失败",
+   "ok": true,
+   "detail": "http=400 code=10001 只有禁言或封禁的账号需要恢复（当前 ACTIVE） 29ms"
+  },
+  {
+   "name": "P7 解除禁言后发帖恢复正常（写权限回来了）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 31ms"
+  },
+  {
+   "name": "P8 待认领工单列表可分页",
+   "ok": true,
+   "detail": "http=200 code=0 成功 28ms total=185"
+  },
+  {
+   "name": "P8 拿到一条待认领工单（本轮危机帖没建单，借用历史单跑状态机）",
+   "ok": true,
+   "detail": "ticketId=19"
+  },
+  {
+   "name": "P8 认领工单",
+   "ok": true,
+   "detail": "http=200 code=0 成功 69ms"
+  },
+  {
+   "name": "P8 重复认领必须失败（同一条不能被两个人同时接）",
+   "ok": true,
+   "detail": "http=403 code=10003 工单已被他人认领或已办结（当前 claimed），请刷新队列 41ms"
+  },
+  {
+   "name": "P8 进入处置中",
+   "ok": true,
+   "detail": "http=200 code=0 成功 74ms"
+  },
+  {
+   "name": "P8 重复进入处置中必须失败（状态机只认 claimed）",
+   "ok": true,
+   "detail": "http=403 code=10003 请先认领工单再标记处置中 49ms"
+  },
+  {
+   "name": "P8 详情能查到且状态是 doing",
+   "ok": true,
+   "detail": "http=200 code=0 成功 27ms status={\"assigneeId\":487,\"claimAt\":\"2026-09-29T15:23:59.763\",\"createdAt\":\"2026-09-21T10"
+  },
+  {
+   "name": "P8 非法终态必须被白名单挡住",
+   "ok": true,
+   "detail": "http=400 code=10001 处置结果只能是 closed/false_positive/expired，收到的是：foo 13ms"
+  },
+  {
+   "name": "P8 办结并排 24 小时回访",
+   "ok": true,
+   "detail": "http=200 code=0 成功 32ms"
+  },
+  {
+   "name": "P8 办结后 close_at 与 followup_at 都落库",
+   "ok": true,
+   "detail": "http=200 code=0 成功 5ms status=closed closeAt=2026-09-29T15:24:00.044 followupAt=2026-09-30T07:24:00"
+  },
+  {
+   "name": "P8 已办结的单不能再办（终态不可逆）",
+   "ok": true,
+   "detail": "http=403 code=10003 工单已办结（closed），不可重复处置 16ms"
+  },
+  {
+   "name": "P8 同一用户的危机时间线可查",
+   "ok": true,
+   "detail": "http=200 code=0 成功 5ms n=2"
+  },
+  {
+   "name": "P8 按等级试算 SLA 返回时刻",
+   "ok": true,
+   "detail": "http=200 code=0 成功 5ms sla=2026-09-29T15:54:00.0971037"
+  },
+  {
+   "name": "P8 非法等级按最宽的 L2 回落而不是返回 null",
+   "ok": true,
+   "detail": "http=200 code=0 成功 5ms L9=2026-09-29T19:24:00.1057998 L2=2026-09-29T19:24:00.1019999 差=0s"
+  },
+  {
+   "name": "P8 等级留空也走同一条回落而不是 500",
+   "ok": true,
+   "detail": "http=200 code=0 成功 5ms sla=2026-09-29T19:24:00.1109809"
+  },
+  {
+   "name": "P8 工单看板五块计数齐全",
+   "ok": true,
+   "detail": "http=200 code=0 成功 10ms {\"statusCounts\":[{\"cnt\":184,\"status\":\"pending\"},{\"cnt\":7,\"status\":\"closed\"}],\"overdueCnt\":182,\"worstMinutes\":12696,\"todayCreatedCnt\":43,\"todayClosedCnt\":0}"
+  },
+  {
+   "name": "P8 超时未处置的任务自动释放",
+   "ok": true,
+   "detail": "http=200 code=0 成功 5ms 0"
+  },
+  {
+   "name": "P9 词典状态有版本与词数",
+   "ok": true,
+   "detail": "http=200 code=0 成功 5ms {\"version\":\"v0.1\",\"wordCount\":139,\"dbVersion\":\"v0.22\",\"dictPath\":\"\",\"cacheMode\":\"local\"}"
+  },
+  {
+   "name": "P9 新词在重载前不命中（证明重载这一步不是装饰）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 3ms hit=false"
+  },
+  {
+   "name": "P9 加词成功",
+   "ok": true,
+   "detail": "http=200 code=0 成功 21ms {\"createdAt\":\"2026-09-29T15:24:00.1406333\",\"deleted\":0,\"groupId\":3,\"hitCnt\":0,\"id\":146,\"matchType\":\"contains\",\"status\":1"
+  },
+  {
+   "name": "P9 同一个词不能重复加（variant_hash 唯一）",
+   "ok": true,
+   "detail": "http=400 code=10001 这个词已经在词库里（组：3，id=146） 8ms"
+  },
+  {
+   "name": "P9 重载成功",
+   "ok": true,
+   "detail": "http=200 code=0 成功 32ms {\"version\":\"v0.23\",\"wordCount\":140,\"scanned\":140,\"snapshotWritten\":false,\"snapshotPath\":\"\",\"opLogId\":259}"
+  },
+  {
+   "name": "P9 版本号比上一版新",
+   "ok": true,
+   "detail": "v0.1 -> v0.23"
+  },
+  {
+   "name": "P9 重载后词数 +1",
+   "ok": true,
+   "detail": "before=139 after=140"
+  },
+  {
+   "name": "P9 重载之后同一个句子命中了",
+   "ok": true,
+   "detail": "http=200 code=0 成功 4ms {\"raw\":\"试一下gate6636142验词会不会命中\",\"normalized\":\"试一下gate6636142验词会不会命中\",\"dictVersion\":\"v0.23\",\"hit\":true,\"category\":\"辱骂攻击\",\"level\":\"grey\",\"action\":\"REVIEW\",\"hitCoun"
+  },
+  {
+   "name": "P9 停用词条",
+   "ok": true,
+   "detail": "http=200 code=0 成功 20ms"
+  },
+  {
+   "name": "P9 停用后重载",
+   "ok": true,
+   "detail": "http=200 code=0 成功 29ms wordCount=139"
+  },
+  {
+   "name": "P9 停用词不再命中",
+   "ok": true,
+   "detail": "http=200 code=0 成功 3ms"
+  },
+  {
+   "name": "P9 删除词条（逻辑删）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 16ms"
+  },
+  {
+   "name": "P9 删除后列表查不到（deleted 过滤生效）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 7ms n=0"
+  },
+  {
+   "name": "P9 收尾重载回到原词数",
+   "ok": true,
+   "detail": "wordCount=139"
+  },
+  {
+   "name": "P10 改 SLA 为 15 分钟",
+   "ok": true,
+   "detail": "http=200 code=0 成功 16ms"
+  },
+  {
+   "name": "P10 改完立刻生效（工单 SLA 真的按新配置算，不是只写了一行表）",
+   "ok": true,
+   "detail": "2026-09-29T15:54:00.3049797 -> 2026-09-29T15:39:00.3259122"
+  },
+  {
+   "name": "P10 改回 30 分钟",
+   "ok": true,
+   "detail": "http=200 code=0 成功 16ms"
+  },
+  {
+   "name": "P10 非数值喂给 decimal 配置必须被拒",
+   "ok": true,
+   "detail": "http=400 code=10001 ai.temperature 需要小数，收到：很热 18ms"
+  },
+  {
+   "name": "P10 不存在的配置键必须被拒",
+   "ok": true,
+   "detail": "http=404 code=90006 参数不存在：not.a.real.key 16ms"
+  },
+  {
+   "name": "P10 分组过滤能查到改回的值 30",
+   "ok": true,
+   "detail": "http=200 code=0 成功 14ms value=30"
+  },
+  {
+   "name": "P11 举报靶子此刻是 PUBLISHED（不是就把后面的判据全废了）",
+   "ok": true,
+   "detail": "status=PUBLISHED"
+  },
+  {
+   "name": "P11 举报一条帖子",
+   "ok": true,
+   "detail": "http=200 code=0 成功 74ms {\"reportCnt\":1,\"auditTaskId\":185,\"reasonLabel\":\"攻击辱骂\"}"
+  },
+  {
+   "name": "P11 同一个人重复举报不会多出一行",
+   "ok": true,
+   "detail": "http=200 code=0 成功 21ms {\"postId\":1307,\"reason\":\"abuse\",\"reasonLabel\":\"攻击辱骂\",\"duplicated\":true,\"reportCnt\":1,\"autoReviewThreshold\":3,\"escalated\""
+  },
+  {
+   "name": "P11 待处置列表里能找到本轮那条举报（剥嵌套 + 翻页翻到命中，不在第 1 页就当没有是判据错）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 304ms scanned=50 reportId=132"
+  },
+  {
+   "name": "P11 办结举报",
+   "ok": true,
+   "detail": "http=200 code=0 成功 73ms"
+  },
+  {
+   "name": "P11 已办结的举报不能再办",
+   "ok": true,
+   "detail": "http=403 code=10003 这条举报已经有人办过了，请刷新队列 35ms"
+  },
+  {
+   "name": "P12 export/tickets BOM+表头+数据行",
+   "ok": true,
+   "detail": "bom=true bytes=20088 crlf=true lines=192 head=id,level,user_id,source_type,source_id,risk_score,trigger_wo"
+  },
+  {
+   "name": "P12 export/tickets 文件名带日期且是 attachment",
+   "ok": true,
+   "detail": "attachment; filename=\"mindisle-tickets-20260929-1524.csv\""
+  },
+  {
+   "name": "P12 export/tickets 声明 text/csv;charset=UTF-8",
+   "ok": true,
+   "detail": "text/csv;charset=UTF-8"
+  },
+  {
+   "name": "P12 export/ai-usage BOM+表头+数据行",
+   "ok": true,
+   "detail": "bom=true bytes=467 crlf=true lines=9 head=day,scene,model,call_cnt,tokens,cost_cent,fail_cnt,avg_laten"
+  },
+  {
+   "name": "P12 export/ai-usage 文件名带日期且是 attachment",
+   "ok": true,
+   "detail": "attachment; filename=\"mindisle-ai-usage-20260929-1524.csv\""
+  },
+  {
+   "name": "P12 export/ai-usage 声明 text/csv;charset=UTF-8",
+   "ok": true,
+   "detail": "text/csv;charset=UTF-8"
+  },
+  {
+   "name": "P12 export/op-logs BOM+表头+数据行",
+   "ok": true,
+   "detail": "bom=true bytes=36812 crlf=true lines=254 head=id,created_at,operator_id,operator_role,action,result,target"
+  },
+  {
+   "name": "P12 export/op-logs 文件名带日期且是 attachment",
+   "ok": true,
+   "detail": "attachment; filename=\"mindisle-op-logs-20260929-1524.csv\""
+  },
+  {
+   "name": "P12 export/op-logs 声明 text/csv;charset=UTF-8",
+   "ok": true,
+   "detail": "text/csv;charset=UTF-8"
+  },
+  {
+   "name": "P12 非法 days 必须被拒而不是静默导出全表",
+   "ok": true,
+   "detail": "http=400 code=10001"
+  },
+  {
+   "name": "P13 动作计数是分组数组",
+   "ok": true,
+   "detail": "http=200 code=0 成功 42ms [{\"cnt\":59,\"status\":\"UPDATE_CONFIG\"},{\"cnt\":39,\"status\":\"TICKET_HANDLE\"},{\"cnt\":31,\"status\":\"EXPORT_CSV\"},{\"cnt\":20,\"status\":\"REVEAL_ANONYMOUS\"},{\"cnt\":15,\"status\":\"POST_TAKEDOWN\"},{\"cnt\":14,\"status\":\"APPEAL_HANDLE\"},{\"c"
+  },
+  {
+   "name": "P13 本轮 14 类动作全部留痕",
+   "ok": true,
+   "detail": "{\"UPDATE_CONFIG\":59,\"TICKET_HANDLE\":39,\"EXPORT_CSV\":31,\"REVEAL_ANONYMOUS\":20,\"POST_TAKEDOWN\":15,\"APPEAL_HANDLE\":14,\"AUDIT_CLAIM\":14,\"MUTE_USER\":12,\"RESTORE_USER\":11,\"REPORT_HANDLE\":9,\"POST_FEATURE\":8,\"POST_TOP\":8,\"AUDIT_REJECT\":7,\"POST_RESTORE\":7}"
+  },
+  {
+   "name": "P13 导出留痕写了行数与范围",
+   "ok": true,
+   "detail": "http=200 code=0 成功 14ms detail=导出操作日志 253 行，范围=最近30天"
+  },
+  {
+   "name": "P13 非法动作码查询被白名单挡住（不是拼进 SQL）",
+   "ok": true,
+   "detail": "http=400 code=10001 审计动作码不在白名单内，请从下拉里选：NOT_A_REAL_ACTION 4ms"
+  },
+  {
+   "name": "P13 ADMIN 越权解匿留下了 DENIED 行（含 IP 与 UA）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 13ms denied=10 ip=127.0.0.1"
+  },
+  {
+   "name": "P13 词库重载也走了 UPDATE_CONFIG 留痕（14 类里没有 DICT_RELOAD 这个码，靠 detail 区分）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 47ms n=11 sample=热更新 v0.24 -> v0.25|词条=139|落盘=false|路径="
+  },
+  {
+   "name": "P15 通过分支另用第二个一次性作者（新号 24h 限发 5 帖，P2 已把第一个号用满）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 92ms"
+  },
+  {
+   "name": "P15 第二个作者登录并拿到 uid",
+   "ok": true,
+   "detail": "http=200 code=0 成功 92ms uid=510"
+  },
+  {
+   "name": "P15 灰词帖进入待审（计时起点 = 发布成功那一枪）",
+   "ok": true,
+   "detail": "status=HUMAN_REVIEW id=1309"
+  },
+  {
+   "name": "P15 人审通过之前，别人按详情接口读不到这条（30001，不是 200 空壳）",
+   "ok": true,
+   "detail": "http=404 code=30001 内容不存在或已删除 29ms msg=内容不存在或已删除"
+  },
+  {
+   "name": "P15 灰词帖在下一轮定时同步内自己进人审队列（按作者精确取到，没有手动触发同步）",
+   "ok": true,
+   "detail": "queueWaitMs=60388 上限=90000 命中=186/PENDING"
+  },
+  {
+   "name": "P15 SUPER 认领这条待审任务",
+   "ok": true,
+   "detail": "http=200 code=0 成功 76ms"
+  },
+  {
+   "name": "P15 人工通过（pass=true）成功并把帖子置为 PUBLISHED —— 这一支在本组之前从未被执行过",
+   "ok": true,
+   "detail": "http=200 code=0 成功 74ms {\"taskId\":186,\"taskStatus\":\"PASSED\",\"postId\":1309,\"postStatus\":\"PUBLISHED\",\"postStatusChanged\":true,\"publishedAtStamped\":true}"
+  },
+  {
+   "name": "P15 库里这条已是 PUBLISHED 且有 publishedAt（管理端回读，不信出参）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 11ms status=PUBLISHED publishedAt=2026-09-29T15:25:02.055"
+  },
+  {
+   "name": "P15 通过之后同一个读者立刻读得到（与上一条同接口同账号，只差这一次裁决）",
+   "ok": true,
+   "detail": "http=200 code=0 成功 108ms status=undefined"
+  },
+  {
+   "name": "P15 D4「全流程 <2 分钟」按实测毫秒判定（发布→入队→认领→通过→回读→他人可读）",
+   "ok": true,
+   "detail": "elapsedMs=60659（其中等同步 60388ms、裁决完成于 60539ms）上限=120000"
+  },
+  {
+   "name": "P14 大屏核心 12 个数都有值",
+   "ok": true,
+   "detail": "http=200 code=0 成功 39ms {\"auditPendingCnt\":177,\"avgValence\":0,\"chatRoundCnt\":129,\"costCent\":0,\"crisisCnt\":117,\"dau\":93,\"newUserCnt\":398,\"overdueCnt\":182,\"postCnt\":577,\"reportPendingCnt\":98,\"ticketPendingCnt\":184,\"tokenCnt\":103917}"
+  }
+ ]
+}

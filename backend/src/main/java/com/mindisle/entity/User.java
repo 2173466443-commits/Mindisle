@@ -46,6 +46,19 @@ public class User {
   private String status;
 
   /**
+   * BR6 禁言到期时间（任务 T6.6 A6 的 1/7/30 天档位，列由 sql/17_stage6_alter.sql 追加）。
+   *
+   * <p>语义分工要写白，否则很容易两头判：<b>{@code status} 决定「现在是不是被禁言」，
+   * 本列只决定「这个禁言有没有到期」</b>。因此判据是单向的——
+   * {@code status='MUTED' && muteUntil!=null && muteUntil<=now} 视为已恢复
+   * （{@code PostingQuotaService.statusOf} 里自愈，不额外抛错）；
+   * 反过来 {@code muteUntil} 有值而 status 不是 MUTED，说明管理员已经手动解过禁，
+   * 本列留着只作历史，不再有任何效力。{@code null} = 不是限时禁言
+   * （阶段 5 之前手工置 MUTED 的账号就是这个状态）。</p>
+   */
+  private LocalDateTime muteUntil;
+
+  /**
    * 提交注销的时刻（任务 T4.21 状态机 active → cooling → purged 的 cooling 入口时间戳）。
    *
    * <p>冷静期内登录即视为撤回注销、本列置回 null（见 {@code CoolingState#restore}）。

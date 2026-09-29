@@ -1,0 +1,237 @@
+{
+  "at": "2026-09-29T07:29:08.867Z",
+  "base": "http://127.0.0.1:5174",
+  "chrome": "C:/Users/Drbrain/AppData/Local/Google/Chrome/Application/chrome.exe",
+  "browser": "150.0.7871.115",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "superAccount": {
+    "username": "gate6_super",
+    "id": 486,
+    "role": "SUPER"
+  },
+  "adminAccount": {
+    "username": "gate6_admin",
+    "id": 487,
+    "role": "ADMIN"
+  },
+  "chain": {
+    "targetUserId": 508,
+    "aliasId": 185,
+    "deniedBefore": 14,
+    "deniedAfter": 15,
+    "newestDeniedLogId": 273,
+    "newestOperator": 487
+  },
+  "data": {
+    "usersTotal": 503,
+    "auditTotal": 177,
+    "postsTotal": 785,
+    "ticketId": 22
+  },
+  "leakCount": 0,
+  "errorCount": 0,
+  "checkFailCount": 0,
+  "shots": [
+    {
+      "file": "01-A1登录页.png",
+      "url": "/login",
+      "desc": "A1 管理员登录：图形验证码由后端签发（dev 关验证码，生产必开）",
+      "chars": 225,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "02-F5刷新后身份仍有效.png",
+      "url": "/dashboard",
+      "desc": "按 F5 之后顶栏仍是「闸门六超管 / SUPER」——身份由 GET /api/admin/me 回读，不靠前端缓存",
+      "chars": 2147,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "03-A1运营工作台.png",
+      "url": "/dashboard",
+      "desc": "A1 工作台：八张待办卡 + SLA 超时工单 + 审核队列五态 + 人均处理量",
+      "chars": 2147,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "04-A3危机工单列表.png",
+      "url": "/tickets",
+      "desc": "A3 危机工单：状态看板 + 六态筛选 + SLA 倒计时（FR9 危机响应）",
+      "chars": 2600,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "05-A3工单处置抽屉.png",
+      "url": "/tickets?ticketId=22",
+      "desc": "A3 深链直接开单：认领→处置→办结三步行在同一个抽屉里，时间线在下方",
+      "chars": 3018,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "06-A4审核队列.png",
+      "url": "/audit",
+      "desc": "A4 审核队列：命中词高亮 + 认领 + 批量裁决（先审后发 BR4）",
+      "chars": 1779,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "07-A5内容管理-帖子.png",
+      "url": "/content",
+      "desc": "A5 内容管理帖子 Tab：状态六态筛选、下架/恢复/置顶/加精",
+      "chars": 2356,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "08-A5内容管理-举报.png",
+      "url": "/content?tab=reports",
+      "desc": "A5 举报 Tab：?tab=reports 深链落位（举报与申诉是两条状态机，不能混成一个角标）",
+      "chars": 1715,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "09-A6用户管理.png",
+      "url": "/users",
+      "desc": "A6 用户检索：状态四态 + 禁言到期 + 注销冷静期都在列表里可见",
+      "chars": 2107,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "10-A6档案深链-SUPER可解匿.png",
+      "url": "/users?userId=508",
+      "desc": "A6 深链 ?userId= 直接开档案：别名表里出现「解匿」按钮（角色驱动控件，FR8.4）",
+      "chars": 2560,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "11-A7参数配置-词库.png",
+      "url": "/configs",
+      "desc": "A7 敏感词词库：分组/级别/动作/作用侧 + 版本与重建入口（FR7.1）",
+      "chars": 1910,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "12-A7词库试审命中.png",
+      "url": "/configs",
+      "desc": "A7 词库试审：原文 / 归一化后 / 命中词三件一起摆出来，这是「可回放」的证据",
+      "chars": 885,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "13-A9操作日志.png",
+      "url": "/logs",
+      "desc": "A9 操作日志：四个筛位（操作人/动作码/结果/时间）+ 动作码分布图 + 三个 CSV 导出",
+      "chars": 4724,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "14-A2运行大屏.png",
+      "url": "/screen",
+      "desc": "A2 数据大屏六图齐全：双轴趋势 / 情绪分布环形饼 / 24 小时热力 / 话题词云 / 年级柱状 / AI 用量，每块 echarts 图都验「画布真有墨」，再验定版画布在 1600x1000 与 1920x1080 两个视口下都不溢出版口",
+      "chars": 1260,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "18-A1推荐链路健康度.png",
+      "url": "/dashboard",
+      "desc": "A1 工作台下半区「推荐链路健康度与离线重算」卡（元素级截图）：状态灯 + 拉取状态 + 立即重算一轮两个按钮 + cacheRows/similarityRows/相似批次时刻/缓存模式/上次作业完成/结果TTL/作业占用/上次失败八项读数",
+      "chars": 2147,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "15-A6ADMIN对照-无解匿按钮.png",
+      "url": "/users?userId=508",
+      "desc": "同一个档案页换成 ADMIN 登录：解匿按钮消失，只留「接口自检（预期 10003）」",
+      "chars": 2631,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "16-A6越权被拒当场提示.png",
+      "url": "/users?userId=508",
+      "desc": "ADMIN 强行调用解匿接口：后端 10003，界面把「这次拒绝已经留下一行 DENIED」说出来，并给出跳去 A9 的入口",
+      "chars": 2881,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    },
+    {
+      "file": "17-A9深链筛中这条DENIED.png",
+      "url": "/logs?action=REVEAL_ANONYMOUS&result=DENIED&operatorId=487",
+      "desc": "A9 收到深链后真的把 result=DENIED 筛了出来，第一条就是刚才那次越权（标着「我」）",
+      "chars": 4445,
+      "bg": "rgb(14, 22, 38)",
+      "leaks": 0,
+      "errBanners": 0,
+      "errors": 0,
+      "pass": true
+    }
+  ]
+}

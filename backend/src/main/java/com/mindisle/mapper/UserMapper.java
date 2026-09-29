@@ -6,6 +6,7 @@ import com.mindisle.entity.User;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
@@ -71,4 +72,25 @@ public interface UserMapper extends BaseMapper<User> {
   @Update("UPDATE user SET status = #{toStatus}, deactivate_at = NULL, purge_at = NULL"
       + " WHERE id = #{id} AND status = #{fromStatus} AND deleted = 0")
   int restoreActive(long id, String fromStatus, String toStatus);
+  /**
+   * 禁言已到期的账号 id（任务 T6.4 的 {@code MuteExpiryJob} 候选读数）。
+   *
+   * <p>判据与 {@code PostingQuotaService.muteActiveNow} 逐字一致：{@code mute_until} 为空视为
+   * 「无限期禁言」，不会被这个作业自动解开——那是管理员手动处置的结果，自动作业无权推定结束。</p>
+   */
+  @Select("SELECT id FROM user WHERE status = 'MUTED' AND mute_until IS NOT NULL"
+      + " AND mute_until <= #{now} AND deleted = 0 ORDER BY mute_until LIMIT #{limit}")
+  List<Long> listExpiredMuteIds(LocalDateTime now, int limit);
+
+  /**
+   * 解除禁言：状态改回 {@code toStatus} 并把 {@code mute_until} 显式写 NULL。
+   *
+   * <p>{@link #restoreActive} 不能复用：它清的是 deactivate_at/purge_at，不碰 mute_until，
+   * 于是「已恢复却留着过去的 mute_until」的账号下次被禁言时会带着一个更早的时间戳，
+   * 自愈判据当场把它判成没禁。和撤回注销同一个道理——MP 的 NOT_NULL 字段策略写不进 NULL，
+   * 必须走裸 SQL。WHERE 带前置态，返回 0 表示状态已被别的入口改走。</p>
+   */
+  @Update("UPDATE user SET status = #{toStatus}, mute_until = NULL, updated_at = #{now}"
+      + " WHERE id = #{id} AND status = #{fromStatus} AND deleted = 0")
+  int releaseMute(long id, String fromStatus, String toStatus, LocalDateTime now);
 }

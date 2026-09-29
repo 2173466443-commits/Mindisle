@@ -2,6 +2,7 @@ package com.mindisle.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.mindisle.entity.Post;
+import java.time.LocalDateTime;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -111,6 +112,26 @@ public interface PostMapper extends BaseMapper<Post> {
   @Update("UPDATE post SET status = #{toStatus} WHERE id = #{id} AND status = #{fromStatus} AND deleted = 0")
   int compareAndSetStatus(@Param("id") long id, @Param("fromStatus") String fromStatus,
       @Param("toStatus") String toStatus);
+
+  /**
+   * 人审放行时回填发布时间（任务 T6.6 · 手册 §9.4 D4「通过后即时可见」）。
+   *
+   * <p><b>为什么要单独开一个口子</b>：{@link #compareAndSetStatus} 刻意不碰 published_at
+   * （转入人审不是发布）。于是灰词帖走「机审拦下 → 人工通过」这条路进来时，帖子状态已经是
+   * PUBLISHED 却带着 published_at = NULL，而下游三个读取方都按发布时间说话：
+   * 广场游标 {@code order by published_at desc, id desc} 在 MySQL DESC 语义下把 NULL 排在最后；
+   * {@code RecommendMapper} 的「近 N 天新帖」用 {@code published_at >= #{since}} 比较，NULL 恒不成立；
+   * 热池排序 {@code quality_score DESC, published_at DESC} 同样把它压到末尾。
+   * 结果是「状态机说它上线了，读取侧却当它没发布」——Gate6 D4 的「即时可见」只走完了一半。
+   * 这里补的就是「人审放行那一刻才是这条帖子的发布时刻」这条语义。</p>
+   *
+   * <p>{@code published_at IS NULL} 是幂等闸门：图片抽审那条分支进来的帖子本来就是 PUBLISHED
+   * 且早就有发布时间，重复裁决也不会把发布时间挪到第二次点击上；没回填就返回 0 行，
+   * 调用方据此在审计 detail 里写「回填发布时间=false」，不留「看起来做了其实没做」的模糊地带。</p>
+   */
+  @Update("UPDATE post SET published_at = #{publishedAt} "
+      + "WHERE id = #{id} AND status = 'PUBLISHED' AND published_at IS NULL AND deleted = 0")
+  int stampPublishedAt(@Param("id") long id, @Param("publishedAt") LocalDateTime publishedAt);
 
   /**
    * 主页「获赞数」（任务 3.6 · 需求 FR1.5）。

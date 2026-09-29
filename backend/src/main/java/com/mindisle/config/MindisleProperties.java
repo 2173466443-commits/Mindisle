@@ -424,6 +424,52 @@ public class MindisleProperties {
          * 与周报同一个纪律：这个值只能把上界调小，{@code DataRetentionJob.MAX_BATCH} 才是上界。</p>
          */
         private int retentionBatchLimit = 50;
+
+        /**
+         * 审核队列同步的 cron，缺省「每分钟第 0 秒」。
+         *
+         * <p>它服务两件事：把命中的历史帖子补进 {@code audit_task}（FR7.4 队列有活可干）、
+         * 把超时未裁决的任务放回队列（FR4.4「不允许两人审同一条」的兜底）。
+         * 一分钟一次是拿 Gate6 的判据倒推的：手册要求「改词 5s 生效」靠的是热更新而不是队列轮询，
+         * 而抽审任务再晚一分钟进队列，SLA 的 4 小时窗口就少一分钟。</p>
+         */
+        private String auditSyncCron = "0 * * * * ?";
+        /** 同步任务开关。演示期关掉可以保住「队列一直有活」的观感，交付时必须为真。 */
+        private boolean auditSyncEnabled = true;
+        /** 单轮最多补多少条图片抽审任务（与 {@code AuditQueueService.SYNC_BATCH_LIMIT} 同一族，只能调小）。 */
+        private int auditSyncBatchLimit = 200;
+
+        /** 禁言到期自动解言的 cron，缺省「每分钟第 20 秒」（与审核同步错开 20 秒，别同时抢连接池）。 */
+        private String muteExpiryCron = "20 * * * * ?";
+        /** 自动解言开关。关掉之后到期禁言仍然不会拦住发帖（判据在 {@code PostingQuotaService}），只是库里的事实不追平。 */
+        private boolean muteExpiryEnabled = true;
+        /** 单轮最多解多少账号。禁言是低频操作，20 已经够把积压一次清干净。 */
+        private int muteExpiryBatchLimit = 20;
+
+        /**
+         * 推荐重算总开关（任务 T7.14）。
+         *
+         * <p>关掉之后 {@code GET /api/feed/recommend} 仍然能返回：它读的是最后一批缓存，
+         * 缓存过 TTL 再退热度兜底。所以这个开关关的是「个性化」，不是「首页」——
+         * 演示时把它关掉可以保住 LLM 预算与 CPU，界面不会出现空白。</p>
+         */
+        private boolean recRebuildEnabled = true;
+        /**
+         * 两轮重算之间的固定间隔（毫秒），缺省 30 分钟，与手册 §10.1「每 30 分钟一批」一致。
+         *
+         * <p>用 fixedDelay 而不是 cron：一轮批次的耗时随活跃用户数与候选池增长，cron 到点强开
+         * 会让两轮并发写同一批 {@code recommend_result}（「先删后插」交叉执行 → position 断号、
+         * 同一帖两行）。{@code RecommendJob} 里还有一把 AtomicBoolean 做第二道闸。</p>
+         */
+        private long recRebuildFixedDelayMillis = 1_800_000L;
+        /**
+         * 单轮最多重算多少个用户（0 = 不限）。
+         *
+         * <p>存在的理由是压测与演示：灌完一万条模拟行为之后，一轮全量重算的耗时要能被压到
+         * 可预期的区间里，而不是靠改代码。它只是「取活跃名单的前 N 个」，不改变任何打分口径，
+         * 所以拿它做限流不会让 §6.4 的对照实验失效。</p>
+         */
+        private int recRebuildUserLimit = 0;
     }
 
     /**

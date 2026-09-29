@@ -325,9 +325,25 @@ public class AuthService {
   }
 
   private AuthResponse toResponse(User user, TokenPair pair) {
-    AuthResponse.UserBrief brief = new AuthResponse.UserBrief(user.getId(), user.getUsername(),
+    return new AuthResponse(pair.accessToken(), pair.refreshToken(), pair.expiresIn(), briefOf(user));
+  }
+
+  /**
+   * 令牌回读身份（阶段 6 · A6 顶栏角色与 SUPER 专属按钮）。
+   *
+   * <p>为什么要有这一条接口：前端把 access token 存在 localStorage 里，刷新页面后令牌还在、
+   * 但 pinia 里的 profile 是内存态，没了。角色的唯一权威在后端 user.role，所以拿令牌回表取一次，
+   * 而不是把 role 抄一份进 localStorage —— 后者会让「降权」在客户端缓存里继续活着，
+   * 界面上出现「按钮还在但每个请求都 10003」这种最难复现的假象。</p>
+   */
+  public AuthResponse.UserBrief briefOf(Long userId) {
+    return briefOf(requireUser(userId));
+  }
+
+  /** 出参字段白名单只在这一处拼装：登录、刷新、身份回读三条路共用，不留第二份字段顺序。 */
+  private static AuthResponse.UserBrief briefOf(User user) {
+    return new AuthResponse.UserBrief(user.getId(), user.getUsername(),
         user.getNickname(), user.getAvatar(), user.getRole(), user.getAiStyle(), user.getStatus());
-    return new AuthResponse(pair.accessToken(), pair.refreshToken(), pair.expiresIn(), brief);
   }
 
   /** 与 user.status 的 ENUM 逐字一致（sql/01_account.sql:20）；禁言态。 */

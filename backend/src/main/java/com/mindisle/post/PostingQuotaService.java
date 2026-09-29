@@ -159,9 +159,28 @@ public class PostingQuotaService {
      */
     public void assertStatusAllowsWrite(User user) {
         assertStatusAllowsInteract(user);
-        if ("MUTED".equals(statusOf(user))) {
+        if (muteActiveNow(user, LocalDateTime.now())) {
             throw new BizException(ErrorCode.FORBIDDEN, "账号处于禁言期，可以看和点赞，暂时不能发布内容");
         }
+    }
+
+    /**
+     * 禁言是否仍在生效（任务 T6.4 · 需求 FR8.3 的自愈分支）。
+     *
+     * <p><b>为什么读侧还要再判一次 {@code mute_until}</b>：{@code MuteExpiryJob} 只是把库里的
+     * 事实追平，它每分钟跑一次，而禁言到期的那一秒用户就可能正在点「发布」。
+     * 只信 {@code user.status} 会让到期后的第一分钟成为「管理员没解锁我就永远发不了」的窗口；
+     * 判据落在读侧，作业迟到也不影响用户，作业本身只是让库里的事实与判据一致。</p>
+     *
+     * <p>{@code mute_until} 为空＝无限期禁言（管理员手动处置且未给期限），<b>不</b>自愈：
+     * 自动作业无权替人推定一次处分什么时候结束。</p>
+     */
+    static boolean muteActiveNow(User user, LocalDateTime now) {
+        if (!"MUTED".equals(statusOf(user))) {
+            return false;
+        }
+        LocalDateTime until = user.getMuteUntil();
+        return until == null || until.isAfter(now);
     }
 
     /**
