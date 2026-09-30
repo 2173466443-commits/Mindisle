@@ -1,8 +1,22 @@
 <template>
   <div class="feed">
-    <!-- 1 U5 发布器（紧凑形态，与 /publish 同一组件） -->
-    <section class="mi-card">
-      <post-composer compact :topic-list="topicList" @published="onPublished" />
+    <!-- 1 U5 发布器（紧凑形态，与 /publish 同一组件）。
+         2026-09-30 改版：默认收成一条胶囊，点一下才展开成整块表单。
+         为什么收 —— 小红书进首页第一眼是笔记墙，而这块表单原先把首屏整屏占满，
+         「看内容」的路被「发内容」的路挡住了；发布是低频动作，不该占最高位。
+         为什么用 v-show 而不是 v-if —— 收起是视觉层的事，不该动结构层：
+         取证脚本（domprobe 那套 .composer 选择器）和草稿自动保存都要求发布器 DOM 常驻，
+         v-if 会把它整个卸载，那时「收起一个框」就变成了「改一条契约」。 -->
+    <section class="mi-card composer-card" :class="{ 'is-pill': !composerOpen }">
+      <button v-if="!composerOpen" class="composer-pill" type="button" @click="composerOpen = true">
+        <span class="pill-face">🏝</span>
+        <span class="pill-ph">此刻想说点什么…</span>
+        <span class="pill-cta">写点什么</span>
+      </button>
+      <div v-show="composerOpen" class="composer-fold-wrap">
+        <post-composer compact :topic-list="topicList" @published="onPublished" />
+        <button class="pill-fold" type="button" @click="composerOpen = false">收起发布框</button>
+      </div>
     </section>
 
     <!-- 1.5 信息流来源切换：广场 = 全站已过审的公开内容；关注 = 我只关注的那些人的更新（任务 T3.17）。
@@ -36,8 +50,11 @@
         <p v-if="!feed.items.length && !feed.loading" class="hint empty">
           这里暂时没有能看的帖子。广场只放「已过审且公开」的内容，你自己的私密帖与审核中的帖不在这条流里。
         </p>
-        <div v-for="item in feed.items" :key="item.id" class="row">
-          <post-card :item="item" @dismiss="dismiss" />
+        <!-- 2026-09-30 改版：一行一张张卡片（笔记墙）。row 这个类没删，只是从「包裹层」
+             挪到了卡片自己身上（Vue 的属性透传会把它合并到 <article class="post"> 上），
+             因为取证脚本数的是 .feed .row 的条数，少一层 div 就少一格计数。 -->
+        <div class="mi-wall">
+          <post-card v-for="item in feed.items" :key="item.id" class="row" :item="item" @dismiss="dismiss" />
         </div>
         <div ref="sentinel" class="sentinel">
           <el-button v-if="feed.hasMore && !feed.loading" size="small" :loading="feed.loading" @click="loadMore">
@@ -71,8 +88,8 @@
           还没有可看的更新。去广场点某张卡片上的名字进主页关注，回来这一栏就会亮起来。
           刚注册的人在这里看到空白是正常的：后端对「没关注任何人」回的是空页，不是错误。
         </p>
-        <div v-for="item in folItems" :key="item.id" class="row">
-          <post-card :item="item" :dismissable="false" />
+        <div class="mi-wall">
+          <post-card v-for="item in folItems" :key="item.id" class="row" :item="item" :dismissable="false" />
         </div>
         <div ref="folSentinel" class="sentinel">
           <el-button v-if="folHasMore && !folLoading" size="small" @click="loadFollowingMore">加载更多</el-button>
@@ -105,8 +122,8 @@
       </p>
       <stage-notice v-else-if="recErrorCode" :code="recErrorCode" stage="7" api-name="GET /api/feed/recommend" :extra="recExtra" />
       <template v-else>
-        <div v-for="item in recItems" :key="item.id" class="row rec-row">
-          <post-card class="rec-card" :item="item" @dismiss="dismissRecommend(item)">
+        <div class="mi-wall">
+          <post-card v-for="item in recItems" :key="item.id" class="rec-card" :item="item" @dismiss="dismissRecommend(item)">
             <template #reason>
               <div class="rec-why">
                 <span class="rec-reason">{{ item.recReason || recReasonFallback(item) }}</span>
@@ -427,6 +444,10 @@ const listExtra = computed(() => {
 })
 
 const source = ref('plaza')
+/* 发布器收起/展开（2026-09-30 改版）：默认收起成一条胶囊。
+   刷新后回到收起态是有意的 —— 它只是「这块表单要不要占屏」的临时视图开关，
+   不是用户写下的内容，所以不进 localStorage（草稿本身仍然照旧自动存）。 */
+const composerOpen = ref(false)
 const folSentinel = ref(null)
 let folObserver = null
 // 只在第一次进入「关注」Tab 时拉：来回切 Tab 不该每次都重转一圈（要最新的，右边有「刷新」）。
@@ -581,6 +602,7 @@ function onPublished(data) {
   if (!data) return
   if (data.status === 'PUBLISHED') {
     ElMessage.success('已发布')
+    composerOpen.value = false  // 发完自动收回胶囊：这块表单刚用完还占着首屏，没有道理
     // 直接回第一屏：服务端刚写完库，前端自己拼一条列表项反而会出现「本地有、刷新没」的不一致。
     reload()
   } else if (data.status === 'HUMAN_REVIEW') {
@@ -656,21 +678,50 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.feed { display: flex; flex-direction: column; gap: 18px; }
+.feed { display: flex; flex-direction: column; gap: 14px; }
+/* ---- 发布器：收起态是一条胶囊，展开态才是整块表单（模板注释里写了为什么用 v-show） ---- */
+.composer-card.is-pill { padding: 10px; }
+.composer-pill {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  height: 44px; padding: 0 8px 0 14px; margin: 0;
+  border: none; border-radius: 999px; background: var(--mi-fill);
+  color: var(--mi-text-dim); font: inherit; font-size: 14px; cursor: pointer; text-align: left;
+  transition: background .15s;
+}
+.composer-pill:hover { background: var(--mi-hover); }
+.pill-face { flex: none; font-size: 16px; line-height: 1; }
+.pill-ph { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 右侧那颗红色小胶囊是「点这里能干什么」的提示，纯装饰，不另绑事件。 */
+.pill-cta {
+  flex: none; padding: 6px 14px; border-radius: 999px;
+  background: var(--mi-primary); color: var(--mi-on-primary); font-size: 13px; font-weight: 600;
+}
+.composer-fold-wrap { display: flex; flex-direction: column; gap: 6px; }
+.pill-fold {
+  align-self: flex-start; padding: 0; border: none; background: none;
+  font: inherit; font-size: 12px; color: var(--mi-text-dim); cursor: pointer;
+}
+.pill-fold:hover { color: var(--mi-primary); }
 .plaza { display: flex; flex-direction: column; gap: 12px; }
 .sec-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-h2 { margin: 0; font-size: 16px; color: var(--mi-mist); letter-spacing: 1px; }
-.tabs { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 18px; }
-.source { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 18px; }
+h2 { margin: 0; font-size: 16px; font-weight: 700; color: var(--mi-text); }
+.tabs { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 14px; }
+.source { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 14px; }
 .tab-right { display: flex; align-items: center; gap: 12px; }
-.row { scroll-margin-top: 80px; }
+/* 改版后 .row 落在卡片本身（见模板那三处 mi-wall）。scroll-margin 留着：
+       顶栏现在是 sticky 的两层头，锚点跳转不留出净距离会被它盖住。 */
+.row { scroll-margin-top: 108px; }
 .sentinel { display: flex; justify-content: center; align-items: center; min-height: 44px; }
 .empty { padding: 18px; }
 .hint { font-size: 12px; color: var(--mi-text-dim); }
 .formula { font-size: 12px; color: var(--mi-text-dim); font-family: Consolas, monospace; margin: 0 0 8px; }
-/* 推荐流那一节（T7.9/T7.10）。卡片本体沿用 PostCard，这里只管「多出来的那一行」与其容器。 */
-.recommend .rec-row { margin-top: 12px; }
-.recommend .rec-card { border: 1px solid var(--mi-border); border-radius: 12px; padding: 12px 14px; background: rgba(127, 167, 196, 0.04); }
+/* 推荐流那一节（T7.9/T7.10）。卡片本体沿用 PostCard，这里只管「多出来的那一行」与其容器。
+   2026-09-30 改版两条：
+   ① 容器 .mi-card 的白底内衬去掉，让推荐卡直接坐在页面灰底上 —— 白卡里再嵌一排白卡，
+      浅色下两层都看不见边，只剩一片糊。需求 D6 要的「与广场同一形状」正好因此更成立。
+   ② 原来给 .rec-card 加的蓝灰边框/内边距整条删除：它和 PostCard 自己的 .mi-card 打架，
+      会把刚做好的笔记卡压回成一行行列表。 */
+.recommend { background: transparent; border: none; box-shadow: none; padding: 2px 0 0; }
 .rec-why { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0 0; padding-top: 8px; border-top: 1px dashed var(--mi-border); }
 .rec-reason { font-size: 12px; line-height: 1.7; color: var(--mi-mist); }
 .btn-rec-why { flex: none; }
@@ -681,13 +732,13 @@ h2 { margin: 0; font-size: 16px; color: var(--mi-mist); letter-spacing: 1px; }
 .why-pop code { font-family: Consolas, monospace; color: var(--mi-primary); }
 .why-pop .hint { color: var(--mi-text-dim); }
 .topics { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-.topic { border: 1px solid var(--mi-border); border-radius: 10px; padding: 12px 14px; background: rgba(127, 167, 196, 0.06); }
+.topic { border: 1px solid var(--mi-hairline); border-radius: 12px; padding: 12px 14px; background: var(--mi-mist-bg); }
 .t-name { font-weight: 700; color: var(--mi-primary); }
 .t-desc { font-size: 12px; color: var(--mi-text-dim); margin: 6px 0; min-height: 32px; }
 .t-meta { display: flex; gap: 12px; font-size: 12px; color: var(--mi-mist); }
 .sec-ops { display: flex; align-items: center; gap: 4px; }
 .topic-link { cursor: pointer; }
-.topic-link:hover { border-color: var(--mi-primary); }
+.topic-link:hover { border-color: var(--mi-primary-line); background: var(--mi-primary-soft); box-shadow: var(--mi-shadow-sm); }
 .t-go { margin-left: auto; font-size: 12px; color: var(--mi-mist); }
 .dlg-line { margin: 10px 0 0; line-height: 1.8; }
 .dlg-body { margin: 4px 0 0; font-size: 13px; line-height: 1.7; }

@@ -217,9 +217,11 @@ const SLEEPS = [
 ]
 // 后端 EmotionProfileService.ALLOWED_RANGES = {7,30,90}，传别的直接 10001，所以这里不给第三个入口。
 const RANGES = [7, 30, 90]
+// 值与 theme.css 的 --mi-joy / --mi-trust / ... 同源（浅底压暗版）。ECharts 拿不到 CSS 变量，
+// 只能在这里抄一份，所以这两处必须一起改。
 const EMOTION_COLOR = {
-  joy: '#F2C14E', trust: '#7FB3A6', anger: '#D9534F', sadness: '#5B7C99',
-  fear: '#8E6BAF', disgust: '#7A8B3C', neutral: '#8A94A6'
+  joy: '#d9a21f', trust: '#4e9e88', anger: '#d9534f', sadness: '#4a7290',
+  fear: '#7e5aa0', disgust: '#6b7a32', neutral: '#8a94a6'
 }
 
 const form = reactive({ emotion: 'neutral', intensity: 3, sleepBucket: 2, note: '', recordDate: '' })
@@ -353,12 +355,12 @@ function renderTrend(p) {
     xAxis: {
       type: 'category', boundaryGap: false,
       data: p.trend.map((t) => t.date.slice(5)),
-      axisLabel: { color: '#93A1B8' }, axisLine: { lineStyle: { color: '#24304d' } }
+      axisLabel: { color: '#8f959e' }, axisLine: { lineStyle: { color: '#e0e2e6' } }
     },
     yAxis: {
       type: 'value', min: 1, max: 5, interval: 1,
-      name: '强度', nameTextStyle: { color: '#93A1B8' },
-      axisLabel: { color: '#93A1B8' }, splitLine: { lineStyle: { color: '#24304d' } }
+      name: '强度', nameTextStyle: { color: '#8f959e' },
+      axisLabel: { color: '#8f959e' }, splitLine: { lineStyle: { color: '#ececef' } }
     },
     series: [{
       type: 'line', smooth: true, symbolSize: 9,
@@ -367,8 +369,8 @@ function renderTrend(p) {
         value: t.avgIntensity,
         itemStyle: { color: EMOTION_COLOR[t.label] || EMOTION_COLOR.neutral }
       })),
-      lineStyle: { color: '#7FA7C4', width: 2 },
-      areaStyle: { color: 'rgba(127,167,196,0.10)' }
+      lineStyle: { color: '#4a7290', width: 2 },
+      areaStyle: { color: 'rgba(74,114,144,0.12)' }
     }]
   }, true)
 }
@@ -380,10 +382,10 @@ function renderPie(p) {
   if (!c) return
   c.setOption({
     tooltip: { trigger: 'item', formatter: (x) => x.name + ' ' + x.value + ' 条（' + x.percent + '%）' },
-    legend: { type: 'scroll', bottom: 0, textStyle: { color: '#93A1B8', fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
+    legend: { type: 'scroll', bottom: 0, textStyle: { color: '#5a6068', fontSize: 11 }, itemWidth: 10, itemHeight: 10 },
     series: [{
       type: 'pie', radius: ['38%', '62%'], center: ['50%', '44%'],
-      label: { color: '#93A1B8', fontSize: 11, formatter: '{b} {d}%' },
+      label: { color: '#5a6068', fontSize: 11, formatter: '{b} {d}%' },
       data: p.distribution.map((d) => ({
         name: d.zh, value: d.count,
         itemStyle: { color: EMOTION_COLOR[d.key] || EMOTION_COLOR.neutral }
@@ -394,7 +396,9 @@ function renderPie(p) {
 
 // 词云字号由命中数线性映射，颜色按词面哈希取固定色板 —— 不用 Math.random()：
 // 答辩要在同一页截两次图，随机色会给出两张不一样的图，评审问「这个词为什么变了」我答不上来。
-const WC_PALETTE = ['#F2C14E', '#7FB3A6', '#7FA7C4', '#E8B4A0', '#8E6BAF', '#7A8B3C', '#8A94A6', '#5B7C99']
+// 词云的底色是白卡，上一版直接从深色主题抄来八个亮色，浅底上黄字和白底糊成一片。
+// 这里给的是同一批色相的压暗版，判据没变：仍然是「按词面哈希取固定色板」，不用随机数。
+const WC_PALETTE = ['#d9a21f', '#4e9e88', '#4a7290', '#c0745a', '#7e5aa0', '#6b7a32', '#8a94a6', '#3f6f96']
 function wcColor(word) {
   let h = 2166136261
   const w = String(word)
@@ -457,15 +461,15 @@ function renderCalendar(p) {
     },
     visualMap: {
       min: 0, max: Math.max(1, ...data.map((d) => d[1])), show: false,
-      inRange: { color: ['#2b3d5c', '#5B7C99', '#8E6BAF'] }
+      inRange: { color: ['#dbe7f3', '#4a7290', '#7e5aa0'] }
     },
     calendar: {
       range: [p.fromDate, p.toDate], cellSize: ['auto', 16], left: 40, right: 12, top: 12,
-      itemStyle: { color: '#101a30', borderColor: '#24304d' },
+      itemStyle: { color: '#f2f3f5', borderColor: '#ffffff' },
       splitLine: { show: false },
       yearLabel: { show: false },
-      dayLabel: { color: '#93A1B8', fontSize: 10, firstDay: 1, nameMap: ['日', '一', '二', '三', '四', '五', '六'] },
-      monthLabel: { color: '#93A1B8', fontSize: 11, nameMap: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'] }
+      dayLabel: { color: '#8f959e', fontSize: 10, firstDay: 1, nameMap: ['日', '一', '二', '三', '四', '五', '六'] },
+      monthLabel: { color: '#8f959e', fontSize: 11, nameMap: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'] }
     },
     series: [{ type: 'heatmap', coordinateSystem: 'calendar', data }]
   }, true)
@@ -568,16 +572,17 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.emo { display: flex; flex-direction: column; gap: 18px; }
+/* 改版：图表要宽度，但不等于整页 1600。居中收到 1280，日历热力图和词云都还够摊开。 */
+.emo { display: flex; flex-direction: column; gap: 18px; max-width: 1280px; margin: 0 auto; }
 .sec-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; gap: 12px; flex-wrap: wrap; }
 .head-r { display: flex; align-items: center; gap: 10px; }
-h2 { margin: 0 0 10px; font-size: 16px; color: var(--mi-mist); letter-spacing: 1px; }
-h3.sub { margin: 18px 0 6px; font-size: 13px; color: var(--mi-mist); font-weight: 600; letter-spacing: 1px; }
+h2 { margin: 0 0 10px; font-size: 16px; font-weight: 700; color: var(--mi-text); }
+h3.sub { margin: 18px 0 6px; font-size: 13px; color: var(--mi-text-2); font-weight: 600; }
 .dim { font-size: 12px; color: var(--mi-text-dim); }
 .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .pick { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px; cursor: pointer;
-        background: rgba(127, 167, 196, 0.06); border: 1px solid var(--mi-border); border-radius: 12px; color: var(--mi-text-dim); }
-.pick.on { border-color: var(--mi-primary); background: rgba(240, 135, 107, 0.12); color: var(--mi-text); }
+        background: var(--mi-mist-bg); border: 1px solid var(--mi-hairline); border-radius: 12px; color: var(--mi-text-dim); }
+.pick.on { border-color: var(--mi-primary); background: var(--mi-primary-soft); color: var(--mi-text); box-shadow: var(--mi-shadow-sm); }
 .face { font-size: 26px; }
 .val { font-size: 11px; font-family: Consolas, monospace; }
 .row { display: flex; align-items: center; gap: 14px; margin: 10px 0; flex-wrap: wrap; }
@@ -589,21 +594,21 @@ h3.sub { margin: 18px 0 6px; font-size: 13px; color: var(--mi-mist); font-weight
 .meta { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 12px; color: var(--mi-text-dim);
         padding-bottom: 4px; border-bottom: 1px dashed var(--mi-border); }
 .chip { color: var(--mi-primary); }
-.chart-err { margin: 0 0 10px; padding: 8px 10px; font-size: 12px; color: #E8B4A0;
-             background: rgba(217, 83, 79, 0.10); border-left: 3px solid #D9534F; border-radius: 6px; }
+.chart-err { margin: 0 0 10px; padding: 8px 10px; font-size: 12px; color: var(--mi-danger-text);
+             background: var(--mi-danger-soft); border-left: 3px solid var(--mi-danger); border-radius: 6px; }
 .chart { width: 100%; height: 260px; }
 .chart.sm { height: 210px; }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
-.accum { padding: 26px 18px; text-align: center; background: rgba(127, 167, 196, 0.06);
+  .accum { padding: 26px 18px; text-align: center; background: var(--mi-mist-bg);
          border: 1px dashed var(--mi-border); border-radius: 12px; }
-.accum-t { margin: 0 0 8px; font-size: 15px; color: var(--mi-mist); letter-spacing: 2px; }
+.accum-t { margin: 0 0 8px; font-size: 15px; color: var(--mi-text-2); letter-spacing: 1px; }
 .legend-src { margin-top: 12px; font-size: 12px; }
 .wk-range { margin: 0 0 8px; font-size: 13px; color: var(--mi-text-dim); display: flex; align-items: center; gap: 10px; }
 .summary { margin: 0 0 10px; font-size: 14px; line-height: 2; color: var(--mi-text); white-space: pre-wrap; }
 .nums { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--mi-text-dim); }
 /* 分享那一行的两种口径：灰字是说明，带 bad 的是「这次没成功」——
    两者用同一个颜色就会让用户分不清点到了什么。 */
-.dim.bad { color: #E8B4A0; }
+.dim.bad { color: var(--mi-danger-text); }
 .steps { margin: 0; padding-left: 20px; line-height: 2; font-size: 13px; }
 .steps code { font-family: Consolas, monospace; font-size: 12px; color: var(--mi-mist); }
 </style>

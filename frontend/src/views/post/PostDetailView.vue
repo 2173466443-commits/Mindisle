@@ -114,8 +114,8 @@
       <stage-notice v-else-if="similarError" :code="similarError" stage="7"
                     api-name="GET /api/posts/{id}/similar" :extra="similarExtra" />
       <template v-else>
-        <div v-for="row in similar" :key="row.id" class="sim-row">
-          <post-card class="sim-card" :item="row" :dismissable="false">
+        <div class="mi-wall">
+          <post-card v-for="row in similar" :key="row.id" class="sim-card sim-row" :item="row" :dismissable="false">
             <template #reason>
               <div class="sim-why">
                 <span class="sim-reason">{{ row.recReason || '后端这条没给理由（reason 为空），页面不替它编。' }}</span>
@@ -602,13 +602,15 @@ async function submitReport() {
 </script>
 
 <style scoped>
-.detail { display: flex; flex-direction: column; gap: 18px; }
-.body { max-width: 820px; }
+/* 改版：主内容列居中收窄到 1200（mi-main 放宽到 1600 之后，不居中会让正文卡靠左、右边空一大片）。
+   「看了又看」那张墙铺满这 1200，正文卡自己再收到 820 并居中 —— 读起来是一栏，扫一眼是一墙。 */
+.detail { display: flex; flex-direction: column; gap: 18px; max-width: 1200px; margin: 0 auto; }
+.body { max-width: 820px; width: 100%; margin: 0 auto; }
 .head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.who { font-size: 13px; font-weight: 700; color: var(--mi-mist); }
+.who { font-size: 13px; font-weight: 600; color: var(--mi-text-2); }
 .dot, .time { font-size: 12px; color: var(--mi-text-dim); }
 .destroy { font-size: 12px; color: var(--mi-primary); }
-.title { margin: 14px 0 10px; font-size: 22px; line-height: 1.5; }
+.title { margin: 14px 0 10px; font-size: 24px; line-height: 1.5; font-weight: 700; }
 .content { font-size: 15px; line-height: 2; white-space: pre-wrap; word-break: break-word; color: var(--mi-text); }
 .imgs { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
 .img { width: 168px; height: 168px; border-radius: 10px; border: 1px solid var(--mi-border); }
@@ -632,10 +634,9 @@ async function submitReport() {
 .report-receipt { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 /* 「看了又看」这张卡（T7.16）。刻意不做成和正文一样的宽度上限之外的样式：
    它读起来就是正文的下一段，所以间距、字号都跟着正文那张卡走。 */
-.similar h2.sim-h { margin: 0; font-size: 16px; color: var(--mi-mist); letter-spacing: 1px; }
+.similar h2.sim-h { margin: 0; font-size: 16px; font-weight: 700; color: var(--mi-text); }
 .sim-note { margin: 0 0 10px; line-height: 1.8; }
 .sim-row { margin-top: 10px; }
-.sim-card { border: 1px solid var(--mi-border); border-radius: 12px; padding: 12px 14px; background: rgba(127, 167, 196, 0.04); }
 .sim-why { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--mi-border); }
 .sim-reason { font-size: 12px; line-height: 1.7; color: var(--mi-mist); }
 .sim-ch { flex: none; font-size: 12px; color: var(--mi-text-dim); }
@@ -659,5 +660,5 @@ async function submitReport() {
 .evi-imgs { display: flex; gap: 10px; margin-top: 12px; }
 .evi-thumb { position: relative; }
 .evi-img { width: 92px; height: 92px; border-radius: 8px; border: 1px solid var(--mi-border); }
-.evi-rm { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; border: none; border-radius: 50%; background: var(--mi-primary); color: #1b1206; line-height: 18px; font-size: 14px; cursor: pointer; }
+.evi-rm { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; border: none; border-radius: 50%; background: var(--mi-primary); color: var(--mi-on-primary); line-height: 18px; font-size: 14px; cursor: pointer; }
 </style>

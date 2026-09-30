@@ -416,9 +416,9 @@ onUnmounted(() => {
 <style scoped>
 .composer { display: flex; flex-direction: column; gap: 12px; }
 .sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-h2 { margin: 0; font-size: 16px; color: var(--mi-mist); letter-spacing: 1px; }
+h2 { margin: 0; font-size: 16px; font-weight: 700; color: var(--mi-text); }
 .type-note { margin: 0; font-size: 12px; color: var(--mi-text-dim); }
-.preset-note { margin: 0; font-size: 12px; line-height: 1.7; color: var(--mi-warn, #e0a33e); }
+.preset-note { margin: 0; font-size: 12px; line-height: 1.7; color: var(--mi-warn); }
 .title-input { max-width: 620px; }
 .pre-line { margin: 0; }
 .pre-body { margin: 4px 0 0; font-size: 13px; line-height: 1.7; }
@@ -433,7 +433,7 @@ h2 { margin: 0; font-size: 16px; color: var(--mi-mist); letter-spacing: 1px; }
 .imgs { display: flex; gap: 10px; flex-wrap: wrap; }
 .thumb { position: relative; width: 84px; text-align: center; }
 .thumb-img { width: 84px; height: 84px; border-radius: 10px; border: 1px solid var(--mi-border); }
-.rm { position: absolute; top: -6px; right: -4px; width: 20px; height: 20px; border-radius: 50%; border: none; background: var(--mi-primary); color: #1b1206; cursor: pointer; line-height: 18px; }
+.rm { position: absolute; top: -6px; right: -4px; width: 20px; height: 20px; border-radius: 50%; border: none; background: var(--mi-primary); color: var(--mi-on-primary); cursor: pointer; line-height: 18px; }
 .dim { display: block; font-size: 11px; color: var(--mi-text-dim); }
 .result { margin-top: 4px; }
 .res-tip { margin: 6px 0 0; font-size: 13px; line-height: 1.7; }

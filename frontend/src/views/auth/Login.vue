@@ -128,7 +128,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.auth { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; background: radial-gradient(1000px 520px at 50% -10%, #1b2a4a 0%, var(--mi-bg) 62%); }
+.auth { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; background: radial-gradient(1000px 520px at 50% -10%, #ffeff1 0%, var(--mi-bg) 62%); }
 .auth-card { width: 420px; max-width: 100%; }
 .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
 .logo { font-size: 34px; }
@@ -136,8 +136,8 @@ h1 { margin: 0; font-size: 26px; letter-spacing: 3px; color: var(--mi-primary); 
 .en { font-size: 13px; color: var(--mi-text-dim); letter-spacing: 1px; }
 .slogan { margin: 4px 0 0; font-size: 12px; color: var(--mi-text-dim); }
 .cap { display: flex; gap: 10px; width: 100%; }
-.cap-img { width: 120px; height: 40px; border-radius: 6px; border: 1px solid var(--mi-border); cursor: pointer; object-fit: cover; background: #fff; }
-.cap-btn { font-size: 12px; color: #333; }
+.cap-img { width: 120px; height: 40px; border-radius: 6px; border: 1px solid var(--mi-border); cursor: pointer; object-fit: cover; background: var(--mi-card); }
+.cap-btn { font-size: 12px; color: var(--mi-text-2); }
 .submit { width: 100%; margin-top: 6px; }
 .foot { display: flex; justify-content: space-between; margin-top: 14px; font-size: 13px; }
 .sos { color: var(--mi-anger); }

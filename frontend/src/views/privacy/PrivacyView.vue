@@ -471,7 +471,7 @@ onUnmounted(() => {
 .h2 { margin: 0 0 6px; font-size: 16px; }
 .h3 { margin: 14px 0 6px; font-size: 13px; color: var(--mi-mist); }
 .dim { color: var(--mi-text-dim); font-size: 12.5px; margin: 6px 0 0; line-height: 1.8; }
-.warn { color: #f0a3a3; font-size: 12.5px; line-height: 1.8; margin: 8px 0 0; }
+.warn { color: var(--mi-danger-text); font-size: 12.5px; line-height: 1.8; margin: 8px 0 0; }
 .ops { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; }
 .blk { margin-top: 14px; }
 .row2 { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 10px 0 12px; }

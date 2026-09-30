@@ -396,7 +396,7 @@ defineExpose({ reload })
 .ops { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .grow { flex: 1; }
 .len { font-size: 12px; color: var(--mi-text-dim); }
-.len.over { color: #d84a4a; font-weight: 700; }
+.len.over { color: var(--mi-danger-text); font-weight: 700; }
 .tip-line { margin: 8px 0 0; font-size: 13px; color: var(--mi-primary); }
 .hint { margin: 6px 0 0; font-size: 12px; line-height: 1.8; color: var(--mi-text-dim); }
 .footnote { margin: 14px 0 0; font-size: 12px; line-height: 1.9; color: var(--mi-text-dim); }

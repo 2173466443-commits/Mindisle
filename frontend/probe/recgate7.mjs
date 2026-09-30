@@ -1,6 +1,11 @@
 // =============================================================================
 // 阶段 7（离线协同过滤 + 情绪加权推荐）收口取证 —— Gate7 A/B/C/D 四线合一
 //
+// 【D 线主题判据 2026-09-30 随需求 Q9 改判，改判后未重跑】主背景钉的值由午夜蓝 rgb(14,22,38)
+// 换成浅灰 rgb(246,246,247)；「三通道 ≥248 即漏白」整条反了（浅色主题下白卡是正确形态），
+// 改成「三通道 ≤60 即深色残留」。docs/gate/阶段7 现存那批图与清单.md 仍是深色版口径的产物，
+// 在重跑之前不能拿来证明浅色新主题。本轮按用户指令不重跑（也不覆盖历史取证）。
+//
 // 【这个文件要证的三件事，对应手册 §10.5 与 §10.6】
 //   D6（§10.5 行 1274）：推荐流连点三次「换一批」不重复；每条卡片带非空理由；
 //       点「不感兴趣」当场消失，并且这一步真的落进三层记账（行为表 / 缓存行 / 邻居联压）。
@@ -706,7 +711,7 @@ async function lineC15 () {
 }
 
 // ===========================================================================
-// D 线 —— 真浏览器（界面层证据：截图 + DOM 判据 + 漏白 + 控制台红字）
+// D 线 —— 真浏览器（界面层证据：截图 + DOM 判据 + 深色残留 + 控制台红字）
 // ===========================================================================
 // 【为什么接口线全绿还要再跑这一条】阶段 3 那颗最贵的雷：npm run build exit 0、
 // 冒烟 246 项全绿、页面照样白屏（TopicDetailView 调了组件里根本不存在的 fmtHot）。
@@ -714,8 +719,8 @@ async function lineC15 () {
 // 都挂一条能失败的判据：判据不成立就进 FAIL、影响退出码，不留「拍了但没人核对」的图。
 // 【令牌只能用 addInitScript 种】路由守卫读的是 localStorage 的 mindisle_token，
 // goto 之后再塞会先被弹回 /login 一趟，回来时人已经在另一个页面上，判据拍不到东西。
-// 【这一线的红字与漏白都算账】.el-message / .el-popper 这些是 Element Plus 自己画背景
-// 的组件，theme.css 只覆盖了少数 CSS 变量，所以「深色主题统一」必须逐类量一遍；
+// 【这一线的红字与深色残留都算账】.el-message / .el-popper 这些是 Element Plus 自己画背景
+// 的组件，theme.css 只覆盖了少数 CSS 变量，所以「主题统一」必须逐类量一遍；
 // 后六个表面（推荐卡 / 理由行 / 浮层 / 看了又看三件）是阶段 7 新增的，
 // 少列一个就是给新界面留一张免检票。
 const SURFACES = [
@@ -724,7 +729,9 @@ const SURFACES = [
   '.el-radio-button__inner', '.el-tag', '.el-tabs__content', '.el-loading-mask', '.el-drawer',
   '.recommend', '.rec-card', '.rec-why', '.why-pop', '.similar', '.sim-card', '.sim-why'
 ]
-const MI_BG = 'rgb(14, 22, 38)'   // #0E1626 午夜蓝（需求 Q9），与阶段 3 同一口径
+const MI_BG = 'rgb(246, 246, 247)'  // #f6f6f7 —— 需求 Q9 于 2026-09-30 改判后的主背景，与阶段 3 同一口径
+const OLD_DARK_BG = 'rgb(14, 22, 38)' // #0E1626 改判前的午夜蓝：再出现就是深色主题回退
+const DARK_MAX = 60                    // 三通道都 ≤60 的底色视为「深色表面」
 
 // FeedView 的两句「替后端说实话」兜底文案与相似位那句，抄在这里是为了做**反向**判据：
 // 接口给了理由时页面不许显示兜底话，接口没给理由时页面只许显示这两句里对的那一句。
@@ -778,7 +785,9 @@ async function audit (page, label) {
         const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/.exec(cs.backgroundColor)
         if (!m) return
         if (m[4] !== undefined && parseFloat(m[4]) === 0) return
-        if (Number(m[1]) >= 248 && Number(m[2]) >= 248 && Number(m[3]) >= 248) {
+        // 判据方向 2026-09-30 反转（见文件头）：浅色主题下白底是对的，要防的是深色残留
+        const dark = Number(m[1]) <= DARK_MAX && Number(m[2]) <= DARK_MAX && Number(m[3]) <= DARK_MAX
+        if (dark || cs.backgroundColor === OLD_DARK_BG) {
           bad.push(s + ' -> ' + cs.backgroundColor + ' [' + String(el.className).slice(0, 58) + ']')
         }
       })
@@ -787,11 +796,11 @@ async function audit (page, label) {
   }, SURFACES)
   if (found.bg !== MI_BG) {
     leakCount++
-    say('  !! ' + label + ' 主背景不是午夜蓝：' + found.bg)
+    say('  !! ' + label + ' 主背景不是浅灰底：' + found.bg + '（需求 Q9 已改判为 #f6f6f7）')
   }
   if (found.bad.length) {
     leakCount += found.bad.length
-    say('  !! ' + label + ' 漏白表面 ' + found.bad.length + ' 处：' + found.bad.slice(0, 6).join(' ; '))
+    say('  !! ' + label + ' 深色残留表面 ' + found.bad.length + ' 处：' + found.bad.slice(0, 6).join(' ; '))
   }
   return found
 }
@@ -812,7 +821,7 @@ async function snap (page, bag, mark, spec, ok, note) {
   catch (e) { shotNote += '  [截图失败：' + String((e && e.message) || e).slice(0, 90) + ']' }
   if (!pass) {
     say('  !! ' + spec.file + ' 四道闸没过：判据=' + (ok === true ? 'ok' : String(ok)) +
-      ' 文字=' + a.text + '(≥' + spec.minText + ') 漏白=' + a.bad.length + ' 新增红字=' + delta)
+      ' 文字=' + a.text + '(≥' + spec.minText + ') 深色残留=' + a.bad.length + ' 新增红字=' + delta)
   }
   shots.push({ file: spec.file, url: spec.url, desc: spec.desc, chars: a.text, bg: a.bg,
     leaks: a.bad.length, newErrors: delta, judgement: ok === true ? 'PASS' : String(ok), pass, note: shotNote })
@@ -921,7 +930,8 @@ const readWhyDom = (page) => page.evaluate(() => {
     n: el.querySelectorAll('p').length,
     text: clean(el.textContent),
     bg: cs2 ? cs2.backgroundColor : '-',
-    leak: cs2 ? (Number(cs2.backgroundColor.split(',')[0].replace(/^[^\d]+/, '')) >= 248) : false
+    // 键名沿用 leak（历史证据 JSON 里就是它），但 2026-09-30 起含义反转：现在量的是「浮层有没有残留深色底」
+    leak: cs2 ? (() => { const q = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(cs2.backgroundColor); return q ? (Number(q[1]) <= 60 && Number(q[2]) <= 60 && Number(q[3]) <= 60) : false })() : false
   }
 })
 
@@ -1028,7 +1038,7 @@ async function lineD () {
           return el ? String(el.textContent).replace(/\s+/g, ' ').trim() : null
         }, undefined, { timeout: 10000 })
         why = await readWhyDom(page)
-        if (!why) why = { n: 0, text: await h.jsonValue(), bg: '-', leak: false }
+        if (!why) why = { n: 0, text: await h.jsonValue(), bg: '-', leak: false } // leak 含义见 D 线判据注释：深色残留
       } catch (e) { why = await readWhyDom(page) }
       const wantScore = fmtUiScore(chosen.score)
       const okLines = !!why && why.n >= 5
@@ -1202,9 +1212,9 @@ async function lineD () {
   }
   consoleErrCount += bag.console.length + bag.pageerror.length
   const shotPass = shots.length && shots.every((x) => x.pass)
-  check('D8', '本轮 ' + shots.length + ' 张截图四道闸全过（判据 / 文字量 / 漏白 / 新增红字）',
+  check('D8', '本轮 ' + shots.length + ' 张截图四道闸全过（判据 / 文字量 / 深色残留 / 新增红字）',
     shots.length > 0 && shotPass === true,
-    '通过 ' + shots.filter((x) => x.pass).length + '/' + shots.length + '｜累计漏白 ' + leakCount + ' 处')
+    '通过 ' + shots.filter((x) => x.pass).length + '/' + shots.length + '｜累计深色残留 ' + leakCount + ' 处')
   check('D9', '浏览器控制台零红字、零页面异常、零 4xx/5xx 资源（HTTP 429 也算）',
     bag.console.length === 0 && bag.pageerror.length === 0 && bag.http.length === 0,
     'console=' + bag.console.length + ' pageerror=' + bag.pageerror.length + ' http=' + bag.http.length +
@@ -1281,7 +1291,7 @@ function finish () {
   const fails = checks.filter((c) => c.state === 'FAIL')
   say('')
   say('==== 汇总 · 判据 ' + checks.length + ' 条：PASS=' + passN + ' FAIL=' + failN + ' SKIP=' + skipN + ' ====')
-  say('==== 截图 ' + shots.length + ' 张（四道闸过 ' + shots.filter((x) => x.pass).length + ' 张）· 深色漏白 ' +
+  say('==== 截图 ' + shots.length + ' 张（四道闸过 ' + shots.filter((x) => x.pass).length + ' 张）· 深色残留 ' +
     leakCount + ' 处 · 控制台红字与页面异常 ' + consoleErrCount + ' 条 ====')
   say('==== 节流复盘：主动等下一自然分钟 ' + throttle.paced + ' 次 · 撞 429 重试 ' + throttle.retried +
     ' 次 · 放弃 ' + throttle.gaveUp + ' 次 ====')
@@ -1375,7 +1385,7 @@ function writeArtifacts () {
   md.push('- 浏览器：' + (st.browserVersion ? 'Chrome ' + st.browserVersion + '（headless，用系统 Chrome，不下载 playwright 自带浏览器）' : '本轮未启动（NOUI=1 或前置失败，D 线整条 SKIP）'))
   md.push('- 账号：' + DEMO_USER + '(#' + (st.demoId === undefined ? '-' : st.demoId) + '，推荐流与相似位) · ' + ADMIN_USER + '（离线重算）· 口令不落任何产物；DB 侧判据走仓库外 cnf 的只读 SELECT')
   md.push('- 判据 **共 ' + checks.length + ' 条：PASS ' + passN + ' ／ FAIL ' + failN + ' ／ SKIP ' + skipN + '**（SKIP 不计入通过，逐条写明为什么没跑）')
-  md.push('- 截图 **共 ' + shots.length + ' 张，四道闸通过 ' + shotPass + ' 张**（判据 / 文字量 / 深色漏白 / 新增红字）；漏白 ' + leakCount + ' 处；控制台红字与页面异常 ' + consoleErrCount + ' 条；4xx/5xx 资源 ' + (bag.http || []).length + ' 条')
+  md.push('- 截图 **共 ' + shots.length + ' 张，四道闸通过 ' + shotPass + ' 张**（判据 / 文字量 / 深色残留 / 新增红字）；深色残留 ' + leakCount + ' 处；控制台红字与页面异常 ' + consoleErrCount + ' 条；4xx/5xx 资源 ' + (bag.http || []).length + ' 条')
   md.push('- 节流复盘：主动等下一自然分钟 ' + throttle.paced + ' 次 · 撞 10010/429 重试 ' + throttle.retried + ' 次 · 放弃 ' + throttle.gaveUp + ' 次（普通接口 60 次/分/用户是产品行为，判据尊重它，不调高服务端配置）')
   md.push('')
   md.push('## 一、逐条判据（编号对齐手册 §10.5 D6/D7 与 §10.6 T7.16）')
@@ -1386,7 +1396,7 @@ function writeArtifacts () {
   md.push('')
   md.push('## 二、逐张截图')
   md.push('')
-  md.push('| 文件 | 路由 | 文字量 | 主背景 | 漏白 | 新增红字 | 判据 | 结论 | 备注 |')
+  md.push('| 文件 | 路由 | 文字量 | 主背景 | 深色残留 | 新增红字 | 判据 | 结论 | 备注 |')
   md.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- |')
   shots.forEach((s) => md.push('| `' + s.file + '` | `' + mdCell(s.url) + '` | ' + s.chars + ' | ' + mdCell(s.bg) + ' | ' + s.leaks + ' | ' + s.newErrors + ' | ' + mdCell(s.judgement) + ' | ' + (s.pass ? 'PASS' : '**FAIL**') + ' | ' + mdCell(s.note) + ' |'))
   md.push('')

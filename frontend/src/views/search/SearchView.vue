@@ -58,7 +58,7 @@
                 description="空关键词后端直接回 10001，所以这里不发请求，也不预填一份「大家都搜了什么」——热搜要等任务 3.10 的埋点落库才有数据。" />
       <stage-notice v-else-if="errorCode" :code="errorCode" :stage="stage" :api-name="apiName" :extra="listExtra" />
       <template v-else>
-        <div v-loading="loading && items.length === 0" class="list">
+        <div v-loading="loading && items.length === 0" class="list mi-wall">
           <el-empty v-if="!loading && items.length === 0" :image-size="60"
                     description="没有匹配的帖子。换少一点的词试试：这里做的是包含匹配，不是分词，「失眠很难受」搜不到只写了「失眠」的那条。" />
           <post-card v-for="item in items" :key="item.id" :item="item" :dismissable="false" />
@@ -316,7 +316,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.page { max-width: 900px; margin: 0 auto; }
+.page { max-width: 1200px; margin: 0 auto; }
 .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .h1 { margin: 0; font-size: 22px; }
 .ops { display: flex; gap: 4px; flex-shrink: 0; }
@@ -326,19 +326,20 @@ onMounted(() => {
 .modes { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .filters-note { margin: 10px 0 0; }
 .scope { margin: 12px 2px 0; }
-.list { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+/* mi-wall 负责铺卡片（见 theme.css）；这里只留它自己的上间距。 */
+.list { margin-top: 14px; }
 .more { display: flex; justify-content: center; align-items: center; min-height: 44px; }
 .topics { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
-.topic { border: 1px solid var(--mi-border); border-radius: 10px; padding: 12px 14px; background: var(--mi-card); }
+.topic { border: 1px solid var(--mi-hairline); border-radius: 12px; padding: 12px 14px; background: var(--mi-card); box-shadow: var(--mi-shadow-sm); }
 .topic-link { cursor: pointer; }
-.topic-link:hover { border-color: var(--mi-primary); }
+.topic-link:hover { border-color: var(--mi-primary-line); box-shadow: var(--mi-shadow); }
 .t-go { margin-left: auto; font-size: 12px; color: var(--mi-mist); }
 .t-name { font-weight: 700; color: var(--mi-primary); }
 .t-desc { font-size: 12px; color: var(--mi-text-dim); margin: 6px 0; min-height: 32px; }
 .t-meta { display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--mi-mist); flex-wrap: wrap; }
 .users { list-style: none; margin: 14px 0 0; padding: 0; }
-.user { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--mi-border); border-radius: 10px; background: var(--mi-card); cursor: pointer; margin-bottom: 8px; }
-.user:hover { border-color: var(--mi-primary); }
+.user { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--mi-hairline); border-radius: 12px; background: var(--mi-card); box-shadow: var(--mi-shadow-sm); cursor: pointer; margin-bottom: 8px; }
+.user:hover { border-color: var(--mi-primary-line); box-shadow: var(--mi-shadow); }
 .u-name { font-size: 14px; font-weight: 700; color: var(--mi-text); }
 .u-id { font-size: 12px; color: var(--mi-text-dim); flex: 1; }
 .u-go { font-size: 12px; color: var(--mi-mist); }

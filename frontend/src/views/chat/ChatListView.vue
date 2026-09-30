@@ -229,9 +229,9 @@ onMounted(() => {
 .list { padding: 6px 0; display: flex; flex-direction: column; }
 .row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 16px; background: none; border: none; border-bottom: 1px solid var(--mi-border); cursor: pointer; text-align: left; color: inherit; font: inherit; }
 .row:last-child { border-bottom: none; }
-.row:hover { background: rgba(127, 167, 196, 0.07); }
+.row:hover { background: var(--mi-mist-bg); }
 .ava { position: relative; flex: none; }
-.presence { position: absolute; right: 0; bottom: 1px; width: 9px; height: 9px; border-radius: 50%; background: #67c23a; border: 2px solid var(--mi-card); }
+.presence { position: absolute; right: 0; bottom: 1px; width: 9px; height: 9px; border-radius: 50%; background: var(--mi-success); border: 2px solid var(--mi-card); }
 .main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .line1 { display: flex; justify-content: space-between; gap: 10px; }
 .name { font-size: 14px; font-weight: 600; color: var(--mi-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

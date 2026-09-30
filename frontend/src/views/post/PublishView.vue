@@ -107,11 +107,12 @@ onMounted(loadTopics)
 </script>
 
 <style scoped>
-.publish { display: flex; flex-direction: column; gap: 18px; }
+/* 改版：表单不收宽就是一整条 1600 的输入框，字走一行要转头看。居中收到 960。 */
+.publish { display: flex; flex-direction: column; gap: 18px; max-width: 960px; margin: 0 auto; }
 .preset-line { margin: 0; font-size: 13px; line-height: 1.8; }
 .preset-line.is-ok { color: var(--mi-mist); }
 .preset-line.is-checking { color: var(--mi-text-dim); }
-.preset-line.is-miss { color: #e0a33e; }
+.preset-line.is-miss { color: var(--mi-warn); }
 .rules h2 { margin: 0 0 8px; font-size: 16px; color: var(--mi-mist); letter-spacing: 1px; }
 .lines { margin: 0; padding-left: 20px; line-height: 2; font-size: 13px; color: var(--mi-text-dim); }
 .dim { margin: 10px 0 0; font-size: 12px; color: var(--mi-text-dim); }

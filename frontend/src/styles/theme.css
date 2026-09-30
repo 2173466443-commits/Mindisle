@@ -1,91 +1,261 @@
-/* 心屿深色治愈主题（制作步骤文档 §5.8 第 6 条 · 需求 Q9「午夜蓝 #0E1626 + 暖珊瑚 #F0876B」）
-   全站只有这一套深色，没有浅色开关 —— 这是产品决策，不是没做完。 */
+/* ============================================================================
+   心屿 · 设计令牌与全站样式
+   ----------------------------------------------------------------------------
+   【2026-09-30 改版：浅色「笔记墙」主题（用户口头指令，参照小红书 explore 的卡片流）】
+   这一版**覆盖**了制作步骤文档 §5.8 第 6 条 / 需求 Q9 定下的「午夜蓝 #0E1626 + 暖珊瑚 #F0876B」
+   深色口径。深色不是删掉了：它整段留在本文件末尾的 html.dark:root 块里，
+   回退只需要在 src/main.js 里把 document.documentElement.classList.add('dark') 那一行加回来。
+   两件事必须一起看：① 手册 §5.8 与需求分析文档的 Q9 还写着深色，属未回写的口径欠账；
+   ② docs/gate/ 里的历史截图和 frontend/probe/{domprobe,shootgate,recgate7,...}.mjs 的
+   主背景断言钉的是 rgb(14, 22, 38)，改版之后必然打红——那是阶段 8 的连带欠账，不是本轮的 bug。
 
-/* 【2026-09-23 真浏览器取证勘误：为什么 EP 的变量覆盖必须写到 html.dark:root 上】
-   上一版把 Element Plus 的令牌覆盖写在 :root 里，看起来天经地义（它排在 main.js 里 EP 样式的后面）。
-   但 vite.config.js 用了 unplugin-vue-components + ElementPlusResolver：每个用到的组件还会各自
-   import 一份 EP 基础样式，其中那个 :root 令牌块会在 theme.css 之后再注入一次。实测 <style> 注入顺序：
-     0 = EP 基础 :root 令牌块 / 1 = 本文件 / 2 = 第二份 EP 基础 :root 令牌块
-   同特异度后来者胜 —— 于是 --el-color-primary 又变回 #409eff、--el-fill-color-blank 变回 #fff，
-   输入框、文本域、单选按钮组、对话框、通知弹层全是白底，主按钮是 EP 默认蓝，而这一切在 jsdom 里
-   永远看不出来（它不加载 EP 样式，也不跑 CSS 级联）。
-   结论：跟自动导入拼注入顺序是拼不赢的，要拼特异度。html.dark:root 的特异度是 (0,2,1)，
-   恒高于 EP 的 :root(0,1,0) 和它自带的 html.dark(0,1,1)，无论谁先注入都是我们这套值生效。 */
+   【为什么 EP 的变量覆盖必须写到 html 上（上一轮的真浏览器勘误，教训没作废）】
+   vite.config.js 用 unplugin-vue-components + ElementPlusResolver，每个用到的组件还会各自
+   import 一份 EP 基础样式，其中那个 :root 令牌块会在本文件**之后**再注入一次。
+   同特异度后来者胜 —— 于是 --el-color-primary 又变回 #409eff、输入框变回默认底。
+   结论：跟自动导入拼注入顺序拼不赢，要拼特异度。html:root 的特异度是 (0,1,1)，
+   恒高于 EP 的 :root (0,1,0)，无论谁先注入都是我们这套值生效。
+   深色时代用的是 html.dark:root (0,2,1)；浅色下 html 上没有 dark 类，所以这里换成 html:root，
+   而末尾那份深色块仍写 html.dark:root (0,2,1) —— 它一旦挂上类就整体压过浅色块。
+   ========================================================================== */
 
-/* ---- 1 品牌令牌：只有心屿自己用，跟组件库无关，放 :root 就够 ---- */
+/* ---- 1 品牌令牌（只有心屿自己用，与组件库无关） ---- */
 :root {
-  --mi-bg: #0E1626;
-  --mi-card: #16203A;
-  --mi-primary: #F0876B;
-  --mi-mist: #7FA7C4;
-  --mi-text: #E8EEF7;
-  --mi-text-dim: #93A1B8;
-  --mi-border: #24304d;
+  /* 底与面：小红书式的「浅灰底 + 白卡」，卡片靠底色的对比浮起来，不靠重边框 */
+  --mi-bg: #f6f6f7;
+  --mi-bg-elev: #ffffff;
+  --mi-card: #ffffff;
+  --mi-hover: #f2f3f5;
+  --mi-fill: #f2f3f5;
+  --mi-fill-soft: rgba(0, 0, 0, 0.03);
 
-  /* 七色情绪色板（与后端 emotion_label 一致） */
-  --mi-joy: #F2C14E;
-  --mi-trust: #7FB3A6;
-  --mi-anger: #D9534F;
-  --mi-sadness: #5B7C99;
-  --mi-fear: #8E6BAF;
-  --mi-disgust: #7A8B3C;
-  --mi-neutral: #8A94A6;
+  /* 品牌红（小红书 #FF2442）与它的三个层级 */
+  --mi-primary: #ff2442;
+  --mi-primary-hover: #e01f3a;
+  --mi-primary-soft: rgba(255, 36, 66, 0.08);
+  --mi-primary-line: rgba(255, 36, 66, 0.26);
+  --mi-on-primary: #ffffff;
+
+  /* 文字三级 + 辅助蓝灰（--mi-mist 是历史令牌名，很多地方在用，这里换值不改名） */
+  --mi-text: #1f2329;
+  --mi-text-2: #3d434b;
+  --mi-text-dim: #8f959e;
+  --mi-mist: #4e5b6e;
+  --mi-mist-bg: rgba(78, 91, 110, 0.07);
+
+  /* 线与阴影：全站只用一档很轻的投影，卡片之间的分隔交给留白 */
+  --mi-border: #ececef;
+  --mi-border-2: #e0e2e6;
+  --mi-hairline: rgba(0, 0, 0, 0.06);
+  --mi-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --mi-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+  --mi-shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.10);
+  --mi-radius-sm: 10px;
+  --mi-radius: 14px;
+  --mi-radius-lg: 18px;
+
+  /* 语义色（浅底上要读得清，所以比深色版更沉） */
+  --mi-warn: #b8730f;
+  --mi-warn-soft: rgba(224, 163, 62, 0.14);
+  --mi-success: #1f9d55;
+  --mi-danger: #d9534f;
+  --mi-danger-text: #c9403c;
+  --mi-danger-soft: rgba(217, 83, 79, 0.10);
+
+  /* 七色情绪色板（与后端 emotion_label 一致；浅底上统一压暗一档，只当小徽标用） */
+  --mi-joy: #d9a21f;
+  --mi-trust: #4e9e88;
+  --mi-anger: #d9534f;
+  --mi-sadness: #4a7290;
+  --mi-fear: #7e5aa0;
+  --mi-disgust: #6b7a32;
+  --mi-neutral: #8a94a6;
+
+  /* 私信气泡的两块底色：自己发的带一点品牌红，对方发的用中性灰面。
+     浅色下「白卡上的浅红」比「白卡上的rgba(255,36,66,.16)」更实，所以给实色不给半透明。 */
+  --mi-bubble: #f2f3f5;
+  --mi-bubble-me: #ffeef1;
+
+  /* 笔记卡封面的三种「无图占位」底色：树洞 / 求助 / 分享 */
+  --mi-cover-hole: linear-gradient(150deg, #eef1f6 0%, #e3e9f2 100%);
+  --mi-cover-help: linear-gradient(150deg, #ffeef0 0%, #ffdfe4 100%);
+  --mi-cover-normal: linear-gradient(150deg, #f3f5f2 0%, #e8eee7 100%);
 }
 
-/* ---- 2 Element Plus 深色令牌 ----
-   :root 那条是「html 上万一没挂上 dark 类」的兜底，真正保证赢的是 html.dark:root 那条；
-   选择器列表里任一条命中即应用同一份声明，所以两处都拿到同一套值。
-   深色模式下 light-N 是「往背景色里混」（越 light 越暗），dark-2 反而更亮 —— 与 EP 官方 dark 同一约定，
-   否则 hover 出来的浅珊瑚会直接把白底请回来。 */
+/* ---- 2 Element Plus 令牌（浅色） ----
+   html:root 抢特异度，理由见文件头。EP 自带的 light-* 系列在浅色里是「往白色里加黑」，
+   即 light-N 越浅、dark-2 越深，与官方约定同一口径。 */
 :root,
-html.dark:root {
-  --el-color-primary: #F0876B;
-  --el-color-primary-light-3: #AC6556;
-  --el-color-primary-light-5: #7F4F49;
-  --el-color-primary-light-7: #52383B;
-  --el-color-primary-light-8: #3B2D34;
-  --el-color-primary-light-9: #25212D;
-  --el-color-primary-dark-2: #F39F89;
+html:root {
+  --el-color-primary: #ff2442;
+  --el-color-primary-light-3: #ff5b70;
+  --el-color-primary-light-5: #ff8a99;
+  --el-color-primary-light-7: #ffb8c2;
+  --el-color-primary-light-8: #ffd0d7;
+  --el-color-primary-light-9: #ffe8ec;
+  --el-color-primary-dark-2: #d91f3a;
 
-  --el-bg-color: #16203A;
-  --el-bg-color-page: #0E1626;
-  --el-bg-color-overlay: #1B2745;
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: #f6f6f7;
+  --el-bg-color-overlay: #ffffff;
 
-  --el-text-color-primary: #E8EEF7;
-  --el-text-color-regular: #CBD6E6;
-  --el-text-color-secondary: #93A1B8;
-  --el-text-color-placeholder: #6D7F99;
-  --el-text-color-disabled: #5A6A80;
+  --el-text-color-primary: #1f2329;
+  --el-text-color-regular: #3d434b;
+  --el-text-color-secondary: #8f959e;
+  --el-text-color-placeholder: #a8adb5;
+  --el-text-color-disabled: #c4c8cf;
 
-  --el-border-color: #24304D;
-  --el-border-color-light: #24304D;
-  --el-border-color-lighter: #1F2A44;
-  --el-border-color-extra-light: #1B2540;
-  --el-border-color-dark: #2C3B5E;
-  --el-border-color-darker: #33436B;
+  --el-border-color: #e0e2e6;
+  --el-border-color-light: #e6e8eb;
+  --el-border-color-lighter: #eceef1;
+  --el-border-color-extra-light: #f2f3f5;
+  --el-border-color-dark: #d4d7dc;
+  --el-border-color-darker: #c4c8cf;
 
-  --el-fill-color: #1C2942;
-  --el-fill-color-light: #1A2540;
-  --el-fill-color-lighter: #18223C;
-  --el-fill-color-extra-light: #172038;
-  --el-fill-color-dark: #21304C;
-  --el-fill-color-darker: #263754;
-  --el-fill-color-blank: #16203A;
+  --el-fill-color: #f2f3f5;
+  --el-fill-color-light: #f5f6f7;
+  --el-fill-color-lighter: #f8f9fa;
+  --el-fill-color-extra-light: #fafbfc;
+  --el-fill-color-dark: #ebedf0;
+  --el-fill-color-darker: #e2e5ea;
+  --el-fill-color-blank: #ffffff;
 
-  --el-mask-color: rgba(14, 22, 38, 0.75);
+  --el-mask-color: rgba(255, 255, 255, 0.86);
+  --el-box-shadow-light: 0 2px 10px rgba(0, 0, 0, 0.06);
+  --el-box-shadow-lighter: 0 1px 4px rgba(0, 0, 0, 0.05);
+
+  --el-border-radius-base: 8px;
+  --el-font-size-base: 14px;
 }
 
+/* ---- 3 全站基座 ---- */
+html { color-scheme: light; }
 html, body, #app { height: 100%; }
 body {
   margin: 0;
   background: var(--mi-bg);
   color: var(--mi-text);
-  font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', system-ui, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
-a { color: var(--mi-mist); }
+a { color: var(--mi-text); text-decoration: none; }
+a:hover { color: var(--mi-primary); }
+::selection { background: var(--mi-primary-soft); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #d6d8dc; border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #b9bcc2; background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ---- 4 公共件：卡片 / 笔记墙 / 小徽标 ----
+   .mi-card 全站有 40+ 处在用，改这里等于改全站，不要跑到组件里一张张改底色。 */
 .mi-card {
   background: var(--mi-card);
-  border: 1px solid var(--mi-border);
-  border-radius: 14px;
+  border: 1px solid var(--mi-hairline);
+  border-radius: var(--mi-radius);
   padding: 18px;
+  box-shadow: var(--mi-shadow-sm);
 }
+
+/* 笔记墙：一行等高、卡片按列铺开（1/2/3/4/5 列跟着容器宽度走）。
+   刻意用 grid 而不是 CSS columns：columns 在「加载更多」时会把已经看过的卡片重新排一遍，
+   用户手指刚停住、整屏内容跳位；grid 只会把新行追加在下面。 */
+.mi-wall {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+/* 空态/骨架屏要铺满整行：它们不是一张笔记卡，被塞进 1/5 宽会变成一条窄缝。 */
+.mi-wall > .el-empty,
+.mi-wall > .el-skeleton,
+.mi-wall > .mi-stage { grid-column: 1 / -1; }
+/* 列数交给 auto-fill 按「容器」宽度算，不是按视口：详情页把墙放进 1200 的容器里时，
+   视口媒体查询会照样铺 5 列、把卡压成 220px 的窄条。minmax 的下限 268px 是量出来的，
+   它复现的正是原来 2/3/4/5 那一格阶梯（760→2 列、1080→3、1280→4、1600→5）。 */
+@media (min-width: 760px) { .mi-wall { grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 14px; } }
+
+.mi-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 8px; border-radius: 999px; font-size: 12px; line-height: 18px;
+  background: rgba(0, 0, 0, 0.05); color: var(--mi-text-2);
+}
+.mi-chip.is-primary { background: var(--mi-primary-soft); color: var(--mi-primary); }
+.mi-chip.is-warn { background: var(--mi-warn-soft); color: var(--mi-warn); }
+.mi-chip.is-danger { background: var(--mi-danger-soft); color: var(--mi-danger-text); }
+.mi-chip.is-ghost { background: rgba(0, 0, 0, 0.28); color: #fff; backdrop-filter: blur(2px); }
+
+/* 首字母头像：列表项里没有头像 URL（后端 PostListItem 不出这个字段），
+   所以画一个字母圆而不是 el-avatar 的占位灰。 */
+.mi-avatar {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; color: #fff;
+  background: linear-gradient(140deg, #8fa3b8, #6b7f95);
+}
+.mi-avatar.is-anon { background: linear-gradient(140deg, #c2c8d0, #9aa2ac); }
+
+/* ---- 5 Element Plus 的表面打磨（只改观感，不动 DOM 结构） ---- */
+/* 单选按钮组（筛选 Tab 全站都是它）→ 小红书式胶囊：未选无底、选中浅红底红字。
+   EP 用 box-shadow 画相邻按钮之间那道 1px 接缝，胶囊之间不该有缝，所以这里必须 !important 掉。 */
+.el-radio-group { gap: 2px; }
+.el-radio-button__inner {
+  background: transparent; color: var(--mi-text-dim);
+  border-color: transparent; border-radius: 999px !important;
+  padding: 6px 14px; font-size: 13px; font-weight: 500;
+  box-shadow: none !important;
+}
+.el-radio-button__original-radio:checked + .el-radio-button__inner {
+  background: var(--mi-primary-soft); color: var(--mi-primary);
+  border-color: transparent; box-shadow: none !important;
+}
+.el-radio-button__inner:hover { color: var(--mi-text); }
+.el-button { border-radius: 999px; font-weight: 500; }
+.el-button--primary.is-plain { background: var(--mi-primary-soft); border-color: var(--mi-primary-line); color: var(--mi-primary); }
+.el-tag { border-radius: 6px; }
+.el-input__wrapper, .el-textarea__inner, .el-select__wrapper { border-radius: 10px; box-shadow: 0 0 0 1px var(--mi-border-2) inset; }
+.el-input__wrapper.is-focus, .el-select__wrapper.is-focused { box-shadow: 0 0 0 1px var(--mi-primary) inset; }
+.el-dialog { border-radius: var(--mi-radius-lg); box-shadow: var(--mi-shadow-lg); }
+.el-popper { border-radius: 12px; }
+.el-image__error, .el-image__placeholder, .el-skeleton { background: var(--mi-fill); }
+.el-empty__description p { color: var(--mi-text-dim); }
+.el-alert { border-radius: 10px; }
+.el-table, .el-descriptions { --el-table-border-color: var(--mi-border); }
+
+/* ---- 6 深色（需求 Q9 原口径）：挂上 html.dark 就整体回到午夜蓝 ----
+   保留的动机不是兼容主义：docs/gate/ 的历史取证图、手册 §5.8 的文字都还指着这套值，
+   删掉它等于让「改版前的证据」和「代码」从此对不上。特异度 (0,2,1) 高于上面的浅色块。 */
+html.dark:root {
+  --mi-bg: #0E1626; --mi-bg-elev: #1B2745; --mi-card: #16203A;
+  --mi-hover: #1C2942; --mi-fill: #1C2942; --mi-fill-soft: rgba(255, 255, 255, 0.05);
+  --mi-primary: #F0876B; --mi-primary-hover: #F39F89;
+  --mi-primary-soft: rgba(240, 135, 107, 0.12); --mi-primary-line: rgba(240, 135, 107, 0.5);
+  --mi-on-primary: #1b1206;
+  --mi-text: #E8EEF7; --mi-text-2: #CBD6E6; --mi-text-dim: #93A1B8;
+  --mi-mist: #7FA7C4; --mi-mist-bg: rgba(127, 167, 196, 0.07);
+  --mi-border: #24304d; --mi-border-2: #2C3B5E; --mi-hairline: #24304d;
+  --mi-shadow-sm: none; --mi-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); --mi-shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.5);
+  --mi-warn: #e0a33e; --mi-warn-soft: rgba(224, 163, 62, 0.16);
+  --mi-success: #7fb3a6; --mi-danger: #D9534F; --mi-danger-text: #f0a3a3; --mi-danger-soft: rgba(217, 83, 79, 0.16);
+  --mi-joy: #F2C14E; --mi-trust: #7FB3A6; --mi-anger: #D9534F; --mi-sadness: #5B7C99;
+  --mi-fear: #8E6BAF; --mi-disgust: #7A8B3C; --mi-neutral: #8A94A6;
+  --mi-bubble: #1C2942; --mi-bubble-me: #2a1c25;
+  --mi-cover-hole: linear-gradient(150deg, #1b2740, #16203A);
+  --mi-cover-help: linear-gradient(150deg, #2a1c25, #1f1826);
+  --mi-cover-normal: linear-gradient(150deg, #1c3040, #16203A);
+
+  --el-color-primary: #F0876B;
+  --el-color-primary-light-3: #AC6556; --el-color-primary-light-5: #7F4F49;
+  --el-color-primary-light-7: #52383B; --el-color-primary-light-8: #3B2D34;
+  --el-color-primary-light-9: #25212D; --el-color-primary-dark-2: #F39F89;
+  --el-bg-color: #16203A; --el-bg-color-page: #0E1626; --el-bg-color-overlay: #1B2745;
+  --el-text-color-primary: #E8EEF7; --el-text-color-regular: #CBD6E6;
+  --el-text-color-secondary: #93A1B8; --el-text-color-placeholder: #6D7F99; --el-text-color-disabled: #5A6A80;
+  --el-border-color: #24304D; --el-border-color-light: #24304D; --el-border-color-lighter: #1F2A44;
+  --el-border-color-extra-light: #1B2540; --el-border-color-dark: #2C3B5E; --el-border-color-darker: #33436B;
+  --el-fill-color: #1C2942; --el-fill-color-light: #1A2540; --el-fill-color-lighter: #18223C;
+  --el-fill-color-extra-light: #172038; --el-fill-color-dark: #21304C; --el-fill-color-darker: #263754;
+  --el-fill-color-blank: #16203A;
+  --el-mask-color: rgba(14, 22, 38, 0.75);
+}
+html.dark { color-scheme: dark; }

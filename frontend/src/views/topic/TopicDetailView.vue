@@ -51,7 +51,7 @@
                     :extra="listExtra" />
       <template v-else>
         <p v-if="!items.length && !loading" class="hint empty">{{ emptyLine }}</p>
-        <div v-else class="list">
+        <div v-else class="list mi-wall">
           <post-card v-for="item in items" :key="item.id" :item="item" :dismissable="false" />
         </div>
         <div class="more">
@@ -236,12 +236,12 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.page { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.page { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
 .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .h1 { margin: 0; font-size: 22px; }
 .ops { display: flex; gap: 4px; flex-shrink: 0; }
 .hero { display: flex; align-items: flex-start; gap: 14px; }
-.cover { width: 84px; height: 84px; border-radius: 14px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, rgba(127, 167, 196, 0.35), rgba(240, 180, 120, 0.28)); }
+.cover { width: 84px; height: 84px; border-radius: 14px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #e8eff7, #fdeede); }
 .cover-img { background-color: transparent; }
 .hash { font-size: 34px; font-weight: 700; color: var(--mi-primary); opacity: 0.75; }
 .hero-main { flex: 1 1 auto; min-width: 0; }
@@ -251,7 +251,7 @@ onMounted(() => {
 .hero-op { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
 .flow { padding: 14px 18px; }
 .tabs { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.list { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.list { margin-top: 14px; }
 .more { display: flex; justify-content: center; align-items: center; min-height: 44px; }
 .hint { font-size: 12px; color: var(--mi-text-dim); }
 .empty { padding: 18px 0; line-height: 1.9; }

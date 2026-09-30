@@ -55,7 +55,7 @@
     <stage-notice v-else-if="errorCode" :code="errorCode" stage="3" api-name="GET /api/users/:id/posts" :extra="listExtra" />
 
     <template v-else>
-      <div v-loading="loading && items.length === 0" class="list">
+      <div v-loading="loading && items.length === 0" class="list mi-wall">
         <el-empty v-if="!loading && items.length === 0"
                   description="这里还没有可展示的公开帖子。对方发过但选择仅自己可见的内容不会出现在别人主页上。" />
         <post-card v-for="item in items" :key="item.id" :item="item" show-status :dismissable="false" />
@@ -213,12 +213,12 @@ function goFeed() {
 </script>
 
 <style scoped>
-.page { max-width: 900px; margin: 0 auto; }
+.page { max-width: 1200px; margin: 0 auto; }
 .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .h1 { margin: 0; font-size: 22px; }
-.h2 { margin: 0 0 8px; font-size: 16px; color: var(--mi-mist); }
+.h2 { margin: 0 0 8px; font-size: 16px; font-weight: 700; color: var(--mi-text); }
 .ops { display: flex; gap: 4px; flex-shrink: 0; }
-.list { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.list { margin-top: 14px; }
 .more { display: flex; justify-content: center; align-items: center; min-height: 44px; }
 .blk { margin-top: 14px; }
 .para { margin: 0 0 8px; font-size: 13px; line-height: 1.9; color: var(--mi-text-dim); }

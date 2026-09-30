@@ -30,13 +30,13 @@ defineProps({
 </script>
 
 <style scoped>
-.crisis { border: 1px solid rgba(240, 135, 107, 0.5); background: rgba(240, 135, 107, 0.1); border-radius: 12px; padding: 10px 12px; margin-top: 10px; }
+.crisis { border: 1px solid var(--mi-primary-line); background: var(--mi-primary-soft); border-radius: 12px; padding: 10px 12px; margin-top: 10px; }
 .row { display: flex; align-items: flex-start; gap: 10px; }
 .ico { font-size: 18px; line-height: 1.4; }
 .txt { flex: 1; min-width: 0; }
 .t { margin: 0; font-size: 13px; font-weight: 700; color: var(--mi-primary); }
 .d { margin: 4px 0 0; font-size: 12px; line-height: 1.7; color: var(--mi-text-dim); }
-.tel { flex: none; display: inline-block; padding: 6px 12px; border-radius: 999px; background: var(--mi-primary); color: #1b1206; font-weight: 700; text-decoration: none; font-size: 14px; letter-spacing: 1px; }
+.tel { flex: none; display: inline-block; padding: 6px 12px; border-radius: 999px; background: var(--mi-primary); color: var(--mi-on-primary); font-weight: 700; text-decoration: none; font-size: 14px; letter-spacing: 1px; }
 .lv-inline .d { display: none; }
 .lv-inline { padding: 8px 10px; }
 .lv-inline .tel { padding: 4px 10px; font-size: 13px; }
