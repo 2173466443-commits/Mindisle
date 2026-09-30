@@ -1,5 +1,5 @@
 情绪通道占比与一致率 · 线上真实快照（任务 T4.15 后半 / 手册 §7.2 §7.3 / 需求 FR3.2、AR-Emotion）
-生成时间 = 2026-09-28 19:13:45
+生成时间 = 2026-09-29 18:39:11
 来源测试 = backend/src/test/java/com/mindisle/emotion/EmotionChannelAgreementTest.java
 数据来源 = backend/src/test/resources/emotion/emotion_record_snapshot.tsv（真库 emotion_record 的导出快照，文件头有导出 SQL 与时间）
 JDK = 17.0.19 ; 词典 = dut-4.0-mindisle-v1+prior-v1.0
