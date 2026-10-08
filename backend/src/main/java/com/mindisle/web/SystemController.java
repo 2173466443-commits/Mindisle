@@ -54,6 +54,26 @@ public class SystemController {
   /** 求助卡片兜底文案：连数据库都读不到时也必须让用户看到电话，这是 L0 级功能。 */
   static final String FALLBACK_TEXT = "如果你现在很难受，可以拨打 12356 心理援助热线，24 小时都有人接。";
 
+  /**
+   * 共青团青少年服务台（需求分析文档 §2 社会资源行：12355，与 12356 并列）。
+   *
+   * <p>它写死在 Java 里而不是只放在配置里，是因为这一格属于「配置读不到也必须还在」的那一类：
+   * FR10.3 要求 L2/L3 卡片同时给出 12356、12355、校中心三个渠道，前两个是全国固定号码，
+   * 没有任何理由因为一次数据库抖动就从求助页上消失。
+   */
+  static final String YOUTH_HOTLINE = "12355";
+
+  /**
+   * 校心理中心号码的**占位默认值**（FR10.3「管理员可配置，默认示例号码」）。
+   *
+   * <p>为什么不写一个看起来能拨通的号码：项目硬性红线第 4 条要求演示数据 100% 虚构，
+   * 而一个编造的 8 位市话号码有相当概率正好是某个真实机构的总机——求助页上的假号码
+   * 比没有号码更糟，它会在人最需要的时候把人接进一个陌生人的电话里。
+   * 所以这里给的是一个明显不可拨的占位串，并由 {@code campusConfigured=false} 让前端
+   * 明说「这是示例，请管理员在配置中心改成本校实际号码」。
+   */
+  static final String CAMPUS_PLACEHOLDER = "010-0000-0000（示例，待学校心理中心配置）";
+
   private final SysConfigMapper sysConfigMapper;
   private final CacheService cacheService;
   private final MindisleProperties properties;
@@ -110,6 +130,10 @@ public class SystemController {
     String hotline = properties.getCrisis().getHotline();
     String text = FALLBACK_TEXT;
     String display = "L2/L3 置顶卡片";
+    // FR10.3 要求的另外两条渠道：与 hotline 同源（同一段 JSON），缺键就用 Java 常量兜底。
+    String youth = YOUTH_HOTLINE;
+    String campus = CAMPUS_PLACEHOLDER;
+    boolean campusConfigured = false;
     try {
       SysConfig config = sysConfigMapper.findByKey("prompt.crisis_card");
       if (config != null && config.getCfgValue() != null && !config.getCfgValue().isBlank()) {
@@ -117,6 +141,11 @@ public class SystemController {
         hotline = text(node, "hotline", hotline);
         text = text(node, "text", text);
         display = text(node, "display", display);
+        youth = text(node, "youth", youth);
+        campus = text(node, "campus", campus);
+        // 「配置里真的写了本校号码」与「拿的是占位串」必须在接口上可区分，
+        // 否则前端只能靠字符串比对猜，而字符串哪天改了猜就错了。
+        campusConfigured = !CAMPUS_PLACEHOLDER.equals(campus);
         source = "sys_config";
       }
     } catch (Exception e) {
@@ -126,6 +155,9 @@ public class SystemController {
     data.put("hotline", hotline);
     data.put("text", text);
     data.put("display", display);
+    data.put("youth", youth);
+    data.put("campus", campus);
+    data.put("campusConfigured", campusConfigured);
     data.put("source", source);
     return Result.ok(data);
   }

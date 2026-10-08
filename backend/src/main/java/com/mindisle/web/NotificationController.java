@@ -1,6 +1,7 @@
 package com.mindisle.web;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,10 +14,13 @@ import org.springframework.web.bind.annotation.RestController;
 import com.mindisle.common.BizException;
 import com.mindisle.common.ErrorCode;
 import com.mindisle.common.Result;
+import com.mindisle.notify.NotifyPreferenceService;
 import com.mindisle.notify.NotifyService;
 import com.mindisle.notify.dto.MarkReadRequest;
 import com.mindisle.notify.dto.MarkReadView;
 import com.mindisle.notify.dto.NotifyPage;
+import com.mindisle.notify.dto.NotifyPreferenceRequest;
+import com.mindisle.notify.dto.NotifyPreferenceView;
 import com.mindisle.security.AuthUser;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,7 +28,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 /**
- * 通知中心的对外接口（任务 T3.11-b · 需求 FR9.1、FR9.2 · 手册 §6.1 行 3.11、§6.2 U13）。
+ * 通知中心的对外接口（任务 T3.11-b、T3.16 · 需求 FR9.1、FR9.2、FR9.4 · 手册 §6.1 行 3.11、§6.2 U13）。
  *
  * <p><b>为什么是新的一批路径而不是塞进 {@code /api/users/**}</b>：本资源的主语是「我的通知」，
  * 路径里根本不该出现别人的 id——而 {@code /api/users/{id}/...} 那一族的主语是被查看的人。
@@ -32,9 +36,10 @@ import io.swagger.v3.oas.annotations.tags.Tag;
  * 的 @Tag 描述变成一句不完全为真的话，而三处描述必须逐字一致的坑已经踩过一次
  * （见 {@link RelationshipController} 的注释）。所以这里开第 8 个分组 {@code 08-notify 站内通知}。</p>
  *
- * <p><b>两个接口都不接受 user_id</b>：收件人只来自令牌（{@code current.id()}），
+ * <p><b>四个接口都不接受 user_id</b>：收件人只来自令牌（{@code current.id()}），
  * 需求 BR4/A9 的口径与点赞关注一致。写接口在 SQL 层的 WHERE 里也带 user_id，
- * 于是「前端传了别人的通知 id」最多是影响 0 行，不会替别人清掉红点。</p>
+ * 于是「前端传了别人的通知 id」最多是影响 0 行，不会替别人清掉红点，
+ * 也不会替别人改偏好的开关。</p>
  *
  * <p><b>未登录判法照 {@link RelationshipController}</b>：SecurityConfig 已经把 {@code /api/**}
  * 全量要求认证，{@code current == null} 在正常配置下不可达；这里仍然兜一手，
@@ -42,13 +47,16 @@ import io.swagger.v3.oas.annotations.tags.Tag;
  */
 @RestController
 @RequestMapping("/api/notifications")
-@Tag(name = "8 通知", description = "站内通知列表与已读标记（赞 / 评论 / 关注，WebSocket 推送口留到阶段 5）")
+@Tag(name = "8 通知", description = "站内通知列表、已读标记与通知偏好开关（FR9.1/9.2/9.4）")
 public class NotificationController {
 
   private final NotifyService notifyService;
 
-  public NotificationController(NotifyService notifyService) {
+  private final NotifyPreferenceService preferenceService;
+
+  public NotificationController(NotifyService notifyService, NotifyPreferenceService preferenceService) {
     this.notifyService = notifyService;
+    this.preferenceService = preferenceService;
   }
 
   /**
@@ -81,6 +89,36 @@ public class NotificationController {
       @AuthenticationPrincipal AuthUser current) {
     requireLogin(current);
     return Result.ok(notifyService.markRead(current.id(), request, LocalDateTime.now()));
+  }
+
+  /**
+   * 我的通知偏好（需求 FR9.4）。
+   *
+   * <p>八类全给而不是只给「已经动过开关的那几格」：界面要能画出「审核结果这一格是灰的」，
+   * 而库里没有行只说明「没设置过 = 接收」，不说明这一档长什么样。置灰的理由句也一起回，
+   * 让界面念一句话而不是自己编一句「为了你的安全」。</p>
+   */
+  @GetMapping("/preferences")
+  @Operation(summary = "我的通知偏好开关（八类全给，含置灰的三档与置灰理由）")
+  public Result<List<NotifyPreferenceView>> preferences(@AuthenticationPrincipal AuthUser current) {
+    requireLogin(current);
+    return Result.ok(preferenceService.snapshot(current.id()));
+  }
+
+  /**
+   * 保存通知偏好（需求 FR9.4）。
+   *
+   * <p>只提交改动的那几格即可，返回的仍是完整的八格：界面按回执重画，
+   * 不信自己的乐观值。试图关掉审核结果 / 危机预警 / 系统通知回 400/10001，
+   * 判据与理由都在 {@link NotifyPreferenceService#save}。</p>
+   */
+  @PostMapping("/preferences")
+  @Operation(summary = "保存通知偏好开关（只提交改动的那几格；三档不可关，试图关它回 400/10001）")
+  public Result<List<NotifyPreferenceView>> savePreferences(
+      @RequestBody(required = false) NotifyPreferenceRequest request,
+      @AuthenticationPrincipal AuthUser current) {
+    requireLogin(current);
+    return Result.ok(preferenceService.save(current.id(), request).items());
   }
 
   private static void requireLogin(AuthUser current) {

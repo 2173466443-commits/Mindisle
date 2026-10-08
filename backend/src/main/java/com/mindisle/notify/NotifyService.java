@@ -16,6 +16,7 @@ import com.mindisle.notify.dto.NotifyItem;
 import com.mindisle.notify.dto.NotifyPage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -113,12 +114,45 @@ public class NotifyService {
         void onCreated(NotifyMessage row);
     }
 
+    /**
+     * 偏好闸门（任务 T3.16 后半 · 需求 FR9.4「可关闭点赞/评论类打扰」· 手册 §18 Gate3「关闭类仍落库不计红点」）。
+     *
+     * <p>抽成接口而不是让本类直接依赖 {@code NotifyPreferenceService}，理由与 {@link PushHook}
+     * 当年抽口一模一样：<b>把「一件事该不该做」的判定留给外面，写链路本身不掺规则</b>。
+     * 真实现见 {@link NotifyPreferenceService#mutes}；两参构造器用
+     * {@link #ALLOW_ALL}，所以阶段 3 与阶段 5 的既有单测（{@code RecordingNotifyService} 那五个消费者）
+     * 一行都不用改 —— 这条不是偷懒，是刻意让「加偏好」这件事对既有测试零改动，
+     * 免得有人为了过测试去改断言。</p>
+     */
+    @FunctionalInterface
+    public interface PreferenceGate {
+
+        /** 这一类通知对这个人是否「落库但不算未读、并且不实时推」。实现<b>不得抛异常打断业务事务</b>。 */
+        boolean mutes(long userId, String type);
+
+        /** 默认闸门：一类都不关。没有偏好系统时（以及既有单测）走它。 */
+        PreferenceGate ALLOW_ALL = (userId, type) -> false;
+    }
+
     private final NotifyStore store;
     private final PushHook pushHook;
+    private final PreferenceGate gate;
 
+    /** 两参构造：偏好闸门取 {@link PreferenceGate#ALLOW_ALL}。既有单测与「先不接偏好」的部署都走这条。 */
     public NotifyService(NotifyStore store, PushHook pushHook) {
+        this(store, pushHook, PreferenceGate.ALLOW_ALL);
+    }
+
+    /**
+     * Spring 注入用的那一个（{@code @Autowired} 必须写：两个 public 构造器并存时，
+     * 容器不会替我猜哪个是主构造器，猜错的后果是偏好闸门静默变成 ALLOW_ALL ——
+     * 症状是「设置页能改、改了不影响任何一条通知」，正是本类要避免的那件装饰品事故）。
+     */
+    @Autowired
+    public NotifyService(NotifyStore store, PushHook pushHook, PreferenceGate gate) {
         this.store = store;
         this.pushHook = pushHook;
+        this.gate = gate == null ? PreferenceGate.ALLOW_ALL : gate;
     }
 
     private static Map<String, String> labels() {
@@ -209,6 +243,14 @@ public class NotifyService {
      *
      * <p><b>不吞异常</b>（理由见类注释第 3 条）；{@code recipientId <= 0} 直接跳过——
      * 匿名帖的作者 id 一定存在，但「系统帖」这类将来可能出现 0 值，为它写一行永远读不到的通知没有意义。</p>
+     *
+     * <p><b>偏好闸门（T3.16 后半 · 需求 FR9.4）改的只有两件事</b>：{@code is_read} 直接给 1
+     * （于是 {@code countUnread} 数不到、红点不亮）与<b>不触发 {@link PushHook}</b>
+     * （于是一条已经声明不想收的提醒不会弹到屏幕上）。{@code INSERT} 照写 ——
+     * Gate3 的判据原话是「关闭类仍落库不计红点」，用户第二天把开关打开，那批提醒还在列表里。
+     * 闸门放在幂等查重<b>之后</b>：查重比的是「未读的同文案行」，一个人关掉「赞」之后
+     * 库里全是已读行，查重永不命中，于是每一次真实的点赞都留下一行历史 —— 这是对的，
+     * 而把它放到查重之前会得到「关掉之后再打开，只收到第一条赞」那种解释不通的行为。</p>
      */
     private void write(long recipientId, String type, String rawTitle, String rawContent,
                        String refType, long refId) {
@@ -227,10 +269,15 @@ public class NotifyService {
         row.setContent(content == null ? title : content);
         row.setRefType(refType);
         row.setRefId(refId);
-        row.setIsRead(0);
+        boolean muted = gate.mutes(recipientId, type);
+        row.setIsRead(muted ? 1 : 0);
         row.setDeleted(0);
         store.insert(row);
-        pushHook.onCreated(row);
+        if (!muted) {
+            pushHook.onCreated(row);
+        } else {
+            log.debug("通知按偏好落库但不提醒 user={} type={} notifyId={}", recipientId, type, row.getId());
+        }
     }
 
     /**

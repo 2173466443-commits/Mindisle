@@ -49,7 +49,13 @@ const routes = [
       // 详情用 :uid（对方用户 id）而不是消息 id 或自造会话号：后端 PmController 的入参就是对端 user id，
       // 而 NotifyMessage#REF_PM 的 ref_id 也是它 —— 通知跳转和私信入口因此能共用同一条路由。
       { path: 'chat', name: 'chat', component: () => import('@/views/chat/ChatListView.vue'), meta: { requiresAuth: true } },
-      { path: 'chat/:uid', name: 'chat-detail', component: () => import('@/views/chat/ChatDetailView.vue'), meta: { requiresAuth: true } }
+      { path: 'chat/:uid', name: 'chat-detail', component: () => import('@/views/chat/ChatDetailView.vue'), meta: { requiresAuth: true } },
+      // U13 通知中心整页（需求分析文档 §10.1 · 任务 T3.16 欠账 ①，2026-10-08 落地）。
+      // 只要登录、不要 requiresConsent：通知里躺的是「有人赞了你 / 审核结果 / 账号被处置」这类对自己数据的回执，
+      // 给同意闸等于让「撤回敏感信息授权的人」连自己的处置通知都看不到，那与隐私中心（/privacy）刻意不设同意闸是同一条理由。
+      // 路径不带数字 id：通知的收件人只来自 JWT，后端 GET /api/notifications 也不接受 user_id，
+      // 所以这一页没有「别人的通知中心」这个地址，做成 /notifications 才是诚实的。
+      { path: 'notifications', name: 'notifications', component: () => import('@/views/notify/NotificationsView.vue'), meta: { requiresAuth: true } }
     ]
   },
   { path: '/:pathMatch(.*)*', name: 'notfound', component: () => import('@/views/NotFound.vue'), meta: { public: true } }

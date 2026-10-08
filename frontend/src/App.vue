@@ -7,6 +7,7 @@ import { onMounted, onUnmounted, watch } from 'vue'
 import { connectWs, disconnectWs } from '@/composables/useWs'
 import { useUserStore } from '@/stores/user'
 import { usePmStore } from '@/stores/pm'
+import { useNotifyStore } from '@/stores/notify'
 
 // 根组件保持极简：布局由各 layout / view 自己负责，
 // 这样 /help（危机场景）等免登录页不必套主框架。
@@ -23,7 +24,9 @@ import { usePmStore } from '@/stores/pm'
 // 「循环 import 把整个 app 挂不起来」这种一崩崩全站的事故。
 const user = useUserStore()
 const pm = usePmStore()
+const notify = useNotifyStore()
 let unbind = null
+let unbindNotify = null
 
 function syncTransport() {
   if (user.isLogged) {
@@ -31,10 +34,18 @@ function syncTransport() {
     // connectWs 是幂等的（有 client 就直接返回），bindWs 只在这里配一次，
     // 所以「令牌被刷新」那次触发不会把订阅叠成两份。
     if (!unbind) unbind = pm.bindWs()
+    // 通知侧的订阅同样全局唯一一次。pm 那边订的是 /user/queue/notify 的「 unread 与私信角标」，
+    // 这里订的是同一目的地的「逐类提醒 + 列表补拉」，两件事不重叠，
+    // 但**都必须只有一个订阅者**，否则同一帧会被处理两遍：未读数加两次、toast 弹两条。
+    if (!unbindNotify) unbindNotify = notify.bindWs()
   } else {
     if (unbind) {
       unbind()
       unbind = null
+    }
+    if (unbindNotify) {
+      unbindNotify()
+      unbindNotify = null
     }
     disconnectWs()
   }
@@ -52,6 +63,7 @@ watch(() => [user.isLogged, user.token], syncTransport)
 
 onUnmounted(() => {
   if (unbind) unbind()
+  if (unbindNotify) unbindNotify()
   disconnectWs()
 })
 </script>

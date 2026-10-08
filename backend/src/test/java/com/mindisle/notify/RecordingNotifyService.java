@@ -26,7 +26,17 @@ public final class RecordingNotifyService {
     private final NotifyService service;
 
     public RecordingNotifyService() {
-        this.service = new NotifyService(new FakeStore(), pushed::add);
+        this(NotifyService.PreferenceGate.ALLOW_ALL);
+    }
+
+    /**
+     * 带偏好闸门的构造（任务 T3.16 后半）。
+     *
+     * <p>默认那个走 {@code ALLOW_ALL}，于是既有五个消费者（点赞 / 评论 / 关注 / 私信 / 关系）
+     * 的断言一字未改就照旧成立 —— 「加偏好」对它们应当是不可见的。</p>
+     */
+    public RecordingNotifyService(NotifyService.PreferenceGate gate) {
+        this.service = new NotifyService(new FakeStore(), pushed::add, gate);
     }
 
     /** 交给被测服务的那个实例。 */

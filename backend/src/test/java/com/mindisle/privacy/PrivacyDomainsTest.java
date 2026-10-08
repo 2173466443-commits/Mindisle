@@ -160,9 +160,9 @@ class PrivacyDomainsTest {
   // ================================================================== 1. 形状
 
   @Test
-  @DisplayName("注册表共 34 条，表名不重复，每条都写了一句理由")
+  @DisplayName("注册表共 35 条，表名不重复，每条都写了一句理由")
   void registryShapeIsFixed() {
-    assertEquals(34, PrivacyDomains.ALL.size(),
+    assertEquals(35, PrivacyDomains.ALL.size(),
         "登记项数量变了：加表必须同时登记归属方式与处置动作，删表要同步 DDL");
     Set<String> seen = new HashSet<>();
     for (Domain d : PrivacyDomains.ALL) {
@@ -252,10 +252,10 @@ class PrivacyDomainsTest {
   // ================================================================== 4. 导出白名单
 
   @Test
-  @DisplayName("导出集 25 条、禁止集 9 条；user_consent 必须在包里，password 那行必须不在")
+  @DisplayName("导出集 26 条、禁止集 9 条；user_consent 必须在包里，password 那行必须不在")
   void exportWhitelistMatchesRequirement() {
     List<String> exported = tablesOf(PrivacyDomains.exportable());
-    assertEquals(25, exported.size(), "可导出域数量：34 条登记项减去 9 条禁止项");
+    assertEquals(26, exported.size(), "可导出域数量：35 条登记项减去 9 条禁止项（sql/18 的 notify_preference 跟着进导出包，一个人有权知道自己在平台上按过哪些开关）");
     assertTrue(exported.contains("user_consent"),
         "🔴 user_consent 必须随注销一起出包：这张表物理删除后，「已告知且已同意」唯一的举证副本就在用户手里");
     assertTrue(exported.contains("chat_message"));
@@ -271,13 +271,13 @@ class PrivacyDomainsTest {
     assertEquals(expected, new HashSet<>(forbidden),
         "禁止出包的那 9 张表逐条钉：user 因为有 password，export_task 因为包不能含包自己，"
             + "三张留痕表因为描述的是别人的操作，四张全局表因为不属于任何个人");
-    assertEquals(34, exported.size() + forbidden.size());
+    assertEquals(35, exported.size() + forbidden.size());
   }
 
   // ================================================================== 5. 三种处置互斥且穷尽
 
   @Test
-  @DisplayName("DELETE / UNBIND / KEEP 三分区互斥且覆盖全部 34 张表")
+  @DisplayName("DELETE / UNBIND / KEEP 三分区互斥且覆盖全部 35 张表")
   void threeActionsPartitionTheRegistry() {
     List<String> del = tablesOf(PrivacyDomains.deletable());
     List<String> unbind = tablesOf(PrivacyDomains.unbindable());
@@ -287,12 +287,12 @@ class PrivacyDomainsTest {
         keep.add(d.table());
       }
     }
-    assertEquals(34, del.size() + unbind.size() + keep.size(), "三分区没覆盖全部登记项");
+    assertEquals(35, del.size() + unbind.size() + keep.size(), "三分区没覆盖全部登记项");
     Set<String> all = new HashSet<>();
     all.addAll(del);
     all.addAll(unbind);
     all.addAll(keep);
-    assertEquals(34, all.size(), "三分区之间有重叠：同一张表既是删掉又是保留，清除顺序就成了运气");
+    assertEquals(35, all.size(), "三分区之间有重叠：同一张表既是删掉又是保留，清除顺序就成了运气");
     assertEquals(3, unbind.size(), "留痕表就三条，多出来的一定是有人把业务表改成了 UNBIND");
     assertTrue(unbind.containsAll(List.of("admin_op_log", "audit_record", "audit_task")));
     assertTrue(del.contains("alert_ticket"),

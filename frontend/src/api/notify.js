@@ -25,6 +25,26 @@ export const listNotifications = (params) => http.get('/notifications', { params
 /** 标记已读：{ ids: [...] } 或 { all: true } 二选一，都不给后端是 400/10001 而不是「当成全部已读」。 */
 export const markNotificationsRead = (payload) => http.post('/notifications/read', payload)
 
+// ---- 通知偏好（任务 T3.16 后半 · 需求 FR9.4）
+
+/**
+ * 我的八个开关。
+ *
+ * silent：这一格读不到时设置卡要说「没读到」，而不该在开页瞬间糊一条全局红条；
+ * 与列表接口同一个口径。
+ */
+export const getNotifyPreferences = () => http.get('/notifications/preferences', { silent: true })
+
+/**
+ * 保存开关：payload = { toggles: [{ type, enabled }] }，只提交改动的那一两格即可。
+ *
+ * 刻意不 silent：这一条请求失败的含义是「你以为关掉了，其实没有」，
+ * 必须让那次点击当场弹出后端那句理由（比如「审核结果不能关：…」），
+ * 由界面再翻译一遍只会和后端那三档理由句分叉。返回的是后端保存后的完整八格，
+ * 界面按这份回执重画，不信自己的乐观值。
+ */
+export const saveNotifyPreferences = (toggles) => http.post('/notifications/preferences', { toggles })
+
 /**
  * 八类通知的中文标签。
  *

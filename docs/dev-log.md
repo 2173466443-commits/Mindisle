@@ -1391,3 +1391,40 @@ D_表行数  user 43 / post 111 / post_like 16 / user_follow 0
 - ⚠️ §18 里 **Gate0 / Gate2 仍是 ☐／◐ 的真欠账**（`docs/gate/` 只有阶段 3–7 五个目录，阶段 0/1/2 从未建过证据目录），**这不是本轮漏签，不要为「收口好看」翻签**。
 - 🔴 **红线自查**：本轮所有新增文本（README / dev-log / 手册 / 全局日志 / commit msg）**0 处口令明文**；DB 全部走 `sql.ps1 --defaults-extra-file`，口令既不进日志也不进回复。
 
+
+## 2026-10-08 需求 Q9 改判后的四段增量（续 16）—— U1 落地页 / U13 通知中心 / U14 求助页 / U15 通知偏好；最贵的一条是「上一轮把产品缺陷记成了探针缺陷」
+
+用户本轮开场口径：**「不用改，继续写项目就好了。不要总是重复测试。太浪费时间了。」** ⇒ 写进纪律的一条：**既有闸门一条都不重跑**（`shootgate` / `pmgate` / `stage4gate` / `recgate7` / `domprobe` / `shootnc` / `shoothelp` 全部不动，`admin/` 深色与 `论文材料/` 一律不碰），**新写的代码只验一次**。
+
+### 1. 四段产出与「只跑一次」的读数
+
+| 段 | 代码产物 | 现场读数（各一次） |
+| --- | --- | --- |
+| v1.3.3 上半天 | 浅色取证重签（不改产品代码） | `shootgate` 21/21 · 深色残留 0 · 主背景全 `rgb(246,246,247)`；`recgate7` 64/64 + 7 图；`pmgate` 103 PASS；`stage4gate` 63/0；`admin/probe/shoot6` 18/18（**深色口径，故意反着判**） |
+| v1.3.3 下半天 | U1 游客落地页：`CommunityPulseMapper`(128) + `pulse/CommunityPulseService`(236) + `CommunityPulseController`(46) + `views/LandingView.vue`(295) ⇒ `GET /api/system/community-pulse` | `mvn package` exit 0 · `npm run build` exit 0 · `node probe/shootland.mjs` 六断言全过 + 3 图 |
+| v1.3.4 | U13 通知中心整页 `views/notify/NotificationsView.vue`(**443**) + `/notifications`；U14 求助页 `views/help/Help.vue`(**403**) + `SystemController` 补 `youth`/`campus`/`campusConfigured` | `shootnc` + `shoothelp` 各一次 ⇒ **9 张图**入 `docs/gate/首页/` |
+| v1.3.5 | 第 35 张表 `notify_preference` + 后端五件 + `GET`/`POST /api/notifications/preferences` + `PreferenceGate` + 前端 `stores/notify.js`(110→**244**) | `mvn -q test -Dtest=NotifyPreferenceServiceTest,PrivacyDomainsTest` **24 例 / 0 失败**（新测试类 **297 行 14 例**）→ `package` exit 0 → 重启 8080 → curl 五例 → root SQL 验 `like` 单行无重复 → `shootpref` **14 断言 PASS / 4 图** |
+
+### 2. 🔴 本轮最贵：上一轮的写白是错的，这次修的是**产品缺陷**而不是探针缺陷
+
+- **现象**：通知偏好八格开关点下去界面一动不动、「保存」按钮永远灰。上一轮记成「探针该点 `.el-switch__core`」，把缺陷**归给了探针**。
+- **证伪过程**（三支一次性 diag，不猜选择器）：① 手工调 `onToggle(row,false)` 之后 `isDirty(row)` 已返回 `true`，但 `li` 上的 `is-dirty` 类不动；② 包一层 `vnode.props.onChange` 打点，证明 `onChange([false])` **确实被调用**；③ 读 element-plus 源码 —— `isControlled = ref(props.modelValue !== false)`、点击靠根 div 的 `onClick: withModifiers(switchValue,['prevent'])` ⇒ **探针点的元素没错**。三条合起来只有一句结论：**界面真坏**。
+- **病因**：`const draft = reactive({})` + `Object.prototype.hasOwnProperty.call(draft, row.type)`。Vue 的 `getOwnPropertyDescriptor` 陷阱**只在「该键已有 dep」时才登记 HAS 订阅**，而 `&&` 短路使 `draft[row.type]` 从未被本次渲染读过 ⇒ 那一格从未被订阅 ⇒ 写 `draft` 唤不醒重渲染。
+- **修法**：`shallowRef({})` + 整体换对象 + 新增 `clearDraft()`；模板 `@change="function (v) {...}"` 收正规写成 `@change="onToggle(row, $event)"`（编译产物证明旧写法本身有效，**不是病因**，别再把它当原因写白一次）。全仓 grep `@x="function` 只剩这一处。
+- **纪律改写**：「先证伪探针再动产品代码」要加反向的一半 —— **证伪探针靠打点与读库源码，不靠换选择器碰运气**；探针与产品各错一次的成本，远高于多写一次打点。
+
+### 3. 命令与文件纪律（本轮现场踩到 / 现场修好）
+
+- 🔴 **`.gitattributes` 把三份定版文档钉成 CRLF**：`/需求分析文档.md`、`/制作步骤文档.md`、`/同类项目调研与实现方案.md` 都是 `text eol=crlf`，而 `README.md` 走 `* text=auto eol=lf`。本轮改写手册时先按 `join('\n')` 落盘，git 立刻警告「LF will be replaced by CRLF」⇒ 已改回 `join('\r\n')` 并**按字节回读校验**：手册现量 **CRLF 1920 / LF-only 0 / 无 BOM**，另两份 959… 与 637… 行同为全 CRLF。写盘后必查「CRLF 数 == 行数、LF-only == 0」这条不变式（续 15 就记过一次，本轮再犯，说明它必须落在**脚本里**而不是落在文档里）。
+- 🔴 **别拿替换函数当存在性检查**：本轮把 `rep('├─ sql/   …', 'SQLPREFIXOK')` 当「这行在不在」跑，它真的把那一行改了。存在性检查只用 `txt.split(from).length - 1` 计数，**不要 join(to)**。误改当场被回读发现并按逆向替换还原 —— 靠的是「每次写盘立刻回读自检」这条老规矩。
+- **文档引用的脚本必须真的在仓库里**：`shootland` / `shootnc` / `shoothelp` / `shootpref` 此前只在 `E:\codex workspace\_cache` 里跑，README 与手册却写成 `probe/shootxxx.mjs` ⇒ 本轮收进 `frontend/probe/`（并把跑法注释统一为 `cd frontend && node probe/xxx.mjs`）。**引用一个仓库里不存在的文件 = 给下一轮留一份假凭据。**
+- PowerShell 只做只读查询，**写盘一律走 node_repl**（中文 + 反引号在 PS 引号嵌套里被吞过太多次）；`[IO.File]::ReadAllText` 用进程 CWD ⇒ 永远传绝对路径。
+
+### 4. 结转（截至本轮，不藏）
+
+- **T3.16 维持 ◐、Gate3 仍不签 ☑**：唯一欠的是「A、B 等 5 人赞了你」这类聚合文案 —— `notify_message` **没有 actor 列**，要做得先加列并回填。
+- **U1 只做了游客落地页**：需求 U1 完整首页（登录后的个性化入口）与「清理一次性账号 / 探针夹具 + 一份干净演示数据集」仍未做（库里 `smoke_%` + `probe%` 占 `user` 表 93.5%）。
+- `admin/`（5174）**仍是深色工作台**，不在需求 Q9 的改判范围，口径已写白在手册 §5.8 第 6 条与 `docs/gate/阶段6/清单.md`。
+- 阶段 8 队列一条没动：50 并发压测、`rec_run_log` 台账表、Redis 口径重跑（现量 `cacheMode=local`）。
+- 🔴 **红线自查**：本轮所有新增文本（README / dev-log / 手册 / commit msg）**0 处口令明文**；库侧一律走 `sql.ps1 --defaults-extra-file`，口令不进日志也不进回复；求助页的校中心号码是**明显不可拨的占位串**，没有任何编造的真实号码。
+

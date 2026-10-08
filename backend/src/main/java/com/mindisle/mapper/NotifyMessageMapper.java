@@ -44,9 +44,21 @@ public interface NotifyMessageMapper extends BaseMapper<NotifyMessage> {
    *
    * <p>{@code created_at}/{@code updated_at} 不在列清单里，交给 DDL 的 DEFAULT CURRENT_TIMESTAMP(3)，
    * 与 content_report、audit_task 三条写链路同一口径：通知时间是服务端收到事件的那一刻。</p>
+   *
+   * <p><b>{@code is_read} 从 T3.16 后半（需求 FR9.4）开始是入参而不是常量 0</b>：被本人关掉的那一类
+   * 通知要「落库但不计红点」，也就是写一行 {@code is_read=1} 的已读历史。以前这里写死 0，
+   * 加偏好闸门就只剩两条路 —— 要么不写（Gate3 的判据立刻不成立），要么写完再补一条 UPDATE
+   * （两次写、一个事务、还把「这条是自动归档的」和「这条被人点过」压成同一形状）。</p>
+   *
+   * <p>{@code read_at} 用 {@code CASE} 同批给值：<b>只有自动归档的那一行才带已读时间</b>，
+   * 时刻取服务端时间，与 {@code created_at} 同源。为什么不能留 NULL：{@code markRead} 的语义是
+   * 「{@code read_at} 是第一被人读的时刻」，一行 {@code is_read=1} 而 {@code read_at} 为空的记录
+   * 会让将来任何按 read_at 统计「多久被读」的口径撞上 NULL；为什么不能由 Java 传 now 进来：
+   * 这条链路上所有时间都是服务端 DDL 定的，多一个时钟就多一处漂移。</p>
    */
-  @Insert("INSERT INTO notify_message (user_id, type, title, content, ref_type, ref_id, is_read) "
-      + "VALUES (#{userId}, #{type}, #{title}, #{content}, #{refType}, #{refId}, 0)")
+  @Insert("INSERT INTO notify_message (user_id, type, title, content, ref_type, ref_id, is_read, read_at) "
+      + "VALUES (#{userId}, #{type}, #{title}, #{content}, #{refType}, #{refId}, #{isRead}, "
+      + "CASE WHEN #{isRead} = 1 THEN CURRENT_TIMESTAMP(3) ELSE NULL END)")
   @Options(useGeneratedKeys = true, keyProperty = "id")
   int insertOne(NotifyMessage row);
 

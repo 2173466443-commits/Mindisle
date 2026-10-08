@@ -33,6 +33,12 @@ public class NotifyStoreAdapter implements NotifyStore {
     return mapper.findUnreadDuplicate(userId, type, refType, refId, title, content) != null;
   }
 
+  /**
+   * 落一行通知。{@code isRead} 由 {@code NotifyService#write} 按偏好闸门定（0=提醒 / 1=这一类被本人关掉），
+   * 本适配器不掺判断 —— 包括「null 当成 0」这种好心的兜底：{@code NotifyMessage#isRead} 为 null 时
+   * SQL 会插出 NULL 而列是 NOT NULL DEFAULT 0，MySQL 在严格模式下直接报错，
+   * 那比静默把一条该亮的红点写成已读更容易发现（同 {@code PostingQuotaService} 对脏值的口径）。
+   */
   @Override
   public void insert(NotifyMessage row) {
     mapper.insertOne(row);

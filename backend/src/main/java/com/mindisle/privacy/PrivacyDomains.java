@@ -7,7 +7,7 @@ import java.util.Optional;
  * 隐私域注册表：全站「哪些表算个人信息、一行怎么归属于某个人、物理清除时怎么处置」的<b>唯一真值</b>
  * （任务 T4.21 · 需求 FR1.5/FR1.6/BR11 · 手册 §7.5）。
  *
- * <p><b>为什么要把 34 张表写进一个枚举式的注册表，而不是在删除与导出时各写一遍 SQL</b>：
+ * <p><b>为什么要把 35 张表写进一个枚举式的注册表，而不是在删除与导出时各写一遍 SQL</b>：
  * 隐私清除与数据导出是同一件事的两面 —— 一面要「把人身上长出来的行都复制走」，
  * 一面要「把人身上长出来的行都删干净」。这两件事的<b>表清单与归属谓词必须逐字相同</b>，
  * 否则就会出现「导出的包里有 12 条评论、注销后库里还留着 3 条」这种最要命的偏差。
@@ -99,7 +99,7 @@ public final class PrivacyDomains {
    */
   public static final long UNBOUND = 0L;
 
-  /** 34 条登记项。逐表的 owner 列由 {@code sql/*.sql} 的 DDL 与开发库 information_schema 现查确认。 */
+  /** 35 条登记项。逐表的 owner 列由 {@code sql/*.sql} 的 DDL 与开发库 information_schema 现查确认。 */
   public static final List<Domain> ALL = List.of(
       // —— 账号与授权（sql/01 · sql/13）——
       new Domain("user", Link.USER, List.of("id"), null, List.of(), false, Action.DELETE,
@@ -170,6 +170,9 @@ public final class PrivacyDomains {
       // —— 通知（sql/08）——
       new Domain("notify_message", Link.USER, List.of("user_id"), null, List.of(), true, Action.DELETE,
           "站内通知正文"),
+      new Domain("notify_preference", Link.USER, List.of("user_id"), null, List.of(), true, Action.DELETE,
+          "通知偏好（sql/18 · 需求 FR9.4）。<b>进导出包</b>：「这个人主动关过哪几类提醒」是他对自己数据做过的决定，"
+              + "注销时该一起带走；复合主键没有 id 列，而导出与清除都只按 user_id 那一列出谓词，不受影响"),
 
       // —— 危机工单（sql/07）——
       new Domain("alert_ticket", Link.USER, List.of("user_id"), null, List.of(), true, Action.DELETE,

@@ -50,6 +50,10 @@
                   <el-button v-if="notify.unread > 0" link type="primary" :loading="marking" @click="markAll">
                     全部已读
                   </el-button>
+                  <!-- U13 通知中心整页的入口。刻意放在 head 里、且文案不是「全部已读」：
+                       frontend/probe/domprobe.mjs 的 11 号线用 .mi-notify-head button 的文本数组做判据
+                       （点完一键已读要断言「全部已读」这个字符串从数组里消失），多一个别的文案不影响它。 -->
+                  <el-button link class="mi-notify-all" @click="goNotifyCenter">通知中心 ›</el-button>
                 </div>
                 <el-scrollbar max-height="336px">
                   <div v-if="notify.loading && !notify.items.length" class="mi-notify-blank">正在读取…</div>
@@ -178,6 +182,11 @@ function openItem(item) {
   if (item.type === 'crisis') router.push({ name: 'help' }).catch(function () {})
 }
 
+function goNotifyCenter() {
+  if (bell.value && typeof bell.value.hide === 'function') bell.value.hide()
+  router.push({ name: 'notifications' }).catch(function () {})
+}
+
 async function doLogout() {
   try {
     await logout()
@@ -256,6 +265,8 @@ onUnmounted(() => timer && clearInterval(timer))
 .mi-status { display: flex; align-items: center; gap: 12px; }
 .mi-ver { font-size: 12px; color: var(--mi-text-dim); white-space: nowrap; }
 .mi-bell { font-size: 18px; line-height: 1; }
+.mi-notify-all { font-size: 12px; color: var(--mi-text-dim); }
+.mi-notify-all:hover { color: var(--mi-primary); }
 .mi-who { font-size: 13px; color: var(--mi-text-2); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- 第二层：频道导航（文字链 + 选中一条红色下划线，就是小红书的导航长相） ---- */
