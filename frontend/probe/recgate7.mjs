@@ -52,7 +52,15 @@ const CHROME = process.env.GATE7_CHROME ||
   'C:/Users/Drbrain/AppData/Local/Google/Chrome/Application/chrome.exe'
 const WEB = process.env.GATE7_WEB || 'http://127.0.0.1:5173'
 const API = process.env.GATE7_API || 'http://127.0.0.1:8080'
-const BACKEND_LOG = process.env.GATE7_LOG || 'E:/codex workspace/_cache/mindisle-dbtmp/run19b.out'
+// 后端日志的落盘位置随「谁把后端拉起来的」而变，写死一条路径会在换实例后读不到新行
+// （2026-10-08 复跑就栽在这里：默认路径还指着上一批实例的 run19b.out，
+//  C15 于是报「偏移之后新增 0 行」——不是后端没记日志，是探针读错了文件）。
+// 现在按候选列表取第一个真实存在的文件，GATE7_LOG 仍然优先级最高。
+const LOG_CANDIDATES = [
+  'E:/codex workspace/_cache/be.out',
+  'E:/codex workspace/_cache/mindisle-dbtmp/run19b.out'
+]
+const BACKEND_LOG = process.env.GATE7_LOG || LOG_CANDIDATES.find((f) => fs.existsSync(f)) || LOG_CANDIDATES[0]
 const SQL_PS1 = process.env.GATE7_SQL_PS1 || 'E:/codex workspace/_cache/mindisle-dbtmp/sql.ps1'
 const SQL_CNF = process.env.GATE7_SQL_CNF || 'E:/codex workspace/_cache/mindisle-dbtmp/rootpwd.cnf'
 const DESKTOP = { width: 1600, height: 1000 }
@@ -525,9 +533,20 @@ async function lineB () {
     '999→' + rowsFrom(s999.data).length + ' 0→' + rowsFrom(s0.data).length + ' 3→' + rowsFrom(s3.data).length)
 
   // 冷帖：没有 item_similarity 邻居行的公开帖，必须靠同话题 + 质量分榜补出内容（§10.6 第 1 条：不空窗）
-  const coldSql = sqlRows('b8-cold', 'SELECT p.id FROM post p LEFT JOIN item_similarity s ON s.item_id=p.id AND s.deleted=0 ' +
-    "WHERE p.deleted=0 AND p.status='PUBLISHED' AND p.visibility='public' AND p.user_id<>" + st.demoId +
-    ' AND s.item_id IS NULL ORDER BY p.id DESC LIMIT 8;')
+  // 【2026-10-08 修判据】这条捞夹具的 SQL 原来只筛 deleted / status / visibility 三条，
+  // 而接口侧 PostQueryService.visibleTo 与 RecommendMapper.listRecommendablePosts 是五条门槛：
+  // 还要求「树洞未到期 (auto_destroy_at IS NULL OR > NOW())」和「作者 u.deleted=0 AND u.status='ACTIVE'」。
+  // 谓词不一致的后果实测过：ORDER BY p.id DESC 先捞到的 8 条全是已过期的树洞帖，
+  // 它们对 API 本来就是 30001/404（不可见与不存在同形，这是刻意的防枚举口径，不是 bug），
+  // 于是 B8 报成「试了 341,281,… 全部空手而归」——假阳性，锅在探针不在兜底逻辑。
+  // 补齐成同一份五条门槛后，冷帖夹具只剩未到期且作者正常的帖子（本次为 91/61/51/41/1，各出 6 条 hot/content 兜底）。
+  // 仍排除探针自己的 demo 账号：它刚发的夹具帖没有邻居行，会被当成「冷帖」混进池子。
+  const coldSql = sqlRows('b8-cold', 'SELECT p.id FROM post p JOIN `user` u ON u.id = p.user_id ' +
+    'LEFT JOIN item_similarity s ON s.item_id=p.id AND s.deleted=0 ' +
+    "WHERE p.deleted=0 AND p.status='PUBLISHED' AND p.visibility='public' " +
+    'AND (p.auto_destroy_at IS NULL OR p.auto_destroy_at > NOW()) ' +
+    "AND u.deleted=0 AND u.status='ACTIVE' AND s.item_id IS NULL AND p.user_id<>" + st.demoId +
+    ' ORDER BY p.id DESC LIMIT 8;')
   const coldIds = coldSql ? coldSql.data.map((r) => Number(r[0])) : []
   let cold = null
   for (const id of coldIds) {
@@ -574,11 +593,27 @@ async function lineB () {
 // ===========================================================================
 // C 线 —— D7：离线作业可手动触发、健康度可查、「通道占比」日志可查
 // ===========================================================================
+// 日志落盘编码不唯一：控制台直接跑后端时是 Windows GBK，
+// 而 `mvn -o -B spring-boot:run`（.mvn/jvm.config 里带 -Dfile.encoding=UTF-8）落的是 UTF-8。
+// 写死任意一种都会让另一种日志里的中文关键字（「通道占比」「负反馈：用户」）匹配不上，
+// 表现为 C15 假失败。先按 UTF-8 严格解码整份文件判编码，再只对「偏移之后」的字节切片解码，
+// 切片起点往前多取 4 个字节，避免把一个多字节汉字从中间劈开。
+function isUtf8 (buf) {
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(buf)
+    return true
+  } catch (e) {
+    return false
+  }
+}
+
 function logTailFrom (offset) {
   if (!fs.existsSync(BACKEND_LOG)) return null
   const buf = fs.readFileSync(BACKEND_LOG)
-  const dec = new TextDecoder('gbk')
-  const tail = buf.length > offset ? buf.subarray(offset) : Buffer.alloc(0)
+  const utf8 = isUtf8(buf)
+  st.logEncoding = utf8 ? 'UTF-8（-Dfile.encoding=UTF-8 落盘）' : 'GBK（Windows 控制台落盘）'
+  const dec = new TextDecoder(utf8 ? 'utf-8' : 'gbk')
+  const tail = buf.length > offset ? buf.subarray(Math.max(0, offset - 4)) : Buffer.alloc(0)
   return dec.decode(tail)
 }
 
@@ -707,7 +742,7 @@ async function lineC15 () {
   const hasFb = keep.some((l) => /负反馈：用户/.test(l))
   check('C15', '后端日志里能查到「通道占比」与「负反馈：用户」两行（D7 的验收物）',
     hasShare && hasFb, '偏移 ' + st.logOffset + ' 之后新增 ' + keep.length + ' 行推荐类日志：通道占比=' +
-    hasShare + ' 负反馈=' + hasFb + '（GBK 落盘、脚本内解码，原文一字不改地写进 d7-log-excerpt.log）')
+    hasShare + ' 负反馈=' + hasFb + '（' + (st.logEncoding || '未知编码') + '、脚本内解码，原文一字不改地写进 d7-log-excerpt.log）')
 }
 
 // ===========================================================================
@@ -773,7 +808,8 @@ function fmtUiScore (v) {
 let uiBrowser = null
 
 async function audit (page, label) {
-  const found = await page.evaluate((sels) => {
+  const found = await page.evaluate((opt) => {
+    const sels = opt.sels
     const bad = []
     const bg = getComputedStyle(document.body).backgroundColor
     for (const s of sels) {
@@ -786,14 +822,14 @@ async function audit (page, label) {
         if (!m) return
         if (m[4] !== undefined && parseFloat(m[4]) === 0) return
         // 判据方向 2026-09-30 反转（见文件头）：浅色主题下白底是对的，要防的是深色残留
-        const dark = Number(m[1]) <= DARK_MAX && Number(m[2]) <= DARK_MAX && Number(m[3]) <= DARK_MAX
-        if (dark || cs.backgroundColor === OLD_DARK_BG) {
+        const dark = Number(m[1]) <= opt.darkMax && Number(m[2]) <= opt.darkMax && Number(m[3]) <= opt.darkMax
+        if (dark || cs.backgroundColor === opt.oldDarkBg) {
           bad.push(s + ' -> ' + cs.backgroundColor + ' [' + String(el.className).slice(0, 58) + ']')
         }
       })
     }
     return { bg, bad, text: (document.getElementById('app') || document.body).innerText.replace(/\s+/g, ' ').trim().length }
-  }, SURFACES)
+  }, { sels: SURFACES, darkMax: DARK_MAX, oldDarkBg: OLD_DARK_BG })
   if (found.bg !== MI_BG) {
     leakCount++
     say('  !! ' + label + ' 主背景不是浅灰底：' + found.bg + '（需求 Q9 已改判为 #f6f6f7）')
@@ -1334,7 +1370,8 @@ function writeArtifacts () {
   const excerpt = st.logExcerpt || []
   const exHead = [
     '# d7-log-excerpt —— 本轮「手动触发重算」之后后端日志里与推荐有关的新增行（C15 判据的原文）',
-    '# 源文件 ' + BACKEND_LOG + ' · 重算前偏移 ' + st.logOffset + ' 字节 · Windows 控制台按 GBK 落盘，脚本内解码',
+    '# 源文件 ' + BACKEND_LOG + ' · 重算前偏移 ' + st.logOffset + ' 字节 · ' +
+    (st.logEncoding || '未知编码') + '落盘，脚本内解码（编码由整份文件试解码自动判定，不写死）',
     '# 抓取时间 ' + now.toISOString(),
     '# 只留 5 个关键词命中的行（推荐重算完成 / 通道占比 / 负反馈：用户 / 推荐流退热度兜底 / 相似位：拦截），一个字没改，也没挑过。'
   ]

@@ -123,7 +123,7 @@
       <stage-notice v-else-if="recErrorCode" :code="recErrorCode" stage="7" api-name="GET /api/feed/recommend" :extra="recExtra" />
       <template v-else>
         <div class="mi-wall">
-          <post-card v-for="item in recItems" :key="item.id" class="rec-card" :item="item" @dismiss="dismissRecommend(item)">
+          <post-card v-for="item in recItems" :key="item.id" class="rec-card rec-row" :item="item" @dismiss="dismissRecommend(item)">
             <template #reason>
               <div class="rec-why">
                 <span class="rec-reason">{{ item.recReason || recReasonFallback(item) }}</span>

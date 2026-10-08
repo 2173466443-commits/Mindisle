@@ -1,6 +1,6 @@
 {
-  "at": "2026-09-29T05:06:02.225Z",
-  "run": "333760",
+  "at": "2026-10-08T01:37:25.165Z",
+  "run": "415064",
   "api": "http://127.0.0.1:8080",
   "web": "http://127.0.0.1:5173",
   "out": "E:\\codex workspace\\009_心屿AI心理陪伴社区\\docs\\gate\\阶段7",
@@ -37,250 +37,249 @@
   "offline": {
     "statusBefore": {
       "running": false,
-      "lastFinishedAt": "2026-09-29T13:02:06.3233238",
+      "lastFinishedAt": "2026-10-08T09:22:53.3454783",
       "lastSummary": {
-        "qualityRows": 616,
-        "topicRows": 59,
-        "similarityRows": 468,
-        "itemsWithNeighbors": 413,
-        "users": 90,
-        "resultRows": 4500,
+        "qualityRows": 641,
+        "topicRows": 62,
+        "similarityRows": 475,
+        "itemsWithNeighbors": 435,
+        "users": 109,
+        "resultRows": 5450,
         "mode": "emotion-on",
-        "calcMs": 6038,
+        "calcMs": 6704,
         "channelShare": {
-          "itemcf": 679,
-          "explore": 88,
-          "usercf": 101,
-          "hot": 3632
+          "itemcf": 1088,
+          "explore": 63,
+          "hot": 4241,
+          "usercf": 58
         }
       },
       "lastSummaryChannelShare": {
-        "itemcf": 679,
-        "explore": 88,
-        "usercf": 101,
-        "hot": 3632
+        "itemcf": 1088,
+        "explore": 63,
+        "hot": 4241,
+        "usercf": 58
       },
-      "cacheRows": 4492,
-      "similarityRows": 413,
-      "similarityBatchAt": "2026-09-29T13:02:00.285",
+      "cacheRows": 5440,
+      "similarityRows": 435,
+      "similarityBatchAt": "2026-10-08T09:22:46.638",
       "resultTtlMinutes": 90,
       "cacheMode": "local",
-      "now": "2026-09-29T13:05:43.5606629"
+      "now": "2026-10-08T09:37:04.0449785"
     },
     "rebuild": {
       "code": 0,
       "msg": "成功",
-      "wallMs": 6974
+      "wallMs": 8892
     },
-    "calcBefore": "2026-09-29 13:05:35.456",
-    "calcAfter": "2026-09-29 13:05:45.129",
+    "calcBefore": "2026-10-08 09:36:56.686",
+    "calcAfter": "2026-10-08 09:37:05.466",
     "summary": {
-      "qualityRows": 616,
-      "topicRows": 59,
-      "similarityRows": 468,
-      "itemsWithNeighbors": 413,
-      "users": 90,
-      "resultRows": 4500,
+      "qualityRows": 641,
+      "topicRows": 62,
+      "similarityRows": 475,
+      "itemsWithNeighbors": 436,
+      "users": 109,
+      "resultRows": 5450,
       "mode": "emotion-on",
-      "calcMs": 6967,
+      "calcMs": 8884,
       "channelShare": {
-        "itemcf": 679,
-        "explore": 88,
-        "usercf": 102,
-        "hot": 3631
+        "itemcf": 1198,
+        "explore": 63,
+        "hot": 4137,
+        "usercf": 52
       }
     },
     "channelShare": {
-      "itemcf": 679,
-      "explore": 88,
-      "usercf": 102,
-      "hot": 3631
+      "itemcf": 1198,
+      "explore": 63,
+      "hot": 4137,
+      "usercf": 52
     },
     "logLines": 3
   },
   "feed": {
     "ids18": [
-      1104,
-      923,
-      264,
       1052,
-      903,
-      1024,
-      1033,
-      1034,
       1053,
-      892,
       1064,
-      1084,
-      1124,
-      1133,
-      913,
       1134,
+      233,
       1142,
-      1144
+      1144,
+      902,
+      924,
+      222,
+      232,
+      164,
+      903,
+      952,
+      187,
+      972,
+      973,
+      974
     ],
     "dislikeTarget": {
-      "id": 1104,
+      "id": 1052,
       "neighborsInCache": [
         1142,
         1064,
         1053,
-        1124,
-        1133,
+        1114,
         1144
       ]
     },
     "batches": {
       "b1": [
         {
-          "id": 923,
-          "title": "冒烟·匿名树洞",
-          "channel": "itemcf",
-          "reason": "和你读过的内容很像",
-          "score": 0.624697
-        },
-        {
-          "id": 264,
-          "title": "冒烟·匿名树洞",
-          "channel": "itemcf",
-          "reason": "和你读过的内容很像",
-          "score": 0.616078
-        },
-        {
-          "id": 1052,
-          "title": "冒烟·通知靶子",
-          "channel": "itemcf",
-          "reason": "和你读过的内容很像",
-          "score": 0.485129
-        },
-        {
-          "id": 1024,
-          "title": "冒烟·树洞",
-          "channel": "itemcf",
-          "reason": "和你读过的内容很像",
-          "score": 0.469129
-        },
-        {
-          "id": 903,
-          "title": "检索锚甲20260924062739甲公开",
-          "channel": "explore",
-          "reason": "换个口味：一篇你还没读过的帖子",
-          "score": 0.424697
-        },
-        {
-          "id": 1033,
-          "title": "检索锚甲20260928054531甲树洞",
-          "channel": "itemcf",
-          "reason": "和你读过的内容很像",
-          "score": 0.469129
-        }
-      ],
-      "b2": [
-        {
-          "id": 1034,
-          "title": "检索锚乙20260928054531转义靶",
-          "channel": "itemcf",
-          "reason": "和你读过的内容很像",
-          "score": 0.469129
-        },
-        {
           "id": 1053,
           "title": "检索锚甲20260928055418甲公开",
           "channel": "itemcf",
           "reason": "和你读过的内容很像",
-          "score": 0.469129
+          "score": 0.346631
         },
         {
           "id": 1064,
           "title": "冒烟·停留计时",
           "channel": "itemcf",
           "reason": "和你读过的内容很像",
-          "score": 0.469129
-        },
-        {
-          "id": 892,
-          "title": "冒烟·普通帖",
-          "channel": "explore",
-          "reason": "换个口味：#失眠夜 里一篇还没被读过的帖子",
-          "score": 0.170658
-        },
-        {
-          "id": 1084,
-          "title": "检索锚乙20260928055640乙树洞",
-          "channel": "itemcf",
-          "reason": "和你读过的内容很像",
-          "score": 0.469129
-        },
-        {
-          "id": 1124,
-          "title": "冒烟·树洞",
-          "channel": "itemcf",
-          "reason": "和你读过的内容很像",
-          "score": 0.469129
-        }
-      ],
-      "b3": [
-        {
-          "id": 1133,
-          "title": "检索锚甲20260928095000甲树洞",
-          "channel": "itemcf",
-          "reason": "和你读过的内容很像",
-          "score": 0.469129
+          "score": 0.346631
         },
         {
           "id": 1134,
           "title": "检索锚乙20260928095000转义靶",
           "channel": "itemcf",
           "reason": "和你读过的内容很像",
-          "score": 0.469129
-        },
-        {
-          "id": 913,
-          "title": "话题冒烟·树洞20260924062739",
-          "channel": "explore",
-          "reason": "换个口味：#失眠夜 里一篇还没被读过的帖子",
-          "score": 0.170658
+          "score": 0.346631
         },
         {
           "id": 1142,
           "title": "冒烟·停留计时",
           "channel": "itemcf",
           "reason": "和你读过的内容很像",
-          "score": 0.469129
+          "score": 0.346631
+        },
+        {
+          "id": 233,
+          "title": "检索锚甲20260923034221甲公开",
+          "channel": "explore",
+          "reason": "换个口味：一篇你还没读过的帖子",
+          "score": 0.324871
         },
         {
           "id": 1144,
           "title": "情绪周报 · 2026-09-21 ~ 2026-09-27",
           "channel": "itemcf",
           "reason": "和你读过的内容很像",
-          "score": 0.469129
-        },
+          "score": 0.346631
+        }
+      ],
+      "b2": [
         {
           "id": 902,
           "title": "冒烟·通知靶子",
           "channel": "itemcf",
           "reason": "和你读过的内容很像",
-          "score": 0.440697
+          "score": 0.344406
+        },
+        {
+          "id": 924,
+          "title": "冒烟·通知靶子",
+          "channel": "itemcf",
+          "reason": "和你读过的内容很像",
+          "score": 0.344406
+        },
+        {
+          "id": 232,
+          "title": "冒烟·通知靶子",
+          "channel": "itemcf",
+          "reason": "和你读过的内容很像",
+          "score": 0.340871
+        },
+        {
+          "id": 222,
+          "title": "冒烟·普通帖",
+          "channel": "explore",
+          "reason": "换个口味：#失眠夜 里一篇还没被读过的帖子",
+          "score": 0.092918
+        },
+        {
+          "id": 164,
+          "title": "冒烟·通知靶子",
+          "channel": "itemcf",
+          "reason": "和你读过的内容很像",
+          "score": 0.330768
+        },
+        {
+          "id": 903,
+          "title": "检索锚甲20260924062739甲公开",
+          "channel": "itemcf",
+          "reason": "和你读过的内容很像",
+          "score": 0.328406
+        }
+      ],
+      "b3": [
+        {
+          "id": 952,
+          "title": "检索锚乙20260924064348乙公开",
+          "channel": "itemcf",
+          "reason": "和你读过的内容很像",
+          "score": 0.328406
+        },
+        {
+          "id": 972,
+          "title": "检索锚乙20260924064508转义靶",
+          "channel": "itemcf",
+          "reason": "和你读过的内容很像",
+          "score": 0.328406
+        },
+        {
+          "id": 187,
+          "title": "冒烟·普通帖",
+          "channel": "explore",
+          "reason": "换个口味：#失眠夜 里一篇还没被读过的帖子",
+          "score": 0.073472
+        },
+        {
+          "id": 973,
+          "title": "检索锚乙20260924064508对照靶",
+          "channel": "itemcf",
+          "reason": "和你读过的内容很像",
+          "score": 0.328406
+        },
+        {
+          "id": 974,
+          "title": "检索锚乙20260924064508乙公开",
+          "channel": "itemcf",
+          "reason": "和你读过的内容很像",
+          "score": 0.328406
+        },
+        {
+          "id": 992,
+          "title": "探针关注238535445甲",
+          "channel": "itemcf",
+          "reason": "和你读过的内容很像",
+          "score": 0.328406
         }
       ],
       "dom3": {
         "n": 6,
         "ids": [
-          "1133",
-          "1134",
-          "913",
-          "1142",
-          "1144",
-          "902"
+          "952",
+          "972",
+          "187",
+          "973",
+          "974",
+          "992"
         ],
         "idsComplete": true,
         "titles": [
-          "检索锚甲20260928095000甲树洞",
-          "检索锚乙20260928095000转义靶",
-          "话题冒烟·树洞20260924062739",
-          "冒烟·停留计时",
-          "情绪周报 · 2026-09-21 ~ 2026-09-27",
-          "冒烟·通知靶子"
+          "检索锚乙20260924064348乙公开",
+          "检索锚乙20260924064508转义靶",
+          "冒烟·普通帖",
+          "检索锚乙20260924064508对照靶",
+          "检索锚乙20260924064508乙公开",
+          "探针关注238535445甲"
         ],
         "reasons": [
           "和你读过的内容很像",
@@ -316,170 +315,167 @@
     "secHint": null,
     "dismiss": {
       "target": {
-        "id": 1133,
-        "title": "检索锚甲20260928095000甲树洞",
+        "id": 952,
+        "title": "检索锚乙20260924064348乙公开",
         "channel": "itemcf",
         "reason": "和你读过的内容很像",
-        "score": 0.469129
+        "score": 0.328406
       },
-      "toast": "这条已从本批缓存里删掉（1 行），并压掉与它相似的 4 条下一屏候选",
+      "toast": "这条已从本批缓存里删掉（1 行），并压掉与它相似的 11 条下一屏候选",
       "before": 6,
       "after": 5
     },
     "whyPopover": {
       "target": {
-        "id": 1133,
-        "title": "检索锚甲20260928095000甲树洞",
+        "id": 952,
+        "title": "检索锚乙20260924064348乙公开",
         "channel": "itemcf",
         "reason": "和你读过的内容很像",
-        "score": 0.469129
+        "score": 0.328406
       },
-      "text": "为什么推给我召回通道：你读过的帖子的相似帖（itemcf）离线打分：0.4691这条流为什么有它：和你读过的内容很像上面三行都是 GET /api/feed/recommend 原样给的字段（recall_channel / score / reason）。页面不自己算分，也不自己编理由。"
+      "text": "为什么推给我召回通道：你读过的帖子的相似帖（itemcf）离线打分：0.3284这条流为什么有它：和你读过的内容很像上面三行都是 GET /api/feed/recommend 原样给的字段（recall_channel / score / reason）。页面不自己算分，也不自己编理由。"
     }
   },
   "similar": {
     "itemcfSrc": {
-      "id": 1104,
+      "id": 1052,
       "rows": [
         {
           "id": 1142,
           "title": "冒烟·停留计时",
           "channel": "itemcf",
           "reason": "看过这篇的屿民也看过它",
-          "score": 0.699933
+          "score": 0.092169
         },
         {
           "id": 1064,
           "title": "冒烟·停留计时",
           "channel": "itemcf",
           "reason": "看过这篇的屿民也看过它",
-          "score": 0.695305
+          "score": 0.091818
         },
         {
           "id": 1053,
           "title": "检索锚甲20260928055418甲公开",
           "channel": "itemcf",
           "reason": "看过这篇的屿民也看过它",
-          "score": 0.554814
+          "score": 0.089285
         },
         {
-          "id": 1063,
-          "title": "话题冒烟·树洞20260928055418",
+          "id": 1082,
+          "title": "检索锚乙20260928055640乙公开",
           "channel": "itemcf",
           "reason": "看过这篇的屿民也看过它",
-          "score": 0.554814
+          "score": 0.089285
         },
         {
           "id": 1114,
           "title": "话题冒烟·公开20260928094514",
           "channel": "itemcf",
           "reason": "看过这篇的屿民也看过它",
-          "score": 0.554814
+          "score": 0.089285
         },
         {
-          "id": 1124,
-          "title": "冒烟·树洞",
+          "id": 1144,
+          "title": "情绪周报 · 2026-09-21 ~ 2026-09-27",
           "channel": "itemcf",
           "reason": "看过这篇的屿民也看过它",
-          "score": 0.554814
+          "score": 0.089285
         }
       ]
     },
     "cold": {
-      "id": 881,
+      "id": 91,
       "ids": [
-        881,
-        341,
-        331,
-        321,
-        301,
-        291,
-        281,
-        271
+        91,
+        61,
+        51,
+        41,
+        1
       ],
       "rows": [
         {
-          "id": 1216,
-          "title": "冒烟·匿名树洞",
+          "id": 1155,
+          "title": "冒烟·通知靶子",
           "channel": "hot",
           "reason": "共读记录还太少，先给你社区里被读完最多的一篇"
         },
         {
-          "id": 1154,
-          "title": "冒烟·匿名树洞",
+          "id": 1105,
+          "title": "冒烟·通知靶子",
           "channel": "hot",
           "reason": "共读记录还太少，先给你社区里被读完最多的一篇"
         },
         {
-          "id": 1104,
-          "title": "冒烟·匿名树洞",
+          "id": 1076,
+          "title": "冒烟·通知靶子",
           "channel": "hot",
           "reason": "共读记录还太少，先给你社区里被读完最多的一篇"
         },
         {
-          "id": 1075,
-          "title": "冒烟·匿名树洞",
+          "id": 1052,
+          "title": "冒烟·通知靶子",
           "channel": "hot",
           "reason": "共读记录还太少，先给你社区里被读完最多的一篇"
         },
         {
-          "id": 1051,
-          "title": "冒烟·匿名树洞",
+          "id": 1030,
+          "title": "冒烟·通知靶子",
           "channel": "hot",
           "reason": "共读记录还太少，先给你社区里被读完最多的一篇"
         },
         {
-          "id": 1007,
-          "title": "冒烟·匿名树洞",
+          "id": 1008,
+          "title": "冒烟·通知靶子",
           "channel": "hot",
           "reason": "共读记录还太少，先给你社区里被读完最多的一篇"
         }
       ]
     },
     "onScreen": {
-      "srcId": 1104,
+      "srcId": 1052,
       "api": [
         {
           "id": 1142,
           "title": "冒烟·停留计时",
           "channel": "itemcf",
           "reason": "看过这篇的屿民也看过它",
-          "score": 0.699933
+          "score": 0.092169
         },
         {
           "id": 1064,
           "title": "冒烟·停留计时",
           "channel": "itemcf",
           "reason": "看过这篇的屿民也看过它",
-          "score": 0.695305
+          "score": 0.091818
         },
         {
           "id": 1053,
           "title": "检索锚甲20260928055418甲公开",
           "channel": "itemcf",
           "reason": "看过这篇的屿民也看过它",
-          "score": 0.554814
+          "score": 0.089285
         },
         {
-          "id": 1063,
-          "title": "话题冒烟·树洞20260928055418",
+          "id": 1082,
+          "title": "检索锚乙20260928055640乙公开",
           "channel": "itemcf",
           "reason": "看过这篇的屿民也看过它",
-          "score": 0.554814
+          "score": 0.089285
         },
         {
           "id": 1114,
           "title": "话题冒烟·公开20260928094514",
           "channel": "itemcf",
           "reason": "看过这篇的屿民也看过它",
-          "score": 0.554814
+          "score": 0.089285
         },
         {
-          "id": 1124,
-          "title": "冒烟·树洞",
+          "id": 1144,
+          "title": "情绪周报 · 2026-09-21 ~ 2026-09-27",
           "channel": "itemcf",
           "reason": "看过这篇的屿民也看过它",
-          "score": 0.554814
+          "score": 0.089285
         }
       ],
       "dom": {
@@ -489,18 +485,18 @@
           "1142",
           "1064",
           "1053",
-          "1063",
+          "1082",
           "1114",
-          "1124"
+          "1144"
         ],
         "idsComplete": true,
         "titles": [
           "冒烟·停留计时",
           "冒烟·停留计时",
           "检索锚甲20260928055418甲公开",
-          "话题冒烟·树洞20260928055418",
+          "检索锚乙20260928055640乙公开",
           "话题冒烟·公开20260928094514",
-          "冒烟·树洞"
+          "情绪周报 · 2026-09-21 ~ 2026-09-27"
         ],
         "reasons": [
           "看过这篇的屿民也看过它",
@@ -524,7 +520,7 @@
       }
     },
     "onScreenCold": {
-      "id": 881,
+      "id": 91,
       "n": 6,
       "channels": [
         "热读补位",
@@ -612,7 +608,7 @@
       "id": "A10",
       "name": "个性化通道带离线打分（score>0，前端「为什么推给我」有真数可显示）",
       "state": "PASS",
-      "detail": "18/18 例=1104:0.669129"
+      "detail": "18/18 例=1052:0.362631"
     },
     {
       "id": "A11",
@@ -624,31 +620,31 @@
       "id": "A12",
       "name": "DB：缓存行的 is_exposed 被置位（发出的那几条）",
       "state": "PASS",
-      "detail": "置位行数=50（本轮共取到 69 条）"
+      "detail": "置位行数=50（本轮共取到 50 条）"
     },
     {
       "id": "A13",
       "name": "DB：expose 行与 floorMod(userId*31+itemId,10)<3 逐条一致（30% 采样可离线复算）",
       "state": "PASS",
-      "detail": "69 条夹具中应采中 5 条，实测命中 5 条；表内不符公式 0 行"
+      "detail": "50 条夹具中应采中 2 条，实测命中 2 条；表内不符公式 0 行"
     },
     {
       "id": "A14",
       "name": "POST /api/feed/dislike 成功并回执两个真实计数",
       "state": "PASS",
-      "detail": "code=0 msg=成功 回执={\"removed\":1,\"removedSimilar\":7}"
+      "detail": "code=0 msg=成功 回执={\"removed\":1,\"removedSimilar\":9}"
     },
     {
       "id": "A15",
       "name": "第一层：本尊被逻辑删，缓存总数正好减少 removed+removedSimilar 行（不是只减 removed）",
       "state": "PASS",
-      "detail": "removed=1 removedSimilar=7 缓存 50→42 实际减少=8"
+      "detail": "removed=1 removedSimilar=9 缓存 50→40 实际减少=10"
     },
     {
       "id": "A16",
       "name": "第二层：DB 里本尊与被联压的邻居都读不到活跃行了",
       "state": "PASS",
-      "detail": "本尊 1104 与邻居 1142,1064,1053,1124,1133,1144 残留活跃行=[]（空数组才算过）"
+      "detail": "本尊 1052 与邻居 1142,1064,1053,1114,1144 残留活跃行=[]（空数组才算过）"
     },
     {
       "id": "A17",
@@ -690,7 +686,7 @@
       "id": "A21",
       "name": "size 越界被夹到上限（PageQuery.MAX_SIZE=50，不报错也不越权）",
       "state": "PASS",
-      "detail": "回 42 条"
+      "detail": "回 40 条"
     },
     {
       "id": "B1",
@@ -702,13 +698,13 @@
       "id": "B2",
       "name": "源帖能出 ItemCF 邻居（第 1 层：一起被读过的那批）",
       "state": "PASS",
-      "detail": "源帖=1104 通道=itemcf,itemcf,itemcf,itemcf,itemcf,itemcf"
+      "detail": "源帖=1052 通道=itemcf,itemcf,itemcf,itemcf,itemcf,itemcf"
     },
     {
       "id": "B3",
       "name": "默认 size=6：整页返回、条数 ≤6、不含源帖自己",
       "state": "PASS",
-      "detail": "6 条 1142,1064,1053,1063,1114,1124"
+      "detail": "6 条 1142,1064,1053,1082,1114,1144"
     },
     {
       "id": "B4",
@@ -738,7 +734,7 @@
       "id": "B8",
       "name": "冷帖（无 ItemCF 邻居）不空窗：兜底两层能补出内容",
       "state": "PASS",
-      "detail": "冷帖=881 出6 条 通道=hot,hot,hot,hot,hot,hot"
+      "detail": "冷帖=91 出6 条 通道=hot,hot,hot,hot,hot,hot"
     },
     {
       "id": "B9",
@@ -748,13 +744,13 @@
     },
     {
       "id": "B10",
-      "name": "不可见源帖（私密 id=1293）与不存在同形，不许当探针",
+      "name": "不可见源帖（私密 id=1325）与不存在同形，不许当探针",
       "state": "PASS",
       "detail": "HTTP 404 code=30001 msg=内容不存在或已删除"
     },
     {
       "id": "B11",
-      "name": "不可见源帖（审核中/未通过 id=1285）与不存在同形，不许当探针",
+      "name": "不可见源帖（审核中/未通过 id=1304）与不存在同形，不许当探针",
       "state": "PASS",
       "detail": "HTTP 404 code=30001 msg=内容不存在或已删除"
     },
@@ -768,7 +764,7 @@
       "id": "B13",
       "name": "DB：连打三次相似位，expose 行数一动不动（被动区块不灌分母）",
       "state": "PASS",
-      "detail": "before=9 after=9"
+      "detail": "before=6 after=6"
     },
     {
       "id": "C1",
@@ -780,73 +776,73 @@
       "id": "C2",
       "name": "健康度读数齐全（running/lastFinishedAt/cacheRows/similarityRows/cacheMode/resultTtlMinutes）",
       "state": "PASS",
-      "detail": "cacheRows=4492 similarityRows=413 cacheMode=local ttl=90min"
+      "detail": "cacheRows=5440 similarityRows=435 cacheMode=local ttl=90min"
     },
     {
       "id": "C3",
       "name": "接口读数与 DB 对得上：cacheRows == recommend_result 活跃行",
       "state": "PASS",
-      "detail": "接口=4492 DB=4492"
+      "detail": "接口=5440 DB=5440"
     },
     {
       "id": "C4",
       "name": "POST /api/admin/rec/rebuild 同步返回一轮摘要（不是 90001 的桩）",
       "state": "PASS",
-      "detail": "HTTP 200 code=0 msg=成功 墙钟=6974ms"
+      "detail": "HTTP 200 code=0 msg=成功 墙钟=8892ms"
     },
     {
       "id": "C5",
       "name": "摘要六项读数都 >0（质量分/话题热度/相似度/有邻居/用户/结果行）",
       "state": "PASS",
-      "detail": "q=616 topic=59 sim=468 nb=413 users=90 rows=4500"
+      "detail": "q=641 topic=62 sim=475 nb=436 users=109 rows=5450"
     },
     {
       "id": "C6",
       "name": "耗时可接受（作业 calcMs 与探针墙钟都 <120s，验收现场等得起）",
       "state": "PASS",
-      "detail": "calcMs=6967ms 墙钟=6974ms"
+      "detail": "calcMs=8884ms 墙钟=8892ms"
     },
     {
       "id": "C7",
       "name": "通道占比的 key 全部属于六通道（ENUM 写错会被静默存成默认值，这条是防线）",
       "state": "PASS",
-      "detail": "itemcf=679 explore=88 usercf=102 hot=3631"
+      "detail": "itemcf=1198 explore=63 hot=4137 usercf=52"
     },
     {
       "id": "C8",
       "name": "占比之和 ≥ 结果行数（写库时会跳过未知通道，等号是常态）",
       "state": "PASS",
-      "detail": "sum=4500 resultRows=4500 差=0"
+      "detail": "sum=5450 resultRows=5450 差=0"
     },
     {
       "id": "C9",
       "name": "诚实记录：本轮真正出现了 6 通道里的哪几路（少于六路不是 bug，是这份数据的真实分布）",
       "state": "PASS",
-      "detail": "出现 4/6 路：itemcf,explore,usercf,hot｜未出现：content,emotion"
+      "detail": "出现 4/6 路：itemcf,explore,hot,usercf｜未出现：content,emotion"
     },
     {
       "id": "C10",
       "name": "DB：MAX(calc_at) 前移了（这一轮真的写过库，不是内存里空转）",
       "state": "PASS",
-      "detail": "2026-09-29 13:05:35.456 → 2026-09-29 13:05:45.129"
+      "detail": "2026-10-08 09:36:56.686 → 2026-10-08 09:37:05.466"
     },
     {
       "id": "C11",
       "name": "DB：这一批新写的行数 == 摘要 resultRows（接口回的不是自夸数）",
       "state": "PASS",
-      "detail": "DB=4500 摘要=4500"
+      "detail": "DB=5450 摘要=5450"
     },
     {
       "id": "C12",
       "name": "DB：admin_op_log 行数不变（重算不落审计，这条决策有判据钉住，不是漏项）",
       "state": "PASS",
-      "detail": "179 → 179"
+      "detail": "257 → 257"
     },
     {
       "id": "C13",
       "name": "status 复查：lastFinishedAt 前进、running 落回 false、cacheRows 与 DB 一致",
       "state": "PASS",
-      "detail": "lastFinishedAt 2026-09-29T13:02:06.3233238 → 2026-09-29T13:05:52.1000755 cacheRows=4500"
+      "detail": "lastFinishedAt 2026-10-08T09:22:53.3454783 → 2026-10-08T09:37:14.3537625 cacheRows=5450"
     },
     {
       "id": "C14",
@@ -864,41 +860,41 @@
       "id": "D2",
       "name": "D6 界面版：连点两次「换一批」＝三批 18 条 id 两两不重复，屏上这批与已见过的零交集",
       "state": "PASS",
-      "detail": "批1=923,264,1052,1024,903,1033｜批2=1034,1053,1064,892,1084,1124｜批3=1133,1134,913,1142,1144,902 distinct=18｜屏上重复项(按帖子id)=0｜DOM 与第三批同id同序=true｜另按标题数到 2 组重名（种子数据四条同名，不参与判据）"
+      "detail": "批1=1053,1064,1134,1142,233,1144｜批2=902,924,232,222,164,903｜批3=952,972,187,973,974,992 distinct=18｜屏上重复项(按帖子id)=0｜DOM 与第三批同id同序=true｜另按标题数到 1 组重名（种子数据四条同名，不参与判据）"
     },
     {
       "id": "D3",
-      "name": "「为什么推给我」浮层：5 行读数全部来自接口三字段（通道 itemcf / 分数 0.4691 / 理由原文）",
+      "name": "「为什么推给我」浮层：5 行读数全部来自接口三字段（通道 itemcf / 分数 0.3284 / 理由原文）",
       "state": "PASS",
-      "detail": "卡片#1133 通道=itemcf 分数=0.469129｜三行命中=true,true,true｜p 数=5｜文字=为什么推给我召回通道：你读过的帖子的相似帖（itemcf）离线打分：0.4691这条流为什么有它：和你读过的内容很像上面三行都是 GET /api/feed/recommend 原样给的字段（recall_channel / score / reason）。页面不自己算分，也不自己编理由。"
+      "detail": "卡片#952 通道=itemcf 分数=0.328406｜三行命中=true,true,true｜p 数=5｜文字=为什么推给我召回通道：你读过的帖子的相似帖（itemcf）离线打分：0.3284这条流为什么有它：和你读过的内容很像上面三行都是 GET /api/feed/recommend 原样给的字段（recall_channel / score / reason）。页面不自己算分，也不自己编理由。"
     },
     {
       "id": "D4",
       "name": "D6 当场没：点「不感兴趣」卡片 6→5，被点的那条从屏上消失，提示条把两个真实计数说出来",
       "state": "PASS",
-      "detail": "点击=true 张数=5 残留=false｜提示原文=\"这条已从本批缓存里删掉（1 行），并压掉与它相似的 4 条下一屏候选\"｜接口回执=0"
+      "detail": "点击=true 张数=5 残留=false｜提示原文=\"这条已从本批缓存里删掉（1 行），并压掉与它相似的 11 条下一屏候选\"｜接口回执=0"
     },
     {
       "id": "D4b",
       "name": "DB：界面这一次驳回在 user_action 里正好一行（weight=-3.00 / scene=feed）",
       "state": "PASS",
-      "detail": "帖子=1133 行=[[\"-3.00\",\"feed\"]]"
+      "detail": "帖子=952 行=[[\"-3.00\",\"feed\"]]"
     },
     {
       "id": "D5",
       "name": "详情页「看了又看」：6 张卡与接口逐条同序同文字，标题「看了又看」",
       "state": "PASS",
-      "detail": "源帖=1104 接口 6 条 / DOM 6 张 / 不符 0｜通道串=共读相似,共读相似,共读相似,共读相似,共读相似,共读相似"
+      "detail": "源帖=1052 接口 6 条 / DOM 6 张 / 不符 0｜通道串=共读相似,共读相似,共读相似,共读相似,共读相似,共读相似"
     },
     {
       "id": "D5b",
       "name": "屏上的「共读相似」条数等于接口的 itemcf 条数，且源帖自己不在列表里",
       "state": "PASS",
-      "detail": "itemcf DOM=6 接口=6｜源帖 1104 出现在屏上=false｜DOM 通道分布=共读相似,共读相似,共读相似,共读相似,共读相似,共读相似"
+      "detail": "itemcf DOM=6 接口=6｜源帖 1052 出现在屏上=false｜DOM 通道分布=共读相似,共读相似,共读相似,共读相似,共读相似,共读相似"
     },
     {
       "id": "D6",
-      "name": "冷帖 #881 不空窗：兜底补出 6 条，且一条「共读相似」都不出现（它没有邻居行）",
+      "name": "冷帖 #91 不空窗：兜底补出 6 条，且一条「共读相似」都不出现（它没有邻居行）",
       "state": "PASS",
       "detail": "接口 6 条 / DOM 6 张｜通道串=热读补位,热读补位,热读补位,热读补位,热读补位,热读补位｜空窗文案=\"\""
     },
@@ -910,9 +906,9 @@
     },
     {
       "id": "D8",
-      "name": "本轮 7 张截图四道闸全过（判据 / 文字量 / 漏白 / 新增红字）",
+      "name": "本轮 7 张截图四道闸全过（判据 / 文字量 / 深色残留 / 新增红字）",
       "state": "PASS",
-      "detail": "通过 7/7｜累计漏白 0 处"
+      "detail": "通过 7/7｜累计深色残留 0 处"
     },
     {
       "id": "D9",
@@ -924,7 +920,7 @@
       "id": "C15",
       "name": "后端日志里能查到「通道占比」与「负反馈：用户」两行（D7 的验收物）",
       "state": "PASS",
-      "detail": "偏移 23210052 之后新增 3 行推荐类日志：通道占比=true 负反馈=true（GBK 落盘、脚本内解码，原文一字不改地写进 d7-log-excerpt.log）"
+      "detail": "偏移 8036899 之后新增 3 行推荐类日志：通道占比=true 负反馈=true（GBK（Windows 控制台落盘）、脚本内解码，原文一字不改地写进 d7-log-excerpt.log）"
     }
   ],
   "shots": [
@@ -932,8 +928,8 @@
       "file": "01-推荐流六卡与接口理由逐条一致.png",
       "url": "/feed",
       "desc": "U3「为你推荐」六张卡：卡片沿用广场 PostCard，多出来的只有 #reason 插槽那一行",
-      "chars": 3795,
-      "bg": "rgb(14, 22, 38)",
+      "chars": 3843,
+      "bg": "rgb(246, 246, 247)",
       "leaks": 0,
       "newErrors": 0,
       "judgement": "PASS",
@@ -944,8 +940,8 @@
       "file": "02-换一批两次三批十八条不重复.png",
       "url": "/feed",
       "desc": "连点两次「换一批」之后的第三批：18 条 id 两两不重复，页脚的到底说明同时可见",
-      "chars": 5856,
-      "bg": "rgb(14, 22, 38)",
+      "chars": 9967,
+      "bg": "rgb(246, 246, 247)",
       "leaks": 0,
       "newErrors": 0,
       "judgement": "PASS",
@@ -956,56 +952,56 @@
       "file": "03-为什么推给我浮层三行.png",
       "url": "/feed",
       "desc": "点某一张卡的「为什么推给我」：召回通道 / 离线打分 / 这条流为什么有它，三行都是接口原样给的字段",
-      "chars": 5856,
-      "bg": "rgb(14, 22, 38)",
+      "chars": 14363,
+      "bg": "rgb(246, 246, 247)",
       "leaks": 0,
       "newErrors": 0,
       "judgement": "PASS",
       "pass": true,
-      "note": "目标卡 id=1133，浮层文字量 145 字"
+      "note": "目标卡 id=952，浮层文字量 145 字"
     },
     {
       "file": "04-不感兴趣当场消失并回执真实行数.png",
       "url": "/feed",
       "desc": "点掉一条之后：这一批只剩 5 张卡，绿条写明「本批缓存删掉 N 行 + 压掉 M 条下一屏候选」",
-      "chars": 5731,
-      "bg": "rgb(14, 22, 38)",
+      "chars": 16241,
+      "bg": "rgb(246, 246, 247)",
       "leaks": 0,
       "newErrors": 0,
       "judgement": "PASS",
       "pass": true,
-      "note": "被驳回的卡 id=1133（通道 itemcf）"
+      "note": "被驳回的卡 id=952（通道 itemcf）"
     },
     {
       "file": "05-详情页看了又看ItemCF.png",
-      "url": "/post/1104",
+      "url": "/post/1052",
       "desc": "U4 详情页「看了又看」：ItemCF 邻居在前、同话题与热读补位在后，每条右侧标出自己所属通道",
-      "chars": 1845,
-      "bg": "rgb(14, 22, 38)",
+      "chars": 1510,
+      "bg": "rgb(246, 246, 247)",
       "leaks": 0,
       "newErrors": 0,
       "judgement": "PASS",
       "pass": true,
-      "note": "源帖 #1104 相似位 6 条（共读相似,共读相似,共读相似,共读相似,共读相似,共读相似）"
+      "note": "源帖 #1052 相似位 6 条（共读相似,共读相似,共读相似,共读相似,共读相似,共读相似）"
     },
     {
       "file": "06-冷帖相似位兜底不空窗.png",
-      "url": "/post/881",
+      "url": "/post/91",
       "desc": "没有任何 ItemCF 邻居的新帖：相似位靠同话题 + 质量分榜补满，不出现空推荐位",
-      "chars": 1373,
-      "bg": "rgb(14, 22, 38)",
+      "chars": 1278,
+      "bg": "rgb(246, 246, 247)",
       "leaks": 0,
       "newErrors": 0,
       "judgement": "PASS",
       "pass": true,
-      "note": "冷帖 #881 补出 6 条"
+      "note": "冷帖 #91 补出 6 条"
     },
     {
       "file": "07-游客被弹回登录页.png",
       "url": "/feed → /login?redirect=/feed",
       "desc": "未登录直连 /feed：路由守卫弹回登录页并带 redirect，登录后原路返回（游客态没有推荐流）",
       "chars": 136,
-      "bg": "rgb(14, 22, 38)",
+      "bg": "rgb(246, 246, 247)",
       "leaks": 0,
       "newErrors": 0,
       "judgement": "PASS",

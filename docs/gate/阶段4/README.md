@@ -4,7 +4,7 @@
 阶段 4 不再以「代码写完 + 单测过了」收口，而是以**十条互相不能替代的取证线**收口。
 每条线只登记**能复跑的脚本 + 真实读数 + 证伪记录**，没有读数的判据一律不算数。
 
-## 0. 环境事实（全部 2026-09-28 现查，不信上一轮记录）
+## 0. 环境事实（2026-09-28 现查；2026-10-08 在浅色主题下的复跑读数见 §7，不信上一轮记录）
 
 | 项 | 现值 |
 |---|---|
@@ -22,7 +22,7 @@
 |---|---|---|---|---|
 | 1 | jsdom DOM 级 | frontend/probe/domprobe.mjs（1369 行） | **121 项 / 失败 0** | domprobe-20260928.log（09-28） |
 | 2 | 真浏览器截图 | frontend/probe/shootgate.mjs | **21 张 / 通过 21 / 漏白 0 / 红字 0 / 断言失败 0** | shootgate-20260928.log（09-28）。⚠️ 这批 png 仍落在 docs/gate/阶段3/（脚本第 27 行写死输出目录），是「同一套界面在阶段 4 之后仍然干净」的复检图，不是阶段 4 新增图 |
-| 3 | 阶段 4 专用截图线 | frontend/probe/stage4gate.mjs（869 行） | **pass 63 / fail 0** + 11 张图 + console=0 pageerror=0 http 失败=0 | shot-manifest.json（2026-09-28 16:00:20 +08:00）+ 本目录 01–09 号 png + console-evidence.log |
+| 3 | 阶段 4 专用截图线 | frontend/probe/stage4gate.mjs（869 行） | **pass 63 / fail 0** + 11 张图 + console=0 pageerror=0 http 失败=0 | shot-manifest.json（**2026-10-08 09:48 +08:00 复跑**，at=2026-10-08T01:48:12Z；09-28 首跑同读数）+ 本目录 01–09 号 png + console-evidence.log |
 | 4 | 提示词注入 | frontend/probe/injection.mjs | **PASS 95 / FAIL 0**（26 条语料 = 12 攻击 + 3 漏检回归 + 11 日常零误伤；全局对账 起跑 16 → 收尾 31，新增 15 = 期望 15） | prompt-injection.md（199 行，§1.1 是三次证伪 A/B/C） |
 | 5 | 断网演示 | docs/offline-demo.mjs（227 行 / 15 条 check） | **15/15 全绿**（09-28 用当前源码复跑；第 1 轮 646ms、第 4 轮 695ms）；证伪：把 model 改成 offline-demo-model ⇒ 14/1 FAIL 再还原 | offline-demo-20260928.log + offline-degrade.md |
 | 6 | HTTP 冒烟 | docs/smoke.mjs | **312 项 / 断言 294 条 / 失败 0**（09-28），其中第 24 步是周报分享的 19 条判据 | smoke_r23.log（83 KB，留在仓库外 _cache，只把汇总与第 24 步抄进 weekly-report-share.md） |
@@ -113,7 +113,28 @@ node docs/smoke.mjs
 | weekly-report-share.md | T4.20 ③ 周报去标识分享：实现落点 / 19 条冒烟判据读数 / 库内复核 / 17 项单测与四次证伪 |
 | prompt-injection.md | 提示词注入线（26 语料 / 95 判据 / 三次证伪） |
 | 01–09 号 png（11 张） | 阶段 4 界面证据截图：流式回复、情绪标签与免责脚注、L2/L3 危机卡、情绪档案四图、详情页停留与读到底、隐私中心四张 |
-| shot-manifest.json | stage4gate 的机器读数（pass=63 fail=0 / viewport / 账号 / 夹具 id） |
+| shot-manifest.json | stage4gate 的机器读数（pass=63 fail=0 / viewport / 账号 / 夹具 id；最近复跑 2026-10-08 09:48，浅色主题） |
 | console-evidence.log | 截图线全程 console/pageerror/http 计数（0/0/0） |
 | d1-onboarding-green.log / d1-onboarding-falsify.log | D1 闭环的正样本（15/15）与负样本（14 项中 10 红） |
 | aichat-20260928.log / routecrawl-20260928.log / domprobe-20260928.log / shootgate-20260928.log / offline-demo-20260928.log | 各线的当日原始输出（PASS 也打印读数，不只打印 PASS） |
+
+## 7. 2026-10-08 复跑记录（浅色主题下重新签字）
+
+需求 Q9 已于 2026-09-30 改判为「明亮简约 · 小红书式卡片墙」，本目录 11 张 png 在 **2026-10-08 09:47~09:48** 用
+`CRISIS=1 node probe/stage4gate.mjs`（工作目录 frontend/）重拍，读数不变：**pass 63 / fail 0 / 图 11 张 / console=0 pageerror=0 http 失败=0**。
+注意 03-AI对话-L2L3危机卡.png 只有带 `CRISIS=1` 才会拍（危机段默认跳过，第一次不带只出 10 张图）。
+
+### 7.1 复跑前拆掉的一颗「时间炸弹」（夹具随时间过期，不是产品缺陷）
+
+| 症状 | 根因 | 修法 |
+|---|---|---|
+| `[emo]` 判据 FAIL：情绪档案停在「数据积累中」空态 | BR12 `accumulating = 可信天数 < 3`（`EmotionProfileService.MIN_TRUSTED_DAYS`，confidence ≥ 0.6 才算可信）。09-28 是靠连续三天跑探针**自然攒出来**的，隔到 10-08 只剩 1 天 ⇒ 假阳性 | 新增 `docs/seed-emotion-history.mjs`：以哨兵 `[seed-emo-history]` 给 demo01 补最近 7 天记录（6 天 × 打卡+被动各 1 行），幂等（先按哨兵 DELETE 再 INSERT，只碰自己的行）；自检输出可信天数=7、行数=13 |
+
+另一颗同类炸弹（树洞 `auto_destroy_at` 158 条全部过期）打在**阶段 7 的 B8 冷帖线**上，判据与读数订正见 `docs/gate/阶段7/清单.md`，
+修法同为 `node docs/seed-demo.mjs`（把过期树洞顺延 7 天，ROW_COUNT=158）。
+
+### 7.2 本线**不签**颜色（写白，避免误读）
+
+`stage4gate.mjs` **没有任何配色判据**（只有 `.md` 的 `white-space:normal` 之类排版判据），所以这 63 条绿证明的是功能与 DOM 接线。
+「浅色主题是否统一」由另两条线签字：`frontend/probe/shootgate.mjs`（阶段 3：21/21 通过、深色残留 0、主背景 `rgb(246,246,247)`）
+与 `frontend/probe/recgate7.mjs`（阶段 7：判据 64/64、7 张图四道闸全过、深色残留 0）。

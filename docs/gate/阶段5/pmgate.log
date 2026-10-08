@@ -1,24 +1,24 @@
 
 ===== Gate5 私信/实时通道收口取证 =====
-后端实例 http://127.0.0.1:8080   前端 http://127.0.0.1:5173   UI 跳过(NOUI=1)
-PASS S0-1 该实例已装载私信模块（/api/pm/* 恰好 9 条）   <- totalPaths=68 pmPaths=9 /api/pm/block/{userId} /api/pm/blocks /api/pm/conversations /api/pm/online /api/pm/read /api/pm/report /api/pm/send /api/pm/thread/{peerId} /api/pm/unread
-S0-2 实例自述 profiles=dev cacheMode=local llmProvider=spring-ai java=17.0.19 serverTime=2026-09-29T02:42:05.611713
+后端实例 http://127.0.0.1:8080   前端 http://127.0.0.1:5173   UI 开
+PASS S0-1 该实例已装载私信模块（/api/pm/* 恰好 9 条）   <- totalPaths=135 pmPaths=9 /api/pm/block/{userId} /api/pm/blocks /api/pm/conversations /api/pm/online /api/pm/read /api/pm/report /api/pm/send /api/pm/thread/{peerId} /api/pm/unread
+S0-2 实例自述 profiles=dev cacheMode=local llmProvider=spring-ai java=17.0.19 serverTime=2026-10-08T09:48:52.727853
 S0-3 夹具 uid 甲=3(屿02) 乙=5 丙=6
 
 ---- A 组：REST 十条线 ----
-PASS A1 GET /conversations：list/hasMore/unreadTotal 必给，可空的 nextCursor 按 non_null 契约允许缺席   <- code=0 keys=list,nextCursor,hasMore,unreadTotal listLen=1 unreadTotal=0 hasMore=false nextCursor=173
-PASS A1b GET /unread 返回 {total,byPeer,peers}   <- total=0 byPeer={}
-PASS A2 POST /send 落库并回视图（id/mine/from/to）   <- code=0 id=174 mine=true status=sent
-PASS A2b 视图内容与类型逐字回显，createdAt 非空（REST 与 WS 帧同一份 view，气泡时间不能靠前端兜本地时钟）   <- createdAt=2026-09-29T02:42:07.4011475 riskLevel=L0 status=sent keys=id,fromUserId,toUserId,mine,msgType,content,riskLevel,status,createdAt
+PASS A1 GET /conversations：list/hasMore/unreadTotal 必给，可空的 nextCursor 按 non_null 契约允许缺席   <- code=0 keys=list,nextCursor,hasMore,unreadTotal listLen=1 unreadTotal=1 hasMore=false nextCursor=183
+PASS A1b GET /unread 返回 {total,byPeer,peers}   <- total=1 byPeer={"5":1}
+PASS A2 POST /send 落库并回视图（id/mine/from/to）   <- code=0 id=186 mine=true status=sent
+PASS A2b 视图内容与类型逐字回显，createdAt 非空（REST 与 WS 帧同一份 view，气泡时间不能靠前端兜本地时钟）   <- createdAt=2026-10-08T09:48:58.0423837 riskLevel=L0 status=sent keys=id,fromUserId,toUserId,mine,msgType,content,riskLevel,status,createdAt
 PASS A2c 普通私信不带求助卡（non_null 契约下 alert 这个键压根不存在）   <- alert=undefined key-present=false
-PASS A3 clientMsgId 重发返回同一条 id（INSERT IGNORE 撞键后回查）   <- 第一次 id=174 重发 id=174
-PASS A3b 重发没有多落一行（按本轮那句唯一正文数一遍，会话里只有那一条）   <- 命中 1 条 ids=174 会话总长=77
+PASS A3 clientMsgId 重发返回同一条 id（INSERT IGNORE 撞键后回查）   <- 第一次 id=186 重发 id=186
+PASS A3b 重发没有多落一行（按本轮那句唯一正文数一遍，会话里只有那一条）   <- 命中 1 条 ids=186 会话总长=86
 PASS A4 GET /thread/{peerId} 返回九字段会话页   <- code=0 peerName=屿04 blocked=false peerOnline=false listLen=20
-PASS A4d 历史是时间正序，且本轮新落的那三条恰好是最新的三条（前端直接 append 到气泡数组上方，不再排序）   <- len=79 尾部三条=174,176,177 本轮=174,176,177
+PASS A4d 历史是时间正序，且本轮新落的那三条恰好是最新的三条（前端直接 append 到气泡数组上方，不再排序）   <- len=88 尾部三条=186,188,189 本轮=186,188,189
 PASS A4e 发信方视角 mine 全为 true（只认本轮那三条：旧行里乙发来的当然是 false，混在一起判就是判据自己出错）   <- 命中=3 mine=true,true,true
-PASS A4f 同一批消息在乙的会话里 mine 全为 false（视角是参数而不是字段）   <- 会话总长=79 本轮命中=3 mine=false,false,false
-PASS A5 size=2 取最新两条、游标=该页最旧一条、hasMore 跟着「还有更旧的」走   <- ids=176,177 期望=176,177 nextCursor=176 hasMore=true 全量=79
-PASS A5b beforeId 游标往旧翻：恰好是再往前的两条，不重叠也不跳号   <- ids=173,174 期望=173,174 hasMore=true
+PASS A4f 同一批消息在乙的会话里 mine 全为 false（视角是参数而不是字段）   <- 会话总长=88 本轮命中=3 mine=false,false,false
+PASS A5 size=2 取最新两条、游标=该页最旧一条、hasMore 跟着「还有更旧的」走   <- ids=188,189 期望=188,189 nextCursor=188 hasMore=true 全量=88
+PASS A5b beforeId 游标往旧翻：恰好是再往前的两条，不重叠也不跳号   <- ids=183,186 期望=183,186 hasMore=true
 PASS A5c size=999 不报错（normalizeSize 夹到 fetch-max=100，不是一行 500）   <- listLen=1
 PASS A6-1 空内容 → 10001   <- HTTP=400 code=10001 msg=私信内容不能是空的
 PASS A6-2 码点>1000 → 10001   <- HTTP=400 code=10001 msg=私信最多 1000 个字，这条有 1001 个
@@ -31,22 +31,22 @@ PASS A6-8 查自己的会话 → 10001   <- code=10001
 PASS A6-9 查无此人的会话 → 20001（不是空昵称 200）   <- code=20001 msg=对方不存在或已注销
 PASS A7 发给不存在的收件人 → 20001   <- code=20001 msg=对方不存在或已注销，这条私信没有收件人
 PASS A8 命中黑词（政治违法组 BLOCK）→ 50001 CONTENT_REJECTED   <- code=50001 msg=私信内容包含违规信息，已拦截
-PASS A8b 被拦截的内容没有落库（最新 100 条里查不到那句黑词原文；会话条数会跟着判据一起长，所以判「查不到」而不是判总数）   <- 命中=0 会话总长=79
-PASS A9-0 现场上传一张图，拿到 uploads/yyyy/MM/dd 三层 url（不是扁平日期目录）   <- HTTP=200 code=0 种子=3271B data={"url":"/uploads/2026/09/29/ab6096d2fbfc49ca84386913665ea2cf.png","kind":"png","width":120,"height":40,"bytes":3271}
+PASS A8b 被拦截的内容没有落库（最新 100 条里查不到那句黑词原文；会话条数会跟着判据一起长，所以判「查不到」而不是判总数）   <- 命中=0 会话总长=88
+PASS A9-0 现场上传一张图，拿到 uploads/yyyy/MM/dd 三层 url（不是扁平日期目录）   <- HTTP=200 code=0 种子=3271B data={"url":"/uploads/2026/10/08/c5f24f598b7847749d7cd023360a3c72.png","kind":"png","width":120,"height":40,"bytes":3271}
 PASS A9-0b 这个 url 真的取得回图片字节（浏览器 img 标签吃的就是它，扁平写法 404 就是这么暴露的）   <- HTTP=200 content-type=image/png bytes=3271
-PASS A9 图片私信落库（msgType=image，内容为 /uploads 路径）   <- id=178 content=/uploads/2026/09/29/ab6096d2fbfc49ca84386913665ea2cf.png code=0
+PASS A9 图片私信落库（msgType=image，内容为 /uploads 路径）   <- id=190 content=/uploads/2026/10/08/c5f24f598b7847749d7cd023360a3c72.png code=0
 PASS A9b 会话列表把图片摘要成「[图片]」（正文不许漏在列表页）   <- lastContent=[图片] lastMsgType=image
-PASS A10 乙回发两条成功   <- ids=179,180
-PASS A10b 甲的未读汇总含乙（byPeer 只带未读>0 的人）   <- total=2 byPeer={"5":2} peers=0
-PASS A10c 已读上报返回 ack{kind,count,unread}，unread 归零   <- count=2 unread=0 peerId=5 code=0
+PASS A10 乙回发两条成功   <- ids=191,192
+PASS A10b 甲的未读汇总含乙（byPeer 只带未读>0 的人）   <- total=3 byPeer={"5":3} peers=0
+PASS A10c 已读上报返回 ack{kind,count,unread}，unread 归零   <- count=3 unread=0 peerId=5 code=0
 PASS A10d 已读之后 byPeer 里不再有乙（0 不发送）   <- total=0 byPeer={}
 PASS A10e 重复上报已读翻 0 行（第二份标签页不会重播已读动画）   <- count=0 code=0
 PASS A10f 把别人的 id 当 upToId 也只是 0 行（谁的数据谁能改，判据在 SQL 里）   <- count=0 code=0
 PASS A11 GET /online?peerIds=1&peerIds=2（逗号方括号写法会被 Spring 拒，必须重复键）   <- online=[] userId=null
-  …拉黑前该会话已有 50 条：128,129,130,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,176,177,178,179,180
+  …拉黑前该会话已有 50 条：138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,176,177,178,179,180,181,182,183,186,188,189,190,191,192
 PASS A12-0 拉黑自己 → 10001   <- code=10001 msg=不能拉黑自己
 PASS A12-1 拉黑生效 {targetId,action=block,changed=true,blocked=true}   <- code=0 data={"targetId":5,"action":"block","changed":true,"blocked":true}
-PASS A12-2 名单里列得出这一条（含原因与时间）   <- size=1 item={"peerId":5,"peerName":"屿04","peerAvatar":"","reason":"Gate5 取证：暂时不想被打扰","blockedAt":"2026-09-29T02:42:20.339"}
+PASS A12-2 名单里列得出这一条（含原因与时间）   <- size=1 item={"peerId":5,"peerName":"屿04","peerAvatar":"","reason":"Gate5 取证：暂时不想被打扰","blockedAt":"2026-10-08T09:49:36.207"}
 PASS A12-3 被拉黑的一方再发 → 30005 PM_BLOCKED   <- code=30005 msg=对方已开启隐私保护，无法发送私信
 PASS A12-4 会话页 blocked=true（双向判定，输入框该禁用）   <- blocked=true code=0
 PASS A12-5 拉黑不抹历史（前后 id 清单逐字相同，需求 FR6.7 的落地口径）   <- 拉黑前 50 条 / 拉黑后 50 条 同序=true
@@ -54,9 +54,9 @@ PASS A12-6 被拉黑之后的求助消息仍然被拦（私信这一半拦住了
 PASS A12-7 被拦的危机私信没有落库（按本轮唯一标记查 = 0 行；建单走库侧核对，见 README 增量）   <- A12-7 那条被拦的危机私信没有落库（建单走库侧核对，见 README 的行数增量）
 PASS A12-8 重复拉黑 changed=false（不重复建行）   <- changed=false code=0
 PASS A12-9 解除拉黑 {action=unblock,blocked=false}   <- data={"targetId":5,"action":"unblock","changed":true,"blocked":false}
-PASS A12-10 解除之后发信恢复（不是永久封死）   <- code=0 id=181
-PASS A13-1 举报受理 → {taskId,status=PENDING,tip}   <- data={"taskId":92,"status":"PENDING","tip":"已收到，我们会在 24 小时内看完这条私信。"}
-PASS A13-2 同一目标的待审任务只有一张（uk_target_pending 兜住）   <- 第一次 taskId=92 第二次 taskId=92
+PASS A12-10 解除之后发信恢复（不是永久封死）   <- code=0 id=193
+PASS A13-1 举报受理 → {taskId,status=PENDING,tip}   <- data={"taskId":188,"status":"PENDING","tip":"已收到，我们会在 24 小时内看完这条私信。"}
+PASS A13-2 同一目标的待审任务只有一张（uk_target_pending 兜住）   <- 第一次 taskId=188 第二次 taskId=188
 PASS A13-3 第三人举报别人的私信 → 30006（拿自增 id 塞不进别人的会话）   <- code=30006
 PASS A13-4 举报不存在的消息 → 30006   <- code=30006
 PASS A13-5 理由不在白名单 → 10001（下拉六项之外的值进不了备注）   <- code=10001 msg=举报理由只能是：spam / abuse / sexual / privacy / self-harm / other
@@ -66,7 +66,91 @@ PASS A14-2 发信方看到的是「自己」那套求助话术，且含热线 12
 PASS A14-3 收信方看到的是「对方可能需要支持」那套文案（同一行两套话术，按视角拼）   <- alert=对方此刻可能很需要支持。你不需要一个人扛，也可以拨打 12356。
 PASS A14-4 risk 组但不含 L3 方式/计划词 → L2（同样出求助卡，词面通道输出域只有 L0/L2/L3）   <- riskLevel=L2
 PASS A15 无令牌读私信 → 10002 / HTTP 401   <- HTTP=401 code=10002
-FATAL 顶层异常：登录 gate5_muted 没拿到 token（HTTP 403 code=20003）
-  stack: Error: 登录 gate5_muted 没拿到 token（HTTP 403 code=20003） |     at login (file:///E:/codex%20workspace/009_%E5%BF%83%E5%B1%BFAI%E5%BF%83%E7%90%86%E9%99%AA%E4%BC%B4%E7%A4%BE%E5%8C%BA/frontend/probe/pmgate.mjs:157:11) |     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) |     at async file:///E:/codex%20workspace/009_%E5%BF%83%E5%B1%BFAI%E5%BF%83%E7%90%86%E9%99%AA%E4%BC%B4%E7%A4%BE%E5%8C%BA/frontend/probe/pmgate.mjs:621:17
+SKIP A16 MUTED 发信 → 10003（库里演示号全是 ACTIVE，跑法见 README：先把一个号置 MUTED 再带 GATE_MUTED_ACCT 补跑）
 
----- Gate5 取证汇总：PASS 60 / FAIL 0 / 图 0 张 ----
+---- B 组：STOMP 实时线（裸 WS /ws-native，自写最小帧客户端）----
+PASS B1-1 坏令牌 → 握手被拒（拿不到 CONNECTED）   <- 坏令牌 WS 错误
+PASS B1-2 完全不带令牌 → 握手被拒   <- 无令牌 WS 错误
+PASS B2 甲 CONNECT 完成，accept-version 协商到 1.2   <- headers={"version":"1.2","heart-beat":"30000,30000","user-name":"3"}
+PASS B3-1 乙上线触发 /topic/presence 广播，载荷只有 {onlineCount,ts}（不含任何 id）   <- json={"ts":"2026-10-08T09:49:55.2870526","onlineCount":2}
+PASS B3-2 presence 载荷里确实没有 userId（广播不得携带个人身份）   <- keys=ts,onlineCount
+PASS B3-3 乙在 WS 上时 GET /online 列得出乙（在线判定与广播同源）   <- online=[5]
+PASS B4 /app/ping 回 {kind:pong} 到 /user/queue/ping（前端 25s 保活靠它）   <- frame={"kind":"pong","at":"2026-10-08T09:49:56.3251255"}
+PASS B5-1 甲从 /user/queue/ack 拿到 {kind:sent,clientMsgId,id,peerId,at}   <- ack={"kind":"sent","clientMsgId":"g5-1791424134937-b5","id":196,"peerId":5,"at":"2026-10-08T09:49:56.3292135"}
+PASS B5-2 乙的 /user/queue/private 真的收到了这一帧（跨连接投递成立 = 私信可用）   <- dest=/user/queue/private mine=false
+PASS B6-1 收件人在线 → 发信方拿到 kind=delivered（本轮实测：它可能比 sent 先到一帧，所以从 b5mark 往后找）   <- ack={"kind":"delivered","clientMsgId":"g5-1791424134937-b5","id":196,"peerId":5,"at":"2026-10-08T09:49:56.3627402"}
+PASS B6-2 库里那一行 status 也翻成 delivered（REST 与 WS 读的是同一行）   <- status=delivered
+PASS B7-1 乙的 /user/queue/notify 收到 {type:dm,id,unread,ts}（私信折成 dm，红点当场亮）   <- json={"type":"dm","id":1008,"unread":41,"ts":1791424196367}
+PASS B7-2 通知线格式恰好四键，没有正文   <- keys=type,id,unread,ts
+PASS B8-1 收件人离线时发信方照样拿到 sent（落库优先，推送只是下游订阅者）   <- ack={"kind":"sent","clientMsgId":"g5-1791424134937-b8","id":197,"peerId":5,"at":"2026-10-08T09:49:58.8951392"}
+PASS B8-2 收件人离线 → 2.5s 内没有 delivered 回执（不谎报送达）   <- delivered 帧数=0
+PASS B8-3 库里那一行停在 sent（等着被重投作业看见）   <- status=sent
+PASS B9-1 重新上线后 PmDeliveryRetryJob 把离线那条补推到 /user/queue/private   <- id=197 status=sent
+PASS B9-2 补推成功后发信方才收到 delivered   <- ack={"kind":"delivered","clientMsgId":"g5-1791424134937-b8","id":197,"peerId":5,"at":"2026-10-08T09:50:06.7106826"}
+PASS B10-1 第三条 WS 私信发出（为已读回执准备未读行）   <- id=198
+PASS B10-2 读者自己拿到 {kind:read,count,unread=0}（气泡上的已读勾当场打）   <- ack={"kind":"read","peerId":3,"count":15,"unread":0,"at":"2026-10-08T09:50:06.798431"}
+PASS B10-3 发信方（甲）收到 kind=read 且 peerId=读者（回执的唯一读者是发信方）   <- ack={"kind":"read","peerId":5,"count":15,"at":"2026-10-08T09:50:06.8169419"}
+PASS B10-4 第二次重复上报翻 0 行 → 不发事件（两个标签页不会把「已读」动画播两遍）   <- 甲收到的重复 read 帧=0
+PASS B11-0 乙拉黑甲（为 WS 错误分支造现场）   <- {"targetId":3,"action":"block","changed":true,"blocked":true}
+PASS B11-1 WS 发信被隐私闸门拦下 → /queue/ack 收到 {kind:error,code:30005,tip}   <- ack={"kind":"error","at":"2026-10-08T09:50:09.3801522","code":30005,"tip":"对方已开启隐私保护，无法发送私信"}
+PASS B11-2 报错之后连接仍然可用（业务错误绝不拆 socket）   <- closed=false
+PASS B11-3 解除（把现场还原给后面的判据）   <- {"targetId":3,"action":"unblock","changed":true,"blocked":false}
+PASS B12-1 WS 发出的危机私信同样落库（两个入口一条判据）   <- id=199
+PASS B12-2 发信方与收信方都收到 /user/queue/alert（两侧各自一张卡）   <- A={"level":"L3","messageId":199,"side":"sender","hotline":"12356","at":"2026-10-08T09:50:10.5029059"} B={"level":"L3","messageId":199,"side":"receiver","hotline":"12356","at":"2026-10-08T09:50:10.5029059"}
+PASS B12-3 alert 载荷恰好 5 键（最小展示原则：里面没有正文）   <- keys=at,hotline,level,messageId,side
+PASS B12-4 alert 里查不到那句危机原文（等级/消息 id/视角/热线之外什么都没有）   <- level=L3 hotline=12356 side=sender 正文命中=false
+PASS B12-5 收信方那张卡 side=receiver 且指向同一条 messageId   <- json={"level":"L3","messageId":199,"side":"receiver","hotline":"12356","at":"2026-10-08T09:50:10.5029059"}
+PASS B12-6 会话里那条气泡自带的求助文案由服务端拼好（前端不许自己编热线）   <- alert=对方此刻可能很需要支持。你不需要一个人扛，也可以拨打 12356。
+PASS B13 乙断开 → /topic/presence 再广播一次，在线数不高于乙在线那一次   <- 断开前=2 断开后={"ts":"2026-10-08T09:50:12.0623732","onlineCount":1}
+PASS B13-2 断开之后 GET /online 不再列乙   <- online=[]
+B14 两条 WS 连接已 DISCONNECT（甲累计收帧 32，乙2 累计收帧 10）
+PASS B15 GET /ws/info 经 Vite 代理返回 200 且 websocket=true（SockJS 靠这个字段决定要不要走真 WebSocket）   <- http=200 body={"entropy":-1244035182,"origins":["*:*"],"cookie_needed":true,"websocket":true}
+PASS B16 SockJS xhr-polling 传输经代理拿到 open 帧（WebSocket 握不上时浏览器就靠这条收私信，代理必须两条都透）   <- http=200 首帧="o\n"
+
+---- C 组：真浏览器（界面层证据）----
+# 浏览器 150.0.7871.115（headless，executablePath 指向本机 Chrome）视口 1600x1000
+  …………C 组先让出限流分钟窗 47215ms
+PASS C0[stale] ChatListView 的 dev server 模块体与磁盘源码同步（按中文字面量抽样 6 条，全部命中）   <- http=200 字节=50966 缺=[]
+PASS C0[stale] ChatDetailView 的 dev server 模块体与磁盘源码同步（按中文字面量抽样 6 条，全部命中）   <- http=200 字节=110498 缺=[]
+PASS C0[stale] stores/pm.js 的 dev server 模块体与磁盘源码同步（按中文字面量抽样 6 条，全部命中）   <- http=200 字节=181773 缺=[]
+PASS C0[stale] BasicLayout 的 dev server 模块体与磁盘源码同步（按中文字面量抽样 5 条，全部命中）   <- http=200 字节=60549 缺=[]
+  …………C 组铺砖 ids=200,201,202 风险档=L2 甲侧求助卡=true
+  [图] 01-私信列表-会话行与未读.png —— C1 /chat 真的列出了会话行（昵称非空、无错误条，且顶栏没说「实时通道未连接」）  <- h1=私信 行数=1 names=["屿04"] badges=["2"] 在线点=[false] dim=与屿友一对一说话。现在有 2 条没读。 errAlert=无 顶栏角标=2
+  [图] 02-会话详情-双向气泡与日期分组与求助卡.png —— C2 /chat/:uid 里甲乙两个方向的气泡同屏、日期分组没有掉进「更早」、L2 那条的求助卡由服务端拼好了  <- 对端=屿04 我方=14 对方=6 日期=["9月29日","今天"] 求助卡=6张 空时间戳=0/20 状态槽=["已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读",""] 更早=看更早的消息 errAlert=无
+PASS C2b 详情页顶部没有「实时通道未连接」那行 —— 浏览器这条路真的握上了 STOMP（降级行只在 !isRealtime 时渲染）   <- chan=false 在线点=off 顶栏角标=无
+  [图] 03-镜像-乙看的同一段会话.png —— C3 乙那一侧看到的是同一段对话：他的「对方」正好是甲的「我方」，条数互为镜像（没有谁多看了几条）  <- 甲屏 我方/对方=14/6 乙屏 我方/对方=6/14 对端=屿02 求助卡=6张 errAlert=无
+  [图] 04-图片气泡-浏览器里真的显示出来了.png —— C4 在浏览器里选一张图 → 走 /api/files/image 上传 → 自动发出 → 气泡里的 img 解码出真实宽高（不是裂口图标）  <- 选图=true 图片数=1→2 src=/uploads/2026/10/08/96704b8dc6e24432a2a8453e75532820.png naturalWidth=120 complete=true
+  [图] 05-发送与送达回执.png —— C5 甲在输入框里敲的字出现在我方气泡上，并且状态槽里躺着后端推回来的「已送达 / 已读」（不是本地自己写的）  <- 填入=true 点击=true 上屏=true 状态="已送达" 观测到发送中=true 状态槽全列=["已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已送达"]
+  [图] 06-乙侧不刷新也收到.png —— C6 乙那块屏从进页面到现在一次没刷新，甲刚敲的那句自己出现在对方气泡里，地址栏没变  <- 命中=true 地址=http://127.0.0.1:5173/chat/3 对方=16 我方=6 通道降级行=false 在线点=on errAlert=无
+  [图] 07-会话页跳对方主页.png —— C7 「看TA的主页」把地址换成 /user/<对端 id>，资料卡上确实有「私信」这个入口  <- url=http://127.0.0.1:5173/user/5 期望=http://127.0.0.1:5173/user/5 操作区按钮=["关注","私信"]
+  [图] 08-主页私信入口进会话.png —— C8 主页那颗「私信」按钮真的把人带回 /chat/:uid，气泡与输入框都在  <- url=http://127.0.0.1:5173/chat/5 我方=16 对方=4 输入框=true 对端=屿04
+  [图] 09-顶栏私信角标亮起.png —— C9 乙在自己那块屏上发的字，让甲这边顶栏的私信角标亮了（甲此刻既不在列表页也不在会话页）  <- 亮之前="" 现在="1" 导航在页=true 地址=/user/5 乙填入=true 乙点击=true
+  [图] 10-列表未读角标.png —— C10 顶栏角标点进去就是会话列表，乙那一行的红点和顶栏那句「现在有 N 条没读」是同一个数  <- url=http://127.0.0.1:5173/chat 行数=1 乙所在行=0(昵称=屿04) 行内角标="1" 全部角标=["1"] dim=与屿友一对一说话。现在有 1 条没读。
+  [图] 11-读完之后顶栏角标归零.png —— C11 甲点进乙的会话读完，顶栏那颗角标当场消失（el-badge 的 hidden 生效 = unreadTotal 真的回到 0）  <- gone="GONE" 角标读数="" 我方=15 对方=5 状态槽=["已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读"] 降级行=false
+  [图] 12-拉黑二次确认弹窗.png —— C12 「不再收TA的消息」弹的是二次确认：后果写明白了，原因是选填，确认那颗按钮是 danger  <- 可见=true danger按钮数=1 弹窗文本=不再收这个人的消息 拉黑之后：对方发给你的消息不会送达，他看到的只是一句「发送失败」，不知道你拉黑了他； 你也发不出去。历史消息仍然留在你这里，删掉要去隐私中心。 17 / 200
+  [图] 13-拉黑后的会话页.png —— C13 拉黑之后：整块输入区连同气泡一起消失，顶上只剩那句「你已经不再接收这个人的消息」和解除限制  <- 提示块=true 文案=你已经不再接收这个人的消息。 输入区存在=false 气泡=0 顶部按钮=["刷新","看TA的主页","解除限制"]
+  [图] 14-解除限制后气泡与输入框回来了.png —— C14 解除限制之后历史气泡和输入框一起回来（拉黑不删本地历史，这条判据同时证了那句「历史消息仍然留在你这里」）  <- 回来=true 提示块=false 输入区=true 我方=15 对方=5 更早=看更早的消息
+  [图] 15-举报这条私信弹窗.png —— C15 举报弹窗：六个原因真能展开，没选原因之前「提交举报」是 disabled（前端不许让人空手往人工审核队列塞东西）  <- 可见=true 选项数=6 按钮={"text":"提交举报","disabled":true}
+PASS C15b 关掉之后举报弹窗不再可见（判可见性，不判 DOM 里还在不在 —— 它本来就一直在那儿）   <- visible=false 关闭方式=已点
+  …………C17 甲离线期间乙发了两条 code/id=206,207
+  [图] 16-断网重连后不丢不重.png —— C17 甲的屏幕离线 11 秒（等价拔网线），乙在这期间发的两条在重新联网后各只出现一次：不丢（两条都在）、不重（各 1 颗气泡）  <- 离线=true 恢复=true 发送code=0/0 断网前 我方/对方=15/5 回来后=15/7 两条各出现={"n1":1,"n2":1,"total":20} 实时通道=已连 errAlert=无
+PASS C16 两块屏从头到尾没有 console.error / 未捕获异常 / 4xx·5xx   <- 甲 c=0 p=0 h=0｜乙 c=0 p=0 h=0 明细=[][][][]
+  …………C 组收尾：两个浏览器上下文与 Chromium 已关（甲收帧计数见上方日志）
+
+---- Gate5 取证汇总：PASS 103 / FAIL 0 / 图 16 张 ----
+  [PASS] 01-私信列表-会话行与未读.png —— C1 /chat 真的列出了会话行（昵称非空、无错误条，且顶栏没说「实时通道未连接」）  <- h1=私信 行数=1 names=["屿04"] badges=["2"] 在线点=[false] dim=与屿友一对一说话。现在有 2 条没读。 errAlert=无 顶栏角标=2
+  [PASS] 02-会话详情-双向气泡与日期分组与求助卡.png —— C2 /chat/:uid 里甲乙两个方向的气泡同屏、日期分组没有掉进「更早」、L2 那条的求助卡由服务端拼好了  <- 对端=屿04 我方=14 对方=6 日期=["9月29日","今天"] 求助卡=6张 空时间戳=0/20 状态槽=["已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读",""] 更早=看更早的消息 errAlert=无
+  [PASS] 03-镜像-乙看的同一段会话.png —— C3 乙那一侧看到的是同一段对话：他的「对方」正好是甲的「我方」，条数互为镜像（没有谁多看了几条）  <- 甲屏 我方/对方=14/6 乙屏 我方/对方=6/14 对端=屿02 求助卡=6张 errAlert=无
+  [PASS] 04-图片气泡-浏览器里真的显示出来了.png —— C4 在浏览器里选一张图 → 走 /api/files/image 上传 → 自动发出 → 气泡里的 img 解码出真实宽高（不是裂口图标）  <- 选图=true 图片数=1→2 src=/uploads/2026/10/08/96704b8dc6e24432a2a8453e75532820.png naturalWidth=120 complete=true
+  [PASS] 05-发送与送达回执.png —— C5 甲在输入框里敲的字出现在我方气泡上，并且状态槽里躺着后端推回来的「已送达 / 已读」（不是本地自己写的）  <- 填入=true 点击=true 上屏=true 状态="已送达" 观测到发送中=true 状态槽全列=["已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已送达"]
+  [PASS] 06-乙侧不刷新也收到.png —— C6 乙那块屏从进页面到现在一次没刷新，甲刚敲的那句自己出现在对方气泡里，地址栏没变  <- 命中=true 地址=http://127.0.0.1:5173/chat/3 对方=16 我方=6 通道降级行=false 在线点=on errAlert=无
+  [PASS] 07-会话页跳对方主页.png —— C7 「看TA的主页」把地址换成 /user/<对端 id>，资料卡上确实有「私信」这个入口  <- url=http://127.0.0.1:5173/user/5 期望=http://127.0.0.1:5173/user/5 操作区按钮=["关注","私信"]
+  [PASS] 08-主页私信入口进会话.png —— C8 主页那颗「私信」按钮真的把人带回 /chat/:uid，气泡与输入框都在  <- url=http://127.0.0.1:5173/chat/5 我方=16 对方=4 输入框=true 对端=屿04
+  [PASS] 09-顶栏私信角标亮起.png —— C9 乙在自己那块屏上发的字，让甲这边顶栏的私信角标亮了（甲此刻既不在列表页也不在会话页）  <- 亮之前="" 现在="1" 导航在页=true 地址=/user/5 乙填入=true 乙点击=true
+  [PASS] 10-列表未读角标.png —— C10 顶栏角标点进去就是会话列表，乙那一行的红点和顶栏那句「现在有 N 条没读」是同一个数  <- url=http://127.0.0.1:5173/chat 行数=1 乙所在行=0(昵称=屿04) 行内角标="1" 全部角标=["1"] dim=与屿友一对一说话。现在有 1 条没读。
+  [PASS] 11-读完之后顶栏角标归零.png —— C11 甲点进乙的会话读完，顶栏那颗角标当场消失（el-badge 的 hidden 生效 = unreadTotal 真的回到 0）  <- gone="GONE" 角标读数="" 我方=15 对方=5 状态槽=["已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读","已读"] 降级行=false
+  [PASS] 12-拉黑二次确认弹窗.png —— C12 「不再收TA的消息」弹的是二次确认：后果写明白了，原因是选填，确认那颗按钮是 danger  <- 可见=true danger按钮数=1 弹窗文本=不再收这个人的消息 拉黑之后：对方发给你的消息不会送达，他看到的只是一句「发送失败」，不知道你拉黑了他； 你也发不出去。历史消息仍然留在你这里，删掉要去隐私中心。 17 / 200
+  [PASS] 13-拉黑后的会话页.png —— C13 拉黑之后：整块输入区连同气泡一起消失，顶上只剩那句「你已经不再接收这个人的消息」和解除限制  <- 提示块=true 文案=你已经不再接收这个人的消息。 输入区存在=false 气泡=0 顶部按钮=["刷新","看TA的主页","解除限制"]
+  [PASS] 14-解除限制后气泡与输入框回来了.png —— C14 解除限制之后历史气泡和输入框一起回来（拉黑不删本地历史，这条判据同时证了那句「历史消息仍然留在你这里」）  <- 回来=true 提示块=false 输入区=true 我方=15 对方=5 更早=看更早的消息
+  [PASS] 15-举报这条私信弹窗.png —— C15 举报弹窗：六个原因真能展开，没选原因之前「提交举报」是 disabled（前端不许让人空手往人工审核队列塞东西）  <- 可见=true 选项数=6 按钮={"text":"提交举报","disabled":true}
+  [PASS] 16-断网重连后不丢不重.png —— C17 甲的屏幕离线 11 秒（等价拔网线），乙在这期间发的两条在重新联网后各只出现一次：不丢（两条都在）、不重（各 1 颗气泡）  <- 离线=true 恢复=true 发送code=0/0 断网前 我方/对方=15/5 回来后=15/7 两条各出现={"n1":1,"n2":1,"total":20} 实时通道=已连 errAlert=无

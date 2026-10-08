@@ -1,4 +1,5 @@
-// 阶段 6（管理端 A1–A9）真浏览器取证 —— 手册 §9.4 第 4 条：前端全部可交互、深色主题统一、无 console 红字
+// 阶段 6（管理端 A1–A9）真浏览器取证 —— 手册 §9.4 第 4 条：页面全部可交互、主题统一、无 console 红字
+// 注：手册那条原文写于深色时代，且签的是**用户端** U3/U4/U5/U6；管理端的主题口径见下面 MI_BG 的说明。
 //
 // 与 frontend/probe/shootgate.mjs（阶段 3）同一套骨架、同一套判据，理由也同一句：
 // jsdom / REST 探针的 PASS 不能当成 §6.4 第 4 条的勾，「页面在真浏览器里到底长什么样」必须看图。
@@ -33,7 +34,11 @@ const CHROME = process.env.GATE_CHROME ||
   'C:/Users/Drbrain/AppData/Local/Google/Chrome/Application/chrome.exe'
 const BASE = process.env.GATE_BASE || 'http://127.0.0.1:5174'
 const DESKTOP = { width: 1600, height: 1000 }        // 手册 §12：论文截图统一尺寸
-const MI_BG = 'rgb(14, 22, 38)'                      // #0E1626 午夜蓝（需求 Q9）
+// 管理端主题：深色工作台 #0E1626。需求 Q9 于 2026-09-30 的改判（深色治愈 → 明亮简约·小红书式）
+// **只覆盖用户端 5173**，管理端 5174 不在改判范围内（admin/src/styles/theme.css 至今仍是深色令牌块）。
+// 所以本探针的「漏白」方向与用户端探针（shootgate/recgate7 已反转为「深色残留」）**故意相反**，
+// 不是漏改：管理端下白底表面才是缺陷，深底才是正确形态。
+const MI_BG = 'rgb(14, 22, 38)'                      // #0E1626 午夜蓝（管理端现行主题，见上）
 
 const SURFACES = [
   '.el-card', '.mi-card', '.el-dialog', '.el-popover', '.el-popper', '.el-message',
@@ -171,7 +176,7 @@ async function audit (page, label) {
   }, SURFACES)
   if (found.bg !== MI_BG) {
     leakCount++
-    say('  !! ' + label + ' 主背景不是午夜蓝：' + found.bg + '（需求 Q9 深色治愈 #0E1626）')
+    say('  !! ' + label + ' 主背景不是午夜蓝：' + found.bg + '（管理端现行深色工作台 #0E1626；需求 Q9 的浅色改判只覆盖用户端 5173）')
   }
   if (found.bad.length) {
     leakCount += found.bad.length
@@ -795,6 +800,7 @@ md.push('- 浏览器：Chrome ' + browser.version() + '（headless，可执行�
 md.push('- 账号：SUPER ' + d.supUser.username + '(#' + d.supUser.id + ') / ADMIN ' + d.admUser.username +
   '(#' + d.admUser.id + ')，口令不落任何产物；身份由 GET /api/admin/me 服务端回读')
 md.push('- 判据：每张图四道闸（页面文字量 / 深色漏白 / 控制台红字 / 该页 DOM 判据）+ 管理端专属第五道（可见 .err 横幅必须为 0）')
+md.push('- 主题口径（2026-10-08 写白，避免和用户端探针打架）：需求 Q9 于 2026-09-30 改判为「明亮简约 · 小红书式」，**改判范围只覆盖用户端 5173**；管理端 5174 沿用深色工作台（`admin/src/styles/theme.css` 的 `--mi-bg: #0E1626`），本清单的「漏白」判据因此仍是「白底表面 = 缺陷」，方向与用户端探针 shootgate.mjs / recgate7.mjs 已反转的「深色残留 = 缺陷」**故意相反**，不是漏改。若日后要把管理端也统一成浅色，这一条判据连同本目录 18 张图必须一起重签。')
 md.push('- 结果：**' + shots.length + ' 张，通过 ' + pass + ' 张**；漏白 ' + leakCount + ' 处；红字 ' + errorCount + ' 条；断言失败 ' + checkFailCount + ' 条')
 md.push('')
 md.push('## A6 → A9 越权留痕链路（FR8.4 的唯一硬证据）')

@@ -113,7 +113,8 @@ async function discover () {
 
 // ---------- 2 每张图的机器断言 ----------
 async function audit (page, label) {
-  const found = await page.evaluate((sels) => {
+  const found = await page.evaluate((opt) => {
+    const sels = opt.sels
     const bad = []
     const bg = getComputedStyle(document.body).backgroundColor
     for (const s of sels) {
@@ -128,14 +129,14 @@ async function audit (page, label) {
         // 判据方向 2026-09-30 反转：浅色主题下白卡是正确形态，上一版「三通道 ≥248 即漏白」
         // 会把每一张 .mi-card 都判成缺陷。现在要防的是「深色残留」——旧午夜蓝整块回来，
         // 或某个表面还留着近黑的底（三通道均 ≤ DARK_MAX）。
-        const dark = Number(m[1]) <= DARK_MAX && Number(m[2]) <= DARK_MAX && Number(m[3]) <= DARK_MAX
-        if (dark || cs.backgroundColor === OLD_DARK_BG) {
+        const dark = Number(m[1]) <= opt.darkMax && Number(m[2]) <= opt.darkMax && Number(m[3]) <= opt.darkMax
+        if (dark || cs.backgroundColor === opt.oldDarkBg) {
           bad.push(s + ' -> ' + cs.backgroundColor + ' [' + String(el.className).slice(0, 58) + ']')
         }
       })
     }
     return { bg, bad, text: (document.getElementById('app') || document.body).innerText.replace(/\s+/g, ' ').trim().length }
-  }, SURFACES)
+  }, { sels: SURFACES, darkMax: DARK_MAX, oldDarkBg: OLD_DARK_BG })
   if (found.bg !== MI_BG) {
     leakCount++
     say('  !! ' + label + ' 主背景不是浅灰底：' + found.bg + '（需求 Q9 已于 2026-09-30 改判为明亮简约 #f6f6f7）')
