@@ -3,7 +3,13 @@ import { useUserStore } from '@/stores/user'
 
 // 路由 meta：requiresAuth / requiresConsent / requiresAdmin（§5.8 第 5 条）
 const routes = [
-  { path: '/', redirect: '/feed' },
+  // U1 首页/着陆（需求分析文档 §6 视图清单第 1 行 · 任务 T3.13 结转项，2026-10-08 落地）。
+  // 这条记录的位置刻意保持在路由表第一项：它和下面那条 { path: '/', component: BasicLayout } 是同一个
+  // path，vue-router 的 matcher 在分数相同处按插入顺序取第一条——旧版 { path: '/', redirect: '/feed' }
+  // 正是靠这个顺序才生效的，改成带 component 之后依赖的还是同一条规则。位置一动，'/' 就会解析成
+  // BasicLayout 的空子路由（一个白框页面），而这是只有真机点开根路径才会暴露的故障。
+  // 已登录的人不该停在游客页，所以 beforeEach 里那条 home -> feed 是本路由的另一半，两处不能拆开改。
+  { path: '/', name: 'home', component: () => import('@/views/LandingView.vue'), meta: { public: true } },
   { path: '/login', name: 'login', component: () => import('@/views/auth/Login.vue'), meta: { public: true } },
   { path: '/register', name: 'register', component: () => import('@/views/auth/Register.vue'), meta: { public: true } },
   // 危机求助页：任何时候免登录可达，这是 FR10/危机转介的硬要求
@@ -53,6 +59,12 @@ const router = createRouter({ history: createWebHistory(), routes })
 
 router.beforeEach((to) => {
   const user = useUserStore()
+  // 🔴 已登录访问 '/' 一律直接进广场，不停在游客落地页。这条守卫同时钉住了取证探针的一个隐含前提：
+  // frontend/probe/domprobe.mjs 用 w.__probeRouter.push('/') 之后断言的是「广场卡片」（.feed .row 计数）。
+  // 旧版 '/' 是硬 redirect，所以那句话永远成立；现在 '/' 是一张真页面，少了这条守卫，
+  // 登录态的探针会落到落地页并报「找不到广场卡片」——那是契约变更造成的假故障，不是产品缺陷。
+  // 落地页本身要能被游客看到，所以判据用 isLogged（有令牌）而不是「路由来源」。
+  if (to.name === 'home' && user.isLogged) return { name: 'feed' }
   if (to.meta.public) return true
   if (to.meta.requiresAuth && !user.isLogged) {
     return { name: 'login', query: { redirect: to.fullPath } }
