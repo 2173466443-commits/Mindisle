@@ -33,7 +33,12 @@ INSERT IGNORE INTO `sys_config` (`cfg_key`,`cfg_value`,`value_type`,`group_key`,
   ('rec.explore_ratio','0.20','decimal','rec','探索流量比例 ε-greedy，缓解马太效应（需求 §6.4 多样性）'),
   ('rec.diversity_topic_max','2','int','rec','单列 feed 中同一话题最多出现条数，打散规则'),
   ('rec.expose_dedup_days','7','int','rec','已曝光物品去重回溯天数，读 recommend_result.is_exposed'),
-  ('rec.weight_profile','{"view":1,"like":3,"collect":5,"comment":4,"read_through":4,"dislike":-5}','json','rec','隐式反馈打分权重表，离线相似度的 r(u,i) 来源（需求 §6.4）'),
+  -- 原此处有一条 ('rec.weight_profile', '{...dislike:-5...}')，阶段 8 · U16-⑦ 删除。原因写死在这里，
+  -- 免得下一任又从「配置表里怎么没有权重」出发把它加回来：这行 JSON <b>全仓 Java 0 处读取</b>，
+  -- 隐式反馈权重的唯一真源是 track/UserActionCatalog.ACTION_WEIGHTS（read_through 2.00、dislike -3.00、
+  -- report -5.00，另有 expose 0.10 / ai_feedback 0），由 UserActionRecorder 在写 user_action 时落成 weight 列快照，
+  -- 打分侧 OfflineRecommendService 读的是那个 weight 列而不是任何配置项。
+  -- 留着这条 JSON 等于凭空造第二个真相源，而且它和代码已经在两个字段上打架（看完 4 vs 2、不喜欢 -5 vs -3）。
   ('rec.scale_item_cap','5000','int','rec','物品规模阈值（手册 §10.2 7.10）：窗口内不同帖子数超过它就只算 ItemCF、跳过 UserCF；置 0 = 关掉这道保护'),
   ('prompt.version','v1','string','ai','当前生效的 AI 提示词版本，与 ai_call_log.prompt_version 对齐可回溯'),
   ('prompt.crisis_card','{"hotline":"12356","text":"你现在的感受很重要，专业的人愿意听你说。可以拨打心理援助热线 12356，也可以预约学校心理咨询中心。","display":"L2/L3 置顶卡片，整卡不可关闭，单次提示可关闭"}','json','risk','危机转介卡片文案（需求 §18.4 强制项：禁诊断、必转人工）'),

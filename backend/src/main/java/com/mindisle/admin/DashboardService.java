@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 
 import com.mindisle.admin.dto.DashboardStatsRow;
 import com.mindisle.admin.dto.EmotionDailyRow;
+import com.mindisle.admin.dto.DayHourValenceRow;
 import com.mindisle.admin.dto.GradeRow;
 import com.mindisle.admin.dto.HotTopicRow;
 import com.mindisle.admin.dto.HourValenceRow;
@@ -90,6 +91,32 @@ public class DashboardService {
   public List<HourValenceRow> hourHeatmap(int days, LocalDateTime now) {
     LocalDate toDate = now.toLocalDate();
     return dashboardMapper.hourHeatmap(toDate.minusDays(clampDays(days) - 1L), toDate);
+  }
+
+  /**
+   * 图表 6 的二维版：日 × 24 小时热力（任务 U16-④）。
+   *
+   * <p>返回里带上 fromDate/toDate/days 三份口径，而不是只给一格对的数组：大屏要把缺行的
+   * 格子补成 0，补之前必须知道「这个窗口到底是哪几天」，否则前端只能拿今天往前倒推，
+   * 一旦后端和前端不在同一天跨午夜（运维在 23:59:58 刷新）就会多画或少画一行。
+   * 窗口口径由本类一处定死，和 hourHeatmap 用同一个 clampDays，两张图永远同窗。</p>
+   */
+  public DayHourBoard dayHourHeatmap(int days, LocalDateTime now) {
+    int span = clampDays(days);
+    LocalDate toDate = now.toLocalDate();
+    LocalDate fromDate = toDate.minusDays(span - 1L);
+    return new DayHourBoard(span, fromDate, toDate, dashboardMapper.dayHourHeatmap(fromDate, toDate));
+  }
+
+  /**
+   * 二维热力的响应体。
+   *
+   * <p>{@code cells} 是「有记录的格子」稀疏数组，最多 span×24 项；前端按 day×hour 建索引补 0。
+   * 后端不铺满空壳行：90 天窗口就是 2160 行，其中大部分本来就没记录，
+   * 铺满只会让 5 秒轮询的响应体涨一个数量级。</p>
+   */
+  public record DayHourBoard(int days, LocalDate fromDate, LocalDate toDate,
+                             List<DayHourValenceRow> cells) {
   }
 
   /** 情绪标签分布单独给一份（A2 的雷达图与看板共用）。 */

@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.mindisle.admin.DashboardService;
+import com.mindisle.admin.DashboardService.DayHourBoard;
 import com.mindisle.admin.DashboardService.EmotionBoard;
 import com.mindisle.admin.dto.DashboardStatsRow;
 import com.mindisle.admin.dto.GradeRow;
@@ -82,6 +83,23 @@ public class AdminDashboardController {
       @RequestParam(name = "days", required = false) Integer days, @AuthenticationPrincipal AuthUser current) {
     AdminSupport.requireAdmin(current);
     return Result.ok(dashboardService.hourHeatmap(days == null ? 30 : days, AdminSupport.now()));
+  }
+
+  /**
+   * 日 × 24 小时二维情绪热力（U16-④）。
+   *
+   * <p>上面那条 /hour-heatmap 的 summary 原本写着「7×24 网格」，但它只按小时聚合，
+   * 一直是<b>一维 24 格</b>——口径名不副实这条已经在这轮改掉：一维那条留着给旧大屏，
+   * 真正要按星期几看节律的用这条。默认 7 天正好是「周一到周日」七行，
+   * 参数上限仍由服务层 clampDays 夹到 90，不在这里重复校验。</p>
+   */
+  @GetMapping("/day-hour-heatmap")
+  @Operation(summary = "日 × 24 小时情绪热力（二维稀疏格，前端按天补 0）")
+  public Result<DayHourBoard> dayHourHeatmap(
+      @Parameter(description = "统计天数，默认 7，服务层上限 90") @RequestParam(name = "days", required = false) Integer days,
+      @AuthenticationPrincipal AuthUser current) {
+    AdminSupport.requireAdmin(current);
+    return Result.ok(dashboardService.dayHourHeatmap(days == null ? 7 : days, AdminSupport.now()));
   }
 
   @GetMapping("/emotion-labels")

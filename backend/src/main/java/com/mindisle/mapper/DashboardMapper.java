@@ -1,6 +1,7 @@
 package com.mindisle.mapper;
 
 import com.mindisle.admin.dto.DashboardStatsRow;
+import com.mindisle.admin.dto.DayHourValenceRow;
 import com.mindisle.admin.dto.EmotionDailyRow;
 import com.mindisle.admin.dto.GradeRow;
 import com.mindisle.admin.dto.HourValenceRow;
@@ -143,6 +144,25 @@ public interface DashboardMapper {
       + "AND record_date BETWEEN #{fromDate} AND #{toDate} "
       + "GROUP BY HOUR(created_at) ORDER BY `hour`")
   List<HourValenceRow> hourHeatmap(@Param("fromDate") LocalDate fromDate,
+      @Param("toDate") LocalDate toDate);
+
+  /**
+   * 图表 6 的二维版「日 × 24 小时情绪热力」（任务 U16-④ · 手册 §9.3）。
+   *
+   * <p>GROUP BY 用生成列 record_date 加 HOUR(created_at)，与上面 hourHeatmap 同一条口径链、
+   * 只是多切一刀日期。两张图若窗口口径不同，大屏相邻两块面板就会互相打脸——
+   * 「一维说凌晨最低、二维说凌晨不低」这种图在答辩现场是致命的。</p>
+   *
+   * <p>行数上限＝窗口天数×24。服务层把窗口夹在 90 天，最坏 2160 行；ORDER BY 的字段就是
+   * GROUP BY 的字段，MySQL 沿 idx_emotion_date 分组后不再额外排序。</p>
+   */
+  @Select("SELECT record_date AS day, HOUR(created_at) AS `hour`, COUNT(*) AS cnt, "
+      + "ROUND(AVG(valence), 2) AS avg_valence "
+      + "FROM emotion_record WHERE deleted = 0 "
+      + "AND record_date BETWEEN #{fromDate} AND #{toDate} "
+      + "GROUP BY record_date, HOUR(created_at) "
+      + "ORDER BY record_date, `hour`")
+  List<DayHourValenceRow> dayHourHeatmap(@Param("fromDate") LocalDate fromDate,
       @Param("toDate") LocalDate toDate);
 
   /**

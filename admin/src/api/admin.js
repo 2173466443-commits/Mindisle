@@ -56,6 +56,10 @@ export const emotionBoard = (days) => http.get('/admin/dashboard/emotion-board',
 export const hotTopics = (limit) => http.get('/admin/dashboard/hot-topics', { params: { limit }, silent: true })
 export const gradeBoard = () => http.get('/admin/dashboard/grade-board', { silent: true })
 export const hourHeatmap = (days) => http.get('/admin/dashboard/hour-heatmap', { params: { days }, silent: true })
+// 二维热力（U16-④）：返回 { days, fromDate, toDate, cells }，cells 是稀疏的 day×hour 格。
+// 一维那条 hourHeatmap 先留着不删：它回答的是「一天里哪个钟点低」，二维回答「星期几 × 钟点」，
+// 两张图不是同一问题，删掉等于把两种读法之一藏起来。
+export const dayHourHeatmap = (days) => http.get('/admin/dashboard/day-hour-heatmap', { params: { days }, silent: true })
 export const emotionLabels = (days) => http.get('/admin/dashboard/emotion-labels', { params: { days }, silent: true })
 export const aiUsage = (days) => http.get('/admin/dashboard/ai-usage', { params: { days }, silent: true })
 
@@ -68,6 +72,9 @@ export const aiUsage = (days) => http.get('/admin/dashboard/ai-usage', { params:
 // 「跑满 40 秒但确实成功」的重算误报成一次前端失败，那种假失败比慢本身更糟。
 export const recStatus = (topic) => http.get('/admin/rec/status', { params: topic ? { topic } : {}, silent: true })
 export const recRebuild = () => http.post('/admin/rec/rebuild', {}, { silent: true, timeout: 120000 })
+// 推荐重算台账（U16-①）：读 rec_run_log，每次重算一行，定时和手动都记。
+// 和 recStatus 的分工写在 A9 页面脚注里：status 是「现在算到哪」，runs 是「历史算过哪几次、每次成没成」。
+export const recRuns = (limit) => http.get('/admin/rec/runs', { params: limit ? { limit } : {}, silent: true })
 
 
 /* -------------------------------- A4 审核队列 -------------------------------- */

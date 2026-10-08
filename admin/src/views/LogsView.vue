@@ -161,6 +161,65 @@
         文件名从 <code>Content-Disposition</code> 取，取不到才本地兜底。
       </p>
     </div>
+
+    <!-- 推荐重算台账（任务 U16-①）：rec_run_log 是唯一能说清「今天到底跑没跑成」的地方。 -->
+    <div class="mi-card rechist">
+      <div class="sec-title">
+        <span>推荐重算台账</span>
+        <el-button size="small" text :loading="runsBusy" @click="loadRuns">刷新</el-button>
+        <el-button size="small" text type="primary" @click="goWorkbench">去 A3 工作台触发重算</el-button>
+        <span class="dim">读自 <code>GET /api/admin/rec/runs</code>，数据源 <code>rec_run_log</code>：定时与手动各记一行，一次调用恰好一行</span>
+      </div>
+      <p v-if="runsErr" class="err">台账读取失败：{{ runsErr }}</p>
+      <template v-else>
+        <el-table :data="runs" size="small" max-height="260"
+                  empty-text="台账为空。这张表是 2026-10-08 才建的，之前的重算没有逐次留痕——空表不等于「从没跑过」">
+          <el-table-column label="开始时刻" width="150">
+            <template #default="{ row }">{{ fmtTime(row.startedAt) }}</template>
+          </el-table-column>
+          <el-table-column label="触发" width="72">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.triggerType === 'manual' ? 'warning' : 'info'">
+                {{ row.triggerType === 'manual' ? '手动' : '定时' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="112">
+            <template #default="{ row }">
+              <el-tag size="small" :type="runTone(row.status)">{{ row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="耗时" width="92">
+            <template #default="{ row }">{{ row.durationMs == null ? '—' : row.durationMs + ' ms' }}</template>
+          </el-table-column>
+          <el-table-column label="模式" width="120">
+            <template #default="{ row }">{{ row.mode || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="行数（质量/话题/相似/结果）" min-width="190">
+            <template #default="{ row }">
+              {{ num(row.qualityRows) }} / {{ num(row.topicRows) }} / {{ num(row.similarityRows) }} / {{ num(row.resultRows) }}
+              <div class="dim2" v-if="row.userCnt != null">覆盖 {{ fmtNum(row.userCnt) }} 人</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="通道占比 / 错误" min-width="240" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="row.errorText" class="err">{{ row.errorText }}</span>
+              <span v-else class="dim2">{{ row.channelShare || '—' }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
+        <p class="dim">
+          共 {{ runsTotal == null ? '—' : runsTotal }} 次重算<template v-if="runsCounts">：
+          <span v-for="(v, k) in runsCounts" :key="k">{{ k }} {{ v }} · </span></template>
+          <template v-if="runsTruncated">本次只显示最近 {{ runs.length }} 行，还有更早的没显示（服务端上限 200 行）。</template>
+          台账记的是<b>已经发生的事实</b>：跑完才落一行，所以它不能当进度条用，正在跑的那次要回 A3 看
+          <code>/api/admin/rec/status</code>。成功与失败都写行是刻意的——一条定时任务连续三天空跑但没人知道，
+          比它跑挂一次更难查；被并发挡掉的那次记 SKIPPED_BUSY，是为了让「今天没更新」有三种可区分的解释。
+          另有一条口径要写明白：这张表<b>不参与注销与导出</b>（登记在隐私注册表 Link.NONE），
+          它只有运行统计没有个体数据，把它接进用户数据导出反而是给导出添噪声。
+        </p>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -173,7 +232,7 @@ import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import {
   OP_ACTIONS, OP_RESULTS,
-  opLogPage, opLogActionStats, opLogReveals,
+  opLogPage, opLogActionStats, opLogReveals, recRuns,
   exportTicketsCsv, exportAiUsageCsv, exportOpLogsCsv, saveBlob
 } from '@/api/admin'
 import { errText, fmtNum, fmtTime, statusTone, toLocalIso } from '@/utils/format'
@@ -212,6 +271,16 @@ const revealErr = ref('')
 
 const stats = ref([])
 const statsDays = ref(30)
+
+// 推荐重算台账（U16-①）。runsTotal/runsCounts/runsTruncated 三个数都来自服务端同一个响应，
+// 不在前端自己数 runs.length 当总数：limit 截断时这两个数会不一样，
+// 而把「共 3 次」和「显示 3 行」混为一谈正是台账最容易骗人的地方。
+const runs = ref([])
+const runsBusy = ref(false)
+const runsErr = ref('')
+const runsTotal = ref(null)
+const runsCounts = ref(null)
+const runsTruncated = ref(false)
 const statsErr = ref('')
 const chartEl = ref(null)
 let chart = null
@@ -304,6 +373,30 @@ async function loadStats () {
   renderChart()
 }
 
+async function loadRuns () {
+  runsBusy.value = true
+  try {
+    const r = await recRuns(20)
+    runs.value = r.runs || []
+    runsTotal.value = r.totalRuns == null ? null : Number(r.totalRuns)
+    runsCounts.value = r.counts && Object.keys(r.counts).length ? r.counts : null
+    runsTruncated.value = !!r.truncated
+    runsErr.value = ''
+  } catch (e) {
+    runs.value = []
+    runsTotal.value = null
+    runsCounts.value = null
+    runsTruncated.value = false
+    runsErr.value = errText(e)
+  }
+  runsBusy.value = false
+}
+
+function runTone (s) {
+  return s === 'SUCCESS' ? 'success' : s === 'FAILED' ? 'danger' : s === 'SKIPPED_BUSY' ? 'warning' : 'info'
+}
+function num (v) { return v == null ? '—' : fmtNum(v) }
+
 function renderChart () {
   if (!chartEl.value) return
   if (!chart || chart.isDisposed()) chart = echarts.init(chartEl.value)
@@ -379,10 +472,12 @@ async function doExport (key) {
 }
 
 function goUsers () { router.push('/users') }
+// 重算按钮不在这一页：A3 工作台的推荐卡才有触发口（带 status 回显），这里只负责取证。
+function goWorkbench () { router.push('/dashboard') }
 
 onMounted(async () => {
   readQuery()
-  await Promise.all([loadList(), loadReveals(), loadStats()])
+  await Promise.all([loadList(), loadReveals(), loadStats(), loadRuns()])
   window.addEventListener('resize', onResize)
 })
 
@@ -402,7 +497,7 @@ onBeforeUnmount(() => {
 .head .dim { flex: 1 1 320px; }
 .sec-title { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; margin-bottom: 10px; flex-wrap: wrap; }
 .sec-title .dim { font-weight: 400; }
-.reveal .sec-title span:first-child, .chart .sec-title span:first-child, .export .sec-title span:first-child { color: var(--mi-primary); }
+.reveal .sec-title span:first-child, .chart .sec-title span:first-child, .export .sec-title span:first-child, .rechist .sec-title span:first-child { color: var(--mi-primary); }
 .canvas { width: 100%; height: 320px; }
 .pager { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; gap: 12px; }
 .pager .dim { flex: 1; }

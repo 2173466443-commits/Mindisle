@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.mindisle.admin.AuditQueueService;
 import com.mindisle.common.BizException;
 import com.mindisle.common.ErrorCode;
 import com.mindisle.common.PageQuery;
@@ -87,11 +88,13 @@ public class PostController {
   private final ReportService reportService;
   private final UserActionRecorder recorder;
   private final SimilarPostService similarPostService;
+  private final AuditQueueService auditQueueService;
 
   public PostController(PostService postService, PostQueryService postQueryService,
                         PostInteractionService postInteractionService,
                         CommentService commentService, ReportService reportService,
-                        UserActionRecorder recorder, SimilarPostService similarPostService) {
+                        UserActionRecorder recorder, SimilarPostService similarPostService,
+                       AuditQueueService auditQueueService) {
     this.postService = postService;
     this.postQueryService = postQueryService;
     this.postInteractionService = postInteractionService;
@@ -99,6 +102,7 @@ public class PostController {
     this.reportService = reportService;
     this.recorder = recorder;
     this.similarPostService = similarPostService;
+    this.auditQueueService = auditQueueService;
   }
 
   @PostMapping
@@ -108,7 +112,14 @@ public class PostController {
     if (current == null) {
       throw new BizException(ErrorCode.UNAUTHORIZED);
     }
-    return Result.ok(postService.publish(current.id(), request, LocalDateTime.now()));
+    LocalDateTime now = LocalDateTime.now();
+    PostView view = postService.publish(current.id(), request, now);
+    // 灰词帖当场进审核队列（手册 §15 阶段 8 队列⑤ · 判据 D4）。改造前只有 cron 一分钟一轮的同步，
+    // 「发帖 → 出现在审核台」实测 60 388ms，现场演示要在这一跳干等。放在控制器而不是发帖事务里，
+    // 是因为这一步绝不能把已经成功的发布变成一次失败：建单失败只记日志，最差退回改造前的行为。
+    // 只对 HUMAN_REVIEW 生效——直发（PUBLISHED）与被拦（REJECTED）都不该出现在人审队列里。
+    auditQueueService.enqueueQuietly(view.id(), view.status(), now);
+    return Result.ok(view);
   }
 
   @GetMapping

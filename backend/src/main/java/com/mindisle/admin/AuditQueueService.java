@@ -139,10 +139,12 @@ public class AuditQueueService {
   /**
    * 把 post.status='HUMAN_REVIEW' 的积压帖搬进审核队列（灰词帖进队列的唯一入口）。
    *
-   * <p>为什么不在 PostService 的发帖事务里直接建任务：那要给它的构造器加一个 Mapper，
-   * 现有 658 例单测的构造点全部要改；而 uk_target_pending 唯一键本来就允许「事后补建」，
-   * 于是同步做成幂等、可反复执行，比在业务主链路上插一刀更稳。代价是灰词帖进队列有一个同步周期，
-   * 因此本方法既由定时作业跑，也由管理端「立即同步」按钮手动触发。</p>
+   * <p>为什么这里不是唯一的入口：建任务的动作发生在发帖之后，而发帖事务里插这一刀意味着
+   * 审核队列的故障能把「发布」这件事一起失败掉；uk_target_pending 唯一键本来就允许事后补建，
+   * 于是同步做成幂等、可反复执行，比在业务主链路上插一刀更稳。<b>v1.3.6 起即时入口已经补上</b>
+   * （见 {@link #enqueueQuietly}：由控制器在发布返回后同请求内调用，失败只记日志不打扰用户），
+   * 本方法退成兜底与补账：管种子数据、管管理端改状态进来的那些行、管即时入口没接住的那一条。
+   * 它也仍由管理端「立即同步」按钮手动触发。</p>
    */
   public SyncStat syncPostsToTasks(LocalDateTime now) {
     List<Post> posts = postMapper.selectList(new LambdaQueryWrapper<Post>()
@@ -166,6 +168,41 @@ public class AuditQueueService {
       log.info("审核队列同步：扫描 {} 条灰词帖，新增任务 {} 条", posts.size(), created);
     }
     return new SyncStat(posts.size(), created, duplicated);
+  }
+
+  /**
+   * 发帖之后<b>立刻</b>把灰词帖送进审核队列（§15 阶段 8 队列⑤ · 判据 D4）。
+   *
+   * <p>改造前这条路只有定时同步：cron 一分钟一轮，于是「发帖 → 出现在审核台」实测
+   * 60 388ms（手册 §14 记的 D4 那一跳），答辩现场演示要干等一分钟。改法不是往发帖事务里插一刀
+   * （{@code syncPostsToTasks} 的原注释解释了为什么），而是由 {@code PostController} 在
+   * {@code publish} 返回之后、同一个请求里补这一次建单。同步作业照旧留着当兜底 ——
+   * 它还得服务那些不经过 PostService 的行（种子数据、管理端改状态、崩溃时漏掉的那一条）。</p>
+   *
+   * <p><b>为什么吞异常</b>：走到这一步时帖子已经发出去了。再把审核队列的故障抛回给用户，
+   * 等于让他以为「发帖失败」而重复提交一条，而那才是真的事故。所以这里只 {@code log.error}，
+   * 队列由下一轮 cron 补上——最差情况就是退回改造前的行为，不会更糟。</p>
+   *
+   * @return true = 本轮真的建了任务；false 包含「不需要建」「已经有待办任务」「建失败了」，
+   *         调用方不需要也无法据此改变给用户的文案（这就是 quietly 的含义）
+   */
+  public boolean enqueueQuietly(Long postId, String postStatus, LocalDateTime now) {
+    if (postId == null || !POST_HUMAN_REVIEW.equals(postStatus)) {
+      return false;
+    }
+    try {
+      Post post = postMapper.selectById(postId);
+      if (post == null || !POST_HUMAN_REVIEW.equals(post.getStatus())) {
+        // 库里的状态与刚返回给控制器的那一份不一致：要么已被并发改掉，要么根本没读到了。
+        // 交回兜底的那一轮 cron，不在这里下结论。
+        return false;
+      }
+      CheckResult result = engine.check(post.getContent(), SIDE_USER);
+      return insertTask(post, AuditTask.SOURCE_MACHINE, AuditTask.CHANNEL_DFA, result, now);
+    } catch (RuntimeException e) {
+      log.error("发帖即时送审失败，交下一轮同步作业兜底 postId={}", postId, e);
+      return false;
+    }
   }
 
   /**

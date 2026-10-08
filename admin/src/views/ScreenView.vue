@@ -45,19 +45,23 @@
         </div>
 
         <div class="panel" data-chart="hours">
-          <div class="ph"><span>24 小时情绪热力（近 {{ days }} 天按小时聚合）</span></div>
-          <div class="hours">
-            <div v-for="h in hours" :key="h.hour" class="hcell" :style="hourStyle(h)" :title="h.title">
-              <b>{{ h.hour }}</b>
-              <i>{{ h.cnt }}</i>
-            </div>
+          <div class="ph">
+            <span>日 × 24 小时情绪热力（近 {{ HEAT_DAYS }} 天）</span>
+            <span class="dim">{{ heatNote }}</span>
+          </div>
+          <div class="hm" :style="{ gridTemplateRows: '13px repeat(' + heatRows.length + ', minmax(0, 1fr))' }">
+            <div class="hm-corner"></div>
+            <div v-for="h in 24" :key="'rule' + (h - 1)" class="hm-ruler">{{ (h - 1) % 6 === 0 ? h - 1 : '' }}</div>
+            <template v-for="row in heatRows" :key="row.key">
+              <div class="hm-day"><b>{{ row.label }}</b><i>{{ row.sub }}</i></div>
+              <div v-for="c in row.cells" :key="c.hour" class="hcell" :style="cellStyle(c)" :title="c.title"></div>
+            </template>
           </div>
           <div class="legend">
-            <span>色深=平均效价</span>
-            <span class="lg neg"></span><span>-1</span>
-            <span class="lg mid"></span><span>0</span>
-            <span class="lg pos"></span><span>+1</span>
-            <span class="dim">缺行的小时按 0 补齐（后端 SQL 只 GROUP BY HOUR，没数据的小时不会返回行）</span>
+            <span>色深=该格条数</span>
+            <span class="lg neg"></span><span>红边=负效价</span>
+            <span class="lg pos"></span><span>黄边=正效价</span>
+            <span class="dim">空格＝那天那小时没有任何记录，不补 0 也不涂成中性（没有样本≠情绪中性）</span>
           </div>
           <div v-if="bad.hours" class="err">{{ bad.hours }}</div>
         </div>
@@ -88,7 +92,7 @@
       </section>
 
       <footer class="ft">
-        <span>数据源：/api/admin/dashboard/*（stats · emotion-board · emotion-labels · hour-heatmap · hot-topics · grade-board · ai-usage）</span>
+        <span>数据源：/api/admin/dashboard/*（stats · emotion-board · emotion-labels · day-hour-heatmap · hot-topics · grade-board · ai-usage）</span>
         <span>本轮刷新 {{ lastCost }}ms · 上次成功 {{ lastOkAt }} · 累计失败 {{ failCnt }} 次</span>
         <a class="back" href="/dashboard">返回工作台</a>
       </footer>
@@ -106,7 +110,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 // 直接引 npm 包会把 echarts 全量入口拖进这一块：A/B 实测 +521.11 kB（min）/ +170.31 kB（gzip）。
 import wordCloudInstaller from '@/vendor/word-cloud.esm.js'
 import {
-  aiUsage, dashboardStats, emotionBoard, emotionLabels, gradeBoard, hotTopics, hourHeatmap
+  aiUsage, dashboardStats, dayHourHeatmap, emotionBoard, emotionLabels, gradeBoard, hotTopics
 } from '@/api/admin'
 import { fmtNum } from '@/utils/format'
 
@@ -121,6 +125,10 @@ const days = ref(30)
 // 手册 §9.3 第 2 条把这块的窗口写死成「近 14 日」，所以它不跟着 days（其余面板取 30）一起动，
 // 面板副标题里把「窗口 14 天、实际有记录 N 天」直接写出来，读图的人不用猜。
 const TREND_DAYS = 14
+// 热力窗口单独写死 7，不跟 days（其余面板取 30）走：这块是「星期几 × 小时」的二维网格，
+// 取 7 天正好一列一周，30 天就是 720 格，在大屏一格里既放不下也读不出来。
+// 后端把窗口夹到 90 天，真要拉长窗口去 /day-hour-heatmap?days= 传，不在这里改常量。
+const HEAT_DAYS = 7
 
 const trendEl = ref(null)
 const emotionEl = ref(null)
@@ -132,7 +140,7 @@ const charts = {}
 const stats = ref(null)
 const daily = ref([])
 const labels = ref([])
-const heat = ref([])
+const heat = ref(null)
 const topics = ref([])
 const grades = ref([])
 const ai = ref([])
@@ -207,33 +215,81 @@ function valTone (s) {
   return v < -0.2 ? 'bad' : v > 0.2 ? 'ok' : ''
 }
 
-const hours = computed(() => {
-  const map = new Map()
-  for (const r of heat.value) map.set(Number(r.hour), r)
-  const out = []
-  for (let h = 0; h < 24; h++) {
-    const r = map.get(h)
-    const cnt = r ? Number(r.cnt) : 0
-    const val = r && r.avgValence !== null && r.avgValence !== undefined ? Number(r.avgValence) : null
-    out.push({
-      hour: h,
-      cnt,
-      val,
-      title: h + ':00 · ' + cnt + ' 条' + (val === null ? ' · 无效价' : ' · 平均效价 ' + val.toFixed(2))
-    })
+// ---- 日 × 24 小时热力（U16-④）：接口给的是稀疏格，网格在这里补齐 ----
+// 行的日期一律取自响应里的 fromDate/days，不由前端拿「今天」往前倒推：大屏 5 秒一轮，
+// 只要在 23:59:58 跨了一次午夜，前端倒推的窗口就和后端 GROUP BY 的窗口错一天，
+// 那种错位表现为「最后一行全空」，看着像数据缺失，实际是两套今天。
+const WEEK_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+function dayKey (v) { return String(v == null ? '' : v).slice(0, 10) }
+function splitDay (v) {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(dayKey(v))
+  return m ? { y: Number(m[1]), mo: Number(m[2]), d: Number(m[3]) } : null
+}
+function shiftDay (day, delta) {
+  const dt = new Date(Date.UTC(day.y, day.mo - 1, day.d + delta))
+  return { y: dt.getUTCFullYear(), mo: dt.getUTCMonth() + 1, d: dt.getUTCDate() }
+}
+function isoOf (day) {
+  return day.y + '-' + String(day.mo).padStart(2, '0') + '-' + String(day.d).padStart(2, '0')
+}
+function weekOf (day) {
+  return WEEK_LABELS[new Date(Date.UTC(day.y, day.mo - 1, day.d)).getUTCDay()]
+}
+
+const heatRows = computed(() => {
+  const board = heat.value || {}
+  const cells = Array.isArray(board.cells) ? board.cells : []
+  const idx = new Map()
+  for (const r of cells) idx.set(dayKey(r.day) + '#' + Number(r.hour), r)
+  const rows = []
+  const from = splitDay(board.fromDate)
+  const span = Math.max(1, Math.min(Number(board.days) || HEAT_DAYS, 90))
+  if (from) {
+    for (let i = 0; i < span; i++) {
+      const d = shiftDay(from, i)
+      rows.push({ key: isoOf(d), label: weekOf(d), sub: isoOf(d).slice(5) })
+    }
+  } else {
+    for (const key of Array.from(new Set(cells.map((r) => dayKey(r.day)))).sort()) {
+      rows.push({ key, label: key.slice(5), sub: '' })
+    }
   }
-  return out
+  return rows.map((d) => ({
+    key: d.key,
+    label: d.label,
+    sub: d.sub,
+    cells: Array.from({ length: 24 }, (_, h) => {
+      const r = idx.get(d.key + '#' + h)
+      const cnt = r ? Number(r.cnt) : 0
+      const val = r && r.avgValence !== null && r.avgValence !== undefined ? Number(r.avgValence) : null
+      return {
+        hour: h,
+        cnt,
+        val,
+        title: d.key + ' ' + String(h).padStart(2, '0') + ':00 · ' + cnt + ' 条'
+          + (val === null ? ' · 无效价' : ' · 平均效价 ' + val.toFixed(2))
+      }
+    })
+  }))
 })
 
-function hourStyle (h) {
-  if (!h.cnt) return { background: 'rgba(147,161,184,0.12)', opacity: 0.55 }
-  const alpha = Math.min(0.9, 0.18 + (h.cnt / Math.max(1, maxCnt.value)) * 0.6)
-  if (h.val === null) return { background: 'rgba(127,167,196,' + alpha.toFixed(2) + ')' }
-  if (h.val < 0) return { background: 'rgba(91,124,153,' + alpha.toFixed(2) + ')', boxShadow: 'inset 0 0 0 2px rgba(217,83,79,0.75)' }
-  if (h.val > 0) return { background: 'rgba(127,179,166,' + alpha.toFixed(2) + ')', boxShadow: 'inset 0 0 0 2px rgba(242,193,78,0.75)' }
+const maxCnt = computed(() => heatRows.value.reduce(
+  (a, r) => r.cells.reduce((m, c) => Math.max(m, c.cnt), a), 1))
+
+const heatNote = computed(() => {
+  const n = heatRows.value.length
+  if (!n) return '等 /day-hour-heatmap 返回'
+  return n + ' 天 × 24 小时 · 有记录 ' + ((heat.value && heat.value.cells) || []).length + ' 格'
+})
+
+function cellStyle (c) {
+  if (!c.cnt) return { background: 'rgba(147,161,184,0.10)' }
+  const alpha = Math.min(0.92, 0.22 + (c.cnt / Math.max(1, maxCnt.value)) * 0.62)
+  if (c.val === null) return { background: 'rgba(127,167,196,' + alpha.toFixed(2) + ')' }
+  if (c.val < -0.05) return { background: 'rgba(91,124,153,' + alpha.toFixed(2) + ')', boxShadow: 'inset 0 0 0 1px rgba(217,83,79,0.85)' }
+  if (c.val > 0.05) return { background: 'rgba(127,179,166,' + alpha.toFixed(2) + ')', boxShadow: 'inset 0 0 0 1px rgba(242,193,78,0.9)' }
   return { background: 'rgba(147,161,184,' + alpha.toFixed(2) + ')' }
 }
-const maxCnt = computed(() => hours.value.reduce((a, b) => Math.max(a, b.cnt), 1))
 
 const trendNote = computed(() => {
   const n = daily.value.length
@@ -267,9 +323,12 @@ function wcColor (word) {
 //   #3 情绪分布 饼                 -> drawEmotion （本次新增；原先这里是词云，图型与手册不符）
 //   #4 高频话题 词云               -> drawWord    （原先是 TOP10 横向柱状，本次与 #3 对调回手册口径）
 //   #5 年级聚合 柱状 bar           -> drawGrade   （原先是环形饼图，本次改成 bar，GradeRow 注释本来就写柱状图）
-//   #6 24 小时情绪热力             -> 模板里的 .hours DOM 网格（保留，偏差理由写在面板脚注与 §9.3 勘误里：
-//      后端 HourValenceRow 只返回 hour/cnt/avgValence 一维，要做 day×hour 二维 heatmap 得新写一条
-//      GROUP BY date,hour 的聚合，属于新增 SQL 面，结转阶段 8，不在本轮「收口」里顺手加。）
+//   #6 日 × 24 小时情绪热力        -> 模板里的 .hm DOM 网格（阶段 8 · U16-④ 补齐二维）
+//      原先这里挂的是一维 /hour-heatmap：那条 SQL 只 GROUP BY HOUR，会把七天的凌晨两点压进同一格，
+//      「工作日深夜塌陷、周末白天回升」和「整周都平稳」画出来是同一张图，而运营要的正是按星期几错开的节律。
+//      现在读 /day-hour-heatmap（GROUP BY record_date, HOUR(created_at)），7 行 × 24 列。
+//      仍然用 DOM 网格而不是 echarts HeatmapChart：为这一块引 heatmap + visualMap 两个组件要往
+//      大屏的共享 bundle 里再加几十 KB，而 168 个 div 的渲染成本远低于一次 echarts 重绘。
 // ============================================================
 
 // 🔴 x 轴只画接口真返回的那些日期，不补零记录的日子。
@@ -461,7 +520,7 @@ async function load () {
     dashboardStats().then((d) => { stats.value = d; bad.stats = '' }, (e) => { bad.stats = e.message }),
     emotionBoard(TREND_DAYS).then((d) => { daily.value = (d && d.daily) || []; bad.trend = '' }, (e) => { bad.trend = '活跃与效价趋势失败：' + e.message }),
     emotionLabels(days.value).then((d) => { labels.value = d || []; bad.emotion = '' }, (e) => { bad.emotion = '情绪分布失败：' + e.message }),
-    hourHeatmap(days.value).then((d) => { heat.value = d || []; bad.hours = '' }, (e) => { bad.hours = '热力数据失败：' + e.message }),
+    dayHourHeatmap(HEAT_DAYS).then((d) => { heat.value = d || null; bad.hours = '' }, (e) => { bad.hours = '热力数据失败：' + e.message }),
     hotTopics(20).then((d) => { topics.value = d || []; bad.word = '' }, (e) => { bad.word = '话题词云失败：' + e.message }),
     gradeBoard().then((d) => { grades.value = d || []; bad.grade = '' }, (e) => { bad.grade = '年级数据失败：' + e.message }),
     aiUsage(7).then((d) => { ai.value = d || []; bad.ai = '' }, (e) => { bad.ai = 'AI 用量数据失败：' + e.message })
@@ -536,10 +595,13 @@ h1 { margin: 0; font-size: 30px; letter-spacing: 2px; }
 .ph { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; font-weight: 700; margin-bottom: 6px; gap: 10px; }
 .ph .dim { font-weight: 400; font-size: 11px; color: #6f7f97; }
 .chart { flex: 1; min-height: 0; }
-.hours { flex: 1; display: grid; grid-template-columns: repeat(12, 1fr); grid-auto-rows: 1fr; gap: 5px; }
-.hcell { border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11px; }
-.hcell b { font-size: 12px; color: #E8EEF7; }
-.hcell i { font-style: normal; color: #d6dfee; }
+/* 7×24 热力：第一列是星期标签，行高由模板里的 gridTemplateRows 内联给出（跟着 heatRows.length 走）。 */
+.hm { flex: 1; min-height: 0; display: grid; grid-template-columns: 46px repeat(24, minmax(0, 1fr)); gap: 3px; }
+.hm-ruler { font-size: 9px; color: #6f7f97; text-align: center; align-self: end; line-height: 1; }
+.hm-day { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; line-height: 1.15; padding-right: 4px; }
+.hm-day b { font-size: 11px; color: #C6D2E4; font-weight: 700; }
+.hm-day i { font-style: normal; font-size: 9px; color: #6f7f97; }
+.hcell { border-radius: 3px; min-height: 10px; }
 .legend { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #93A1B8; margin-top: 6px; }
 .legend .dim { color: #6f7f97; margin-left: 8px; }
 .lg { width: 16px; height: 10px; border-radius: 2px; display: inline-block; }

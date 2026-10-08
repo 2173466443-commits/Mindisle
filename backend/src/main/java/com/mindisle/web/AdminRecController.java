@@ -18,9 +18,11 @@ import com.mindisle.common.ErrorCode;
 import com.mindisle.common.Result;
 import com.mindisle.mapper.ItemSimilarityMapper;
 import com.mindisle.mapper.RecommendMapper;
+import com.mindisle.entity.RecRunLog;
 import com.mindisle.mapper.RecommendResultMapper;
 import com.mindisle.recommend.OfflineRecommendService;
 import com.mindisle.recommend.RecConstants;
+import com.mindisle.recommend.RecRunLogService;
 import com.mindisle.recommend.RecommendJob;
 import com.mindisle.security.AuthUser;
 
@@ -39,11 +41,12 @@ import io.swagger.v3.oas.annotations.tags.Tag;
  * 这条决策连同理由写在这里，是为了避免下一次评审时有人把它当成漏项补上——
  * 补它的正确做法是同时给 ACTIONS 加白名单项，而不是在这里悄悄插一行日志。</p>
  *
- * <p>可追溯性由三样东西承担，都不需要这张表：应用日志里那一轮 channel share 明细（D7 的验收物）、
- * {@code recommend_result.calc_at} 本身（每行都带批次时刻）、以及 {@link RecommendJob} 留在内存里的
- * {@code lastFailure}。代价是重启会丢内存摘要，所以 {@code /status} 里同时回 DB 侧的读数
- * （{@code cacheRows} / {@code similarityRows} / {@code similarityBatchAt}）——
- * 那三个数重启后依然能证明「作业确实写过库」。</p>
+ * <p><b>可追溯性的四层（v1.3.6 起最上面那层换成了表）</b>：历次轮次记在
+ * {@code rec_run_log}（sql/19 第 36 表，成功/失败/跳过各一行，{@code GET /api/admin/rec/runs} 读），
+ * 本轮的实时读数仍在 {@code /status}（内存摘要 + DB 侧三个数），
+ * 应用日志里是 channel share 明细与栈，{@code recommend_result.calc_at} 是每行的批次时刻。
+ * 这四层各回答一个问题：「昨天跑没跑」查表、「现在活着吗」查 status、「为什么红」看日志、
+ * 「这批数是哪一批算的」看 calc_at。少任何一层都会在答辩现场卡住。</p>
  */
 @RestController
 @RequestMapping("/api/admin/rec")
@@ -55,23 +58,26 @@ public class AdminRecController {
   private final ItemSimilarityMapper similarityMapper;
   private final RecommendMapper recommendMapper;
   private final CacheService cache;
+  private final RecRunLogService runLogService;
 
   public AdminRecController(RecommendJob job, RecommendResultMapper resultMapper,
       ItemSimilarityMapper similarityMapper, RecommendMapper recommendMapper,
-      CacheService cache) {
+      CacheService cache, RecRunLogService runLogService) {
     this.job = job;
     this.resultMapper = resultMapper;
     this.similarityMapper = similarityMapper;
     this.recommendMapper = recommendMapper;
     this.cache = cache;
+    this.runLogService = runLogService;
   }
 
   /**
    * 手动跑一轮重算（T7.15）。
    *
-   * <p><b>同步执行、返回摘要</b>，不做异步任务表：演示与验收等不起「提交后轮询」，
-   * 而现在这一库规模（约五百用户 × 三百候选）一轮是几十毫秒到几秒。真要异步，
-   * 就得给作业建状态表 + 进度查询，那是另一个任务，不该由一个按钮顺带决定。</p>
+   * <p><b>同步执行、返回摘要</b>，不做「提交后轮询进度」的异步任务表：演示与验收等不起轮询，
+   * 而现在这一库规模（约五百用户 × 三百候选）一轮是几十毫秒到几秒。{@code rec_run_log}
+   * 记的是<b>已经结束的轮次</b>，不是「正在跑的第 37 %」——它是台账不是进度条，
+   * 这两件事的区别在于进度表要驱动取消与重试，而那一整套东西现在不需要。</p>
    *
    * <p>与定时轮共用 {@link RecommendJob} 里那把重入锁，所以连点不会叠两批交叉写。
    * 被占用时回 10010/429（与限流同一个码：语义就是「稍后再试」），
@@ -87,7 +93,7 @@ public class AdminRecController {
     if (job.isRunning()) {
       throw new BizException(ErrorCode.RATE_LIMITED, "上一轮重算还没结束，请稍后再试");
     }
-    OfflineRecommendService.Summary summary = job.rebuildOnce();
+    OfflineRecommendService.Summary summary = job.rebuildOnce(RecRunLog.TRIGGER_MANUAL);
     if (summary == null) {
       throw new BizException(ErrorCode.INTERNAL_ERROR,
           "重算失败：" + (job.lastFailure() == null ? "被并发占用或作业未返回" : job.lastFailure()));
@@ -114,7 +120,26 @@ public class AdminRecController {
    * 后台的话题墙排序就按它排。查不到该话题时回 null 而不是 0——
    * 「热度是 0」和「没有这个话题」是两个完全不同的结论。</p>
    */
-  @GetMapping("/status")
+  /**
+   * 历次重算台账（sql/19 · 阶段 8 队列① · 答辩 D7）。
+   *
+   * <p>只读，所以不写 admin_op_log，口径与 {@code /status} 逐字相同（见类注释第 1 段）。</p>
+   *
+   * <p>{@code limit} 默认 50、上限 200，夹在服务层（{@code RecRunLogService.clampLimit}）。
+   * 返回值里 {@code truncated} 必须显式给：一张只显示最近 50 轮的台账如果不自报截断，
+   * 「这个季度只失败过一次」就会被当成统计结论念出来，而那句话其实是没数完的。</p>
+   */
+  @GetMapping("/runs")
+  @Operation(summary = "历次重算台账：成功/失败/跳过各一行，含耗时、写入行量与通道占比")
+  public Result<Map<String, Object>> runs(
+      @Parameter(description = "取最近 N 轮，默认 50，上限 200")
+      @RequestParam(name = "limit", required = false) Integer limit,
+      @AuthenticationPrincipal AuthUser current) {
+    AdminSupport.requireAdmin(current);
+    return Result.ok(runLogService.ledger(limit == null ? 0 : limit));
+  }
+
+    @GetMapping("/status")
   @Operation(summary = "推荐缓存健康度：批次时刻、行量、通道占比、邻居缓存模式")
   public Result<Map<String, Object>> status(
       @Parameter(description = "可选：抽查某个话题的 hot_score")

@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS `user_action` (
   `target_type`    ENUM('post','comment','topic','user') NOT NULL COMMENT '目标类型：帖子/评论/话题/用户（需求 §7.2 #9）',
   `target_id`      BIGINT UNSIGNED NOT NULL COMMENT '目标逻辑主键，随 target_type 解释，不做物理外键（ER §4）',
   `action_type`    ENUM('view','like','collect','comment','read_through','dislike','follow','report','expose','ai_feedback') NOT NULL COMMENT '十种行为：需求 §7.2 #9 九种 + 手册 T4.19 第 10 种 ai_feedback',
-  `weight`         DECIMAL(4,2)    NOT NULL DEFAULT 1.00 COMMENT '行为权重（浏览1/点赞3/收藏5/看完4/不喜欢-5），CF 打分输入（需求 §6.2）',
+  `weight`         DECIMAL(4,2)    NOT NULL DEFAULT 1.00 COMMENT '行为权重快照：写入时取自 track/UserActionCatalog.ACTION_WEIGHTS（expose0.1/view1/read_through2/like3/comment4/collect5/follow5/dislike-3/report-5/ai_feedback0），CF 打分直接读这一列（需求 §6.2）；本列不是配置，sys_config 里没有第二份权重',
   `mood_valence`   TINYINT         NULL COMMENT '创新点②专用：动作发生时用户心情效价 -5..+5，NULL=未采集（情绪感知加权协同过滤）',
   `message_id`     BIGINT UNSIGNED NULL COMMENT '手册 T4.19：action_type=ai_feedback 时存 chat_message.id，记录对 AI 回复的赞/踩',
   `day_bucket`     DATE            NOT NULL COMMENT '日期分桶，配合 uk_action 实现同日同动作幂等，防止重复点击打爆行为表',

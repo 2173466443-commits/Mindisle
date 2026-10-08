@@ -9,6 +9,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import com.mindisle.config.MindisleProperties;
+import com.mindisle.entity.RecRunLog;
 
 /**
  * 推荐重算的定时入口（任务 T7.14 · 手册 §10.1「离线侧」· 需求 §6.2 的 P95 前提）。
@@ -23,6 +24,11 @@ import com.mindisle.config.MindisleProperties;
  * {@code WebSocketConfig} 注册（手册 §8 记过一次：多候选 TaskScheduler 会让 {@code @Scheduled}
  * 在启动期解析失败，服务直接起不来）。fixedDelay 的等待是在调度线程里睡的，所以一轮长批次
  * 会挤住私信重投 —— 演示期可接受，且 {@code rec-rebuild-enabled} 就是为此留的关。</p>
+ *
+ * <p><b>每一轮都往 rec_run_log 落一行</b>（sql/19 第 36 表）：成功、失败、被上一轮占用而跳过，
+ * 三种结局各一行，定时轮与手动按钮靠 trigger_type 分清。这一行是内存摘要之外的第二份证据，
+ * 专门回答重启之后查不到的那件事——「昨天那轮到底跑没跑」。写台账失败不影响重算本身，
+ * 理由见 {@link RecRunLogService} 类注释第 1 条。</p>
  *
  * <p><b>失败为什么只 log 不外抛</b>：{@code @Scheduled} 方法抛出的异常会被 Spring 的
  * 错误处理器吞掉并停掉该任务的后续调度（Spring 文档明确写着默认行为），
@@ -39,6 +45,7 @@ public class RecommendJob {
 
   private final OfflineRecommendService recommendService;
   private final MindisleProperties properties;
+  private final RecRunLogService runLogService;
 
   /** 防重入闸：{@link #rebuild()} 与 {@code POST /api/admin/rec/rebuild} 共用一把锁。 */
   private final AtomicBoolean running = new AtomicBoolean(false);
@@ -48,9 +55,11 @@ public class RecommendJob {
   private volatile LocalDateTime lastFinishedAt;
   private volatile String lastFailure;
 
-  public RecommendJob(OfflineRecommendService recommendService, MindisleProperties properties) {
+  public RecommendJob(OfflineRecommendService recommendService, MindisleProperties properties,
+      RecRunLogService runLogService) {
     this.recommendService = recommendService;
     this.properties = properties;
+    this.runLogService = runLogService;
   }
 
   public OfflineRecommendService.Summary lastSummary() {
@@ -77,7 +86,7 @@ public class RecommendJob {
       log.info("推荐重算已被配置关闭（mindisle.schedule.rec-rebuild-enabled=false），本轮跳过");
       return;
     }
-    rebuildOnce();
+    rebuildOnce(RecRunLog.TRIGGER_SCHEDULE);
   }
 
   /**
@@ -85,30 +94,48 @@ public class RecommendJob {
    *
    * <p>单独抽出来是给管理端「立即重算」按钮用的（任务 T7.15）：演示与验收不可能等 30 分钟。
    * 它与定时入口共用同一把重入锁，所以点按钮不会和定时轮打架。</p>
+   *
+   * <p>{@code trigger} 只决定台账里 trigger_type 那一列，不参与任何计算：定时轮传
+   * {@code schedule}、按钮传 {@code manual}。分开记是因为「管理员一点就成功、定时轮天天红」
+   * 与「两边都红」是两种病，而这两种处方不能靠一个重启即丢的内存摘要区分。</p>
    */
-  public OfflineRecommendService.Summary rebuildOnce() {
+  public OfflineRecommendService.Summary rebuildOnce(String trigger) {
+    LocalDateTime startedAt = LocalDateTime.now();
     if (!running.compareAndSet(false, true)) {
       log.warn("推荐重算：上一轮还没结束，本轮跳过（若频繁出现这条日志，说明批次耗时已超过重算间隔）");
+      runLogService.recordSkippedBusy(trigger, startedAt);
       return null;
     }
     long started = System.currentTimeMillis();
+    OfflineRecommendService.Summary done = null;
+    RuntimeException boom = null;
     try {
       int userLimit = Math.max(0, properties.getSchedule().getRecRebuildUserLimit());
       OfflineRecommendService.Summary summary = recommendService.rebuildAll(LocalDateTime.now(), userLimit);
       lastSummary = summary;
       lastFinishedAt = LocalDateTime.now();
+      done = summary;
       if (summary.resultRows() == 0 && summary.similarityRows() == 0) {
         log.warn("推荐重算：本轮零写入（mode={} 耗时{}ms），在线侧仍读上一批缓存，TTL 到点退热度兜底",
             summary.mode(), summary.calcMs());
       }
       return summary;
     } catch (RuntimeException e) {
+      boom = e;
       lastFailure = e.toString();
       log.error("推荐重算失败，保留上一批缓存（在线侧 TTL 到点自动退热度兜底）：{}", e.toString(), e);
       return null;
     } finally {
+      long costMillis = System.currentTimeMillis() - started;
+      // 一次调用恰好一行台账：记在 finally 里，所以「算完了但收尾炸了」不会漏行，
+      // 也不会有「try 记成功、catch 记失败」那种一次调用出两行互相打脸的可能。
+      if (boom != null) {
+        runLogService.recordFailure(trigger, startedAt, LocalDateTime.now(), costMillis, boom);
+      } else {
+        runLogService.recordSuccess(trigger, startedAt, LocalDateTime.now(), costMillis, done);
+      }
       running.set(false);
-      log.debug("推荐重算入口收尾：本轮占用{}ms", System.currentTimeMillis() - started);
+      log.debug("推荐重算入口收尾：本轮占用{}ms", costMillis);
     }
   }
 }
